@@ -126,7 +126,7 @@ export async function sendLessonReminderNotification({
 }
 
 /** Sender branding — all outbound notifications originate from the business account. */
-const BRAND_NAME = "Project8";
+const BRAND_NAME = "PROJECT100";
 const BRAND_SIGNATURE = `צוות ${BRAND_NAME}`;
 
 export type LessonSummaryNotificationInput = {
@@ -283,7 +283,7 @@ export async function sendQuadGroupInvite({
   const greeting = recipientName?.trim() ? `שלום ${recipientName.trim()}` : "שלום";
   const message =
     `${greeting},\n` +
-    `ברוכים הבאים ל-Quad Ecosystem של Project8!\n` +
+    `ברוכים הבאים ל-Quad Ecosystem של ${BRAND_NAME}!\n` +
     `פתחנו עבורכם קבוצת ליווי ייעודית ב-WhatsApp המאגדת את התלמיד (${studentName}), המורה המומחה (${teacherName}), ההורים והמנהל הפדגוגי.\n\n` +
     `להצטרפות לקבוצה וקבלת סיכומי שיעור שוטפים:\n` +
     `${groupUrl}\n\n` +
@@ -352,7 +352,7 @@ export async function createWhatsAppQuadGroup(
 
   // WhatsApp Cloud / BSP group-create scaffold (provider-specific path).
   const subjectLabel = input.subject?.trim() || "ליווי פדגוגי";
-  const groupSubject = `Project8 · ${input.studentName} · ${subjectLabel}`;
+  const groupSubject = `${BRAND_NAME} · ${input.studentName} · ${subjectLabel}`;
 
   const response = await fetch(`${config.apiUrl}/groups`, {
     method: "POST",
@@ -448,7 +448,7 @@ export async function dispatchQuadLessonSummary({
 // מחולל הודעות המרה אוטומטי לפי עומק הפער (Lead Conversion & WhatsApp Closer)
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type PackageSize = "SINGLE" | "TRIO" | "MULTI";
+export type PackageSize = "SINGLE" | "TRIO" | "MULTI" | "TEN";
 
 /**
  * Maps the diagnosed knowledge-gap depth to the recommended package:

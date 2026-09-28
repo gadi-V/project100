@@ -70,7 +70,7 @@ export function buildGoogleCalendarUrl(event: IcsLessonEvent): string {
 
 export function buildIcsCalendar(
   events: IcsLessonEvent[],
-  calendarName = "Project8 Lessons"
+  calendarName = "PROJECT100 Lessons"
 ): string {
   const now = toIcsUtc(new Date());
   const lines: string[] = [

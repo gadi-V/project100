@@ -2,6 +2,9 @@
 import { useState } from "react";
 import Link from "next/link";
 import { toast } from "react-hot-toast";
+import BenefitsBar from "../components/landing/BenefitsBar";
+import AboutSection from "../components/landing/AboutSection";
+import SubjectsMarquee from "../components/landing/SubjectsMarquee";
 
 export default function HomePage() {
   const [activeFaq, setActiveFaq] = useState<number | null>(null);
@@ -49,14 +52,13 @@ export default function HomePage() {
       {/* 1. חלק הגיבור (Hero Section) - כותרת עבה וממוקדת פלטפורמה */}
       <section id="hero" className="max-w-5xl mx-auto px-6 pt-24 pb-16 grid grid-cols-1 md:grid-cols-12 gap-12 items-center">
         <div className="md:col-span-7 space-y-6 text-right">
-          <span className="text-xs font-black tracking-widest text-[#0071e3] uppercase block">סוף לחיפוש מורים</span>
-          <h1 className="text-4xl sm:text-6xl font-black text-[#1d1d1f] tracking-tight leading-none">
-            התאמה חכמה.
-            <br />
-            קצה לקצה.
+          <span className="text-sm font-black tracking-widest text-[#0071e3] uppercase block">הסוף לחיפוש מורים</span>
+          <h1 dir="ltr" className="text-4xl sm:text-6xl font-black text-[#1d1d1f] tracking-tight leading-none text-right">
+            <span className="text-[31px] sm:text-[55px] text-blue-950">PROJECT</span>
+            <span className="text-[#3987ec]">100</span>
           </h1>
-          <h2 className="text-2xl sm:text-3xl font-bold text-[#6e6e73] tracking-tight leading-tight">
-            פלטפורמה אדפטיבית המאתרת את המורה המדויק ביותר עבורך – לפי הדרישות, היעדים והלו"ז שלך.
+          <h2 className="text-[15px] sm:text-[21px] font-bold text-[#6e6e73] tracking-tight leading-tight">
+            פלטפורמת למידה מרחוק למקצועות וקורסים מתיכון ועד אקדמיה
           </h2>
           <div className="pt-4 flex flex-col sm:flex-row gap-4">
             <Link href="/register" className="inline-block text-center bg-[#1d1d1f] hover:bg-[#2d2d2f] text-white font-black text-xs py-3.5 px-8 rounded-full transition-all shadow-md">
@@ -79,6 +81,8 @@ export default function HomePage() {
         </div>
       </section>
 
+      <BenefitsBar />
+
       {/* 2. גריד היתרונות הטכנולוגיים (Platform Capabilities Grid) */}
       {/* 2. גריד היתרונות הטכנולוגיים במבנה Bento של Apple */}
       <section id="challenge" className="py-24 border-t border-b border-[#e5e5e7]/70">
@@ -95,17 +99,25 @@ export default function HomePage() {
             {/* קוביה 1: גדולה ומרכזית (רוחב 7 מתוך 12) - משלבת טקסט וצילום ממשק */}
             <div className="md:col-span-7 liquid-glass rounded-3xl overflow-hidden flex flex-col justify-between hover:shadow-md transition-all group">
               <div className="p-8 space-y-2">
-                <span className="text-[11px] font-black text-[#0071e3] tracking-wider uppercase">המערכת האדפטיבית</span>
-                <h4 className="text-xl font-black text-[#1d1d1f]">בגרות ואקדמיה תחת קורת גג אחת</h4>
+                <span className="text-[11px] font-black text-[#0071e3] tracking-wider uppercase">קביעת שיעור בלייב</span>
+                <h4 className="text-xl font-black text-[#1d1d1f]">גישה ישירה ללו&quot;ז המורה</h4>
                 <p className="text-xs font-bold text-[#6e6e73] max-w-md leading-relaxed">
-                  מענה שלם לכל מקצועות הבגרות ולכל התארים האקדמיים. התמחות מיוחדת בעולמות ההנדסה והמדעים המדויקים, המותאמת לקצב ההבנה האישי שלך.
+                  מערכת קביעת שיעורים עצמאית לחלוטין. רואים חלונות זמן פנויים, בוחרים קליק, ומשריינים מפגש בלייב
                 </p>
               </div>
-              {/* מקום לצילום באיכות גבוהה / UI גראפי של הפלטפורמה */}
               <div className="px-8 bg-slate-50/60 border-t border-slate-100 aspect-[16/7] flex items-center justify-center overflow-hidden">
-                <div className="w-full h-full bg-[#1d1d1f] rounded-t-xl mt-4 p-4 shadow-2xl transition-transform group-hover:scale-[1.02] duration-300">
-                  {/* כאן תשתול תמונת מסך מלוטשת של לוח הניהול הכהה שלך */}
-                  <div className="text-[10px] font-mono text-slate-500">// צילום מסך: חלון שיבוץ השיעורים הדינמי באזור האישי</div>
+                <div className="w-full h-full bg-[#1d1d1f] rounded-t-xl mt-4 p-1.5 pb-0 shadow-2xl transition-transform group-hover:scale-[1.02] duration-300">
+                  <video
+                    className="w-full h-full rounded-t-lg object-cover object-top bg-white"
+                    src="/videos/student-scheduling.webm?v=2"
+                    poster="/videos/student-scheduling-poster.png?v=2"
+                    aria-label="המחשה: בחירת שעה פנויה וקביעת שיעור בלוח השעות באזור האישי"
+                    autoPlay
+                    loop
+                    muted
+                    playsInline
+                    preload="metadata"
+                  />
                 </div>
               </div>
             </div>
@@ -113,20 +125,14 @@ export default function HomePage() {
             {/* קוביה 2: צרה וגבוהה (רוחב 5 מתוך 12) - ממוקדת לו"ז */}
             <div className="md:col-span-5 liquid-glass rounded-3xl p-8 flex flex-col justify-between hover:shadow-md transition-all">
               <div className="space-y-2">
-                <span className="text-[11px] font-black text-[#0071e3] tracking-wider uppercase">מטריצת שעות חיה</span>
-                <h4 className="text-xl font-black text-[#1d1d1f]">גישה ישירה ללו"ז המורה</h4>
+                <span className="text-[11px] font-black text-[#0071e3] tracking-wider uppercase">מגוון רחב של תחומים</span>
+                <h4 className="text-xl font-black text-[#1d1d1f]">בגרות ואקדמיה תחת קורת גג אחת</h4>
                 <p className="text-xs font-bold text-[#6e6e73] leading-relaxed">
-                  מערכת קביעת שיעורים עצמאית לחלוטין. רואים חלונות זמן פנויים, בוחרים קליק, ומשריינים מפגש בלייב – ללא טלפונים וללא מתווכחים.
+                  מענה שלם לכל מקצועות הבגרות ולכל התארים האקדמיים. התמחות מיוחדת בעולמות ההנדסה והמדעים המדויקים, המותאמת לקצב ההבנה האישי שלך.
                 </p>
               </div>
-              {/* אלמנט ויזואלי מינימליסטי - הדמיית קלנדר של אפל */}
-              <div className="mt-6 grid grid-cols-4 gap-2 opacity-60">
-                {[8, 10, 12, 14].map((hour) => (
-                  <div key={hour} className="liquid-glass p-3 rounded-xl text-center font-mono text-xs font-black text-[#6e6e73]">
-                    {hour}:00
-                  </div>
-                ))}
-              </div>
+              <SubjectsMarquee className="mt-6 -mx-8" />
+
             </div>
 
             {/* קוביה 3: צרה (רוחב 5 מתוך 12) - קבוצות ווטסאפ */}
@@ -224,6 +230,8 @@ export default function HomePage() {
           </div>
         </div>
       </section>
+
+      <AboutSection />
 
       {/* 4. שאלות נפוצות (FAQ) - מעודכן לשאלות שקיפות וכרטיסיות */}
       <section id="faq" className="py-24 border-t border-b border-[#e5e5e7]/70">

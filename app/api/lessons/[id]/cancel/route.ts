@@ -7,8 +7,8 @@ import { sendLessonCancellationNotification } from "../../../../../lib/whatsapp"
 import { deleteDailyRoom, dailyRoomNameForLesson, roomNameFromDailyUrl } from "../../../../../lib/daily";
 
 // ─── Business constants (ILS) ───
-/** Monetary value of a single lesson credit (mirrors app/api/payments SINGLE = 180 ILS). */
-const LESSON_VALUE_ILS = 180;
+/** Monetary value of a single lesson credit (mirrors app/api/payments SINGLE = 200 ILS). */
+const LESSON_VALUE_ILS = 200;
 /** Teacher share paid out when a student cancels late (50% of lesson value). */
 const TEACHER_LATE_CANCEL_SHARE_ILS = LESSON_VALUE_ILS / 2; // 90
 /** Invalidated-teacher penalty when cancelling < 24h (15% of lesson value). */

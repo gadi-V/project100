@@ -5,7 +5,7 @@ import AmbientCanvas from "../components/AmbientCanvas";
 import AppShell from "../components/AppShell";
 
 export const metadata: Metadata = {
-  title: "Project8 - פלטפורמת למידה",
+  title: "PROJECT100 - פלטפורמת למידה",
   description: "מערכת חכמה לשיבוץ ורכישת שיעורים פרטיים",
 };
 
@@ -15,7 +15,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="he" dir="rtl">
+    <html lang="he" dir="rtl" data-scroll-behavior="smooth">
       <body className="min-h-screen text-neutral-900 antialiased font-sans flex flex-col">
         {/* Scroll-aware ambient mesh — colors shift with landing sections */}
         <AmbientCanvas />

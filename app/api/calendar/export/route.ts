@@ -44,13 +44,13 @@ export async function GET() {
       location: lesson.dailyRoomUrl ?? undefined,
     }));
 
-    const ics = buildIcsCalendar(events, "Project8 — שיעורים");
+    const ics = buildIcsCalendar(events, "PROJECT100 — שיעורים");
 
     return new NextResponse(ics, {
       status: 200,
       headers: {
         "Content-Type": "text/calendar; charset=utf-8",
-        "Content-Disposition": 'attachment; filename="project8-lessons.ics"',
+        "Content-Disposition": 'attachment; filename="project100-lessons.ics"',
         "Cache-Control": "private, no-store",
       },
     });

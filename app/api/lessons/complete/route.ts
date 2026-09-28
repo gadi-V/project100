@@ -8,8 +8,8 @@ import { schedulePayoutInTransaction } from "../../../../lib/services/PayoutServ
 import { writeLedgerEntryInTransaction } from "../../../../lib/services/LedgerService";
 
 // ─── Financial split (ILS) — mirrors the single-credit price of 180 ₪ ───
-/** Gross value credited to a completed lesson (SINGLE package = 180 ILS). */
-const LESSON_VALUE_ILS = 180;
+/** Gross value credited to a completed lesson (SINGLE package = 200 ILS). */
+const LESSON_VALUE_ILS = 200;
 /** SaaS commission retained by the platform on each completed lesson. */
 const PLATFORM_FEE_PERCENT = 0.3;
 /** Net payout to the tutor after the platform share. */

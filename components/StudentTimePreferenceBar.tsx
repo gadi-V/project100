@@ -99,9 +99,8 @@ export default function StudentTimePreferenceBar({
       <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
         <div>
           <h3 className="text-sm font-semibold text-neutral-900">מתי נוח לך ללמוד?</h3>
-          <p className="text-[11px] text-neutral-500 mt-1">
-            בחירה מרובה של ימים ומשבצות שעה (08:00–22:00) — סינון לפי הצלבות Day×Hour ודירוג Fair
-            Dispatch.
+          <p className="text-xs text-neutral-500 mt-1">
+            סמנו ימים ושעות שנוחים לך, ונציג מורים שפנויים בהם.
           </p>
         </div>
         {hasFilter && (
@@ -118,7 +117,7 @@ export default function StudentTimePreferenceBar({
 
       <div className="space-y-1.5">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <label className="text-[11px] font-medium text-neutral-500">ימים (בחירה מרובה)</label>
+          <label className="text-[11px] font-medium text-neutral-500">ימים</label>
           <button
             type="button"
             disabled={busy}
@@ -153,9 +152,7 @@ export default function StudentTimePreferenceBar({
 
       <div className="space-y-1.5">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <label className="text-[11px] font-medium text-neutral-500">
-            משבצות שעה (60 דק׳, 08:00–22:00)
-          </label>
+          <label className="text-[11px] font-medium text-neutral-500">שעות</label>
           <button
             type="button"
             disabled={busy}
@@ -189,7 +186,7 @@ export default function StudentTimePreferenceBar({
       </div>
 
       {busy && (
-        <p className="text-[11px] text-neutral-500 text-start">מעדכן מורים פנויים...</p>
+        <p className="text-[11px] text-neutral-500 text-start">מחפשים מורים פנויים...</p>
       )}
     </div>
   );

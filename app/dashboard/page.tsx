@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "react-hot-toast";
 import TeacherOnboardingTimeline from "../../components/TeacherOnboardingTimeline";
 import LessonRow from "../../components/LessonRow";
+import BrandWordmark from "../../components/BrandWordmark";
 import WeeklyScheduleBoard from "../../components/WeeklyScheduleBoard";
 import StudentTimePreferenceBar, {
   type StudentTimePreference,
@@ -12,6 +13,7 @@ import StudentTimePreferenceBar, {
 import { ACTIVITY_HOUR_SLOTS } from "../../lib/matching";
 import type { TeacherOnboardingStatus } from "../../lib/teacher-onboarding";
 import {
+  badgeNeutral,
   badgeSuccess,
   badgeWarning,
   emptyState,
@@ -41,6 +43,22 @@ function preferenceHighlightHours(pref: StudentTimePreference): string[] {
     }
   }
   return [...hours].sort();
+}
+
+/** Keys must match the reason strings emitted by `lib/matching.ts`; unmapped (ranking/load) reasons stay internal. */
+const STUDENT_REASON_COPY: Record<string, string> = {
+  "התאמת מקצוע גבוהה": "מתמחה במקצוע שלך",
+  "התאמת מקצוע חלקית": "מלמד תחומים קרובים",
+  "התאמת חומר לימוד": "מכיר את החומר שביקשת",
+  "התאמת רמת לימוד / קבוצת גיל": "מלמד בשכבת הגיל שלך",
+};
+
+function studentFacingReasons(reasons: string[]): string[] {
+  return reasons.flatMap((r) => (STUDENT_REASON_COPY[r] ? [STUDENT_REASON_COPY[r]] : []));
+}
+
+function scrollToSection(id: string) {
+  document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 interface LoggedInUser {
@@ -325,13 +343,15 @@ export default function DashboardPage() {
       setRankedMatches(matches);
       const top = data.recommended ?? matches[0] ?? null;
       setRecommendedMatch(top);
-      if (data.nearestFallback?.message) {
-        setMatchNotice(data.nearestFallback.message);
+      if (data.nearestFallback) {
+        setMatchNotice(
+          "אין מורה פנוי בדיוק בשעות שבחרת. הצגנו את המורים המתאימים עם המועד הפנוי הקרוב ביותר."
+        );
       } else if (hasActiveTimePreference(active)) {
         setMatchNotice(
           typeof data.exactAvailabilityMatches === "number" &&
             data.exactAvailabilityMatches > 0
-            ? `${data.exactAvailabilityMatches} מורים פנויים באחת המשבצות שבחרת — מדורגים לפי חפיפה ו-Fair Dispatch`
+            ? `נמצאו ${data.exactAvailabilityMatches} מורים פנויים בשעות שבחרת`
             : null
         );
       } else {
@@ -384,10 +404,10 @@ export default function DashboardPage() {
     await loadStudentOpenSlots(teacher.teacherId);
     toast.success(
       teacher.exactAvailabilityMatch
-        ? `${teacher.teacherName} — ${teacher.overlapCount ?? 0} משבצות חופפות`
+        ? `${teacher.teacherName} זמין בשעות דומות לבקשתך`
         : teacher.isSoftRecommendation && teacher.openSlotsCount === 0
-          ? `${teacher.teacherName} נבחר (המלצה רכה) — כשתיפתח זמינות היא תופיע בלוח`
-          : `הלוח מציג את שעות ${teacher.teacherName}`
+          ? `ל${teacher.teacherName} אין כרגע שעות פנויות. כשייפתחו, הן יופיעו בלוח`
+          : `הלוח מציג את השעות של ${teacher.teacherName}`
     );
   };
 
@@ -490,7 +510,8 @@ export default function DashboardPage() {
   const openBookingFlow = async () => {
     if (!user) return;
     if (user.lessonCredits < 1) {
-      toast.error("אין מספיק קרדיטים — רכשו חבילה לפני השיבוץ");
+      toast.error("כדי לקבוע שיעור צריך קודם לבחור חבילת שיעורים");
+      scrollToSection("packages");
       return;
     }
     setSlotsLoading(true);
@@ -505,7 +526,7 @@ export default function DashboardPage() {
         }
       }
       await loadStudentOpenSlots(teacherId);
-      toast.success("הלוח עודכן — בחרו שעה בלחיצה או בגרירה");
+      toast.success("הלוח עודכן. בחרו שעה פנויה");
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "שגיאה בטעינת השעות");
     } finally {
@@ -515,11 +536,12 @@ export default function DashboardPage() {
 
   const handleBookSlot = async (slotId: string) => {
     if (user && user.lessonCredits < 1) {
-      toast.error("אין מספיק קרדיטים — רכשו חבילה לפני השיבוץ");
+      toast.error("כדי לקבוע שיעור צריך קודם לבחור חבילת שיעורים");
+      scrollToSection("packages");
       throw new Error("אין מספיק קרדיטים");
     }
     setBookingLoading(true);
-    const bookingToast = toast.loading("משבץ שיעור ומנכה קרדיט...");
+    const bookingToast = toast.loading("קובעים את השיעור...");
     try {
       const slot = openSlots.find((s) => s.id === slotId);
       if (slot?.teacher?.id) {
@@ -563,7 +585,7 @@ export default function DashboardPage() {
     if (branchType === "school") {
       const finalSubject = schoolSubject === "אחר" ? customSubject : schoolSubject;
       if (!finalSubject || !schoolGrade || !schoolLevel || !schoolChallenge || !schoolTarget) {
-        toast.error("אנא מלאו את כל שדות החובה באבחון בית הספר");
+        toast.error("חסרים כמה פרטים. מלאו את כל השדות כדי להמשיך");
         return;
       }
       payload = {
@@ -578,7 +600,7 @@ export default function DashboardPage() {
       };
     } else {
       if (!academyInstitution || !academyDegree || !academyCourse || !academyTarget || !academyChallenge) {
-        toast.error("אנא מלאו את כל שדות החובה באבחון האקדמי");
+        toast.error("חסרים כמה פרטים. מלאו את כל השדות כדי להמשיך");
         return;
       }
       payload = {
@@ -593,7 +615,7 @@ export default function DashboardPage() {
       };
     }
 
-    const quizToast = toast.loading("מעבד ומנתח את פרופיל הלמידה בענן...");
+    const quizToast = toast.loading("שומרים את הפרטים...");
     try {
       const response = await fetch("/api/diagnostic", {
         method: "POST",
@@ -601,21 +623,21 @@ export default function DashboardPage() {
         body: JSON.stringify(payload),
       });
 
-      if (!response.ok) throw new Error("שגיאה במהלך שמירת פרופיל האבחון");
+      if (!response.ok) throw new Error("השמירה לא הצליחה. נסו שוב");
 
-      toast.success("פרופיל הלמידה פוענח בהצלחה! מחשבים התאמת מורה...", { id: quizToast });
+      toast.success("הפרטים נשמרו. הנה המורים שמתאימים לך", { id: quizToast });
       setHasCompletedQuiz(true);
       await fetchRecommendedMatch();
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "שגיאה באבחון", { id: quizToast });
+      toast.error(err instanceof Error ? err.message : "השמירה לא הצליחה. נסו שוב", { id: quizToast });
     }
   };
 
   // מנגנון רכישת חבילות — מפנה ל-Stripe Checkout; זיכוי קרדיטים רק אחרי Webhook
-  const handlePurchase = async (packageType: "SINGLE" | "TRIO" | "MULTI") => {
+  const handlePurchase = async (packageType: "SINGLE" | "TRIO" | "MULTI" | "TEN") => {
     if (!user) return;
     setPurchaseLoading(true);
-    const purchaseToast = toast.loading("מתקשר עם חברת הסליקה המאובטחת...");
+    const purchaseToast = toast.loading("מעבירים לעמוד התשלום...");
 
     try {
       const response = await fetch("/api/payments", {
@@ -745,6 +767,70 @@ export default function DashboardPage() {
   }
   if (!user) return null;
 
+  const needsPackage = user.lessonCredits < 1;
+  const nextLesson =
+    myLessons
+      .filter((l) => l.status === "SCHEDULED" || l.status === "IN_PROGRESS")
+      .sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime())[0] ??
+    null;
+  const hasBookedLesson = myLessons.some((l) => !l.status.startsWith("CANCELLED"));
+
+  const packageTiles: {
+    type: "SINGLE" | "TRIO" | "MULTI" | "TEN";
+    label: string;
+    title: string;
+    price: string;
+    popular?: boolean;
+  }[] = [
+    { type: "SINGLE", label: "שיעור היכרות", title: "שיעור אחד", price: "200 ₪" },
+    { type: "TRIO", label: "לנושא או מבחן קרוב", title: "3 שיעורים", price: "540 ₪", popular: true },
+    { type: "MULTI", label: "ליווי שוטף", title: "5 שיעורים", price: "850 ₪" },
+    { type: "TEN", label: "ליווי לאורך הסמסטר", title: "10 שיעורים", price: "1,600 ₪" },
+  ];
+
+  const packagesSection = (
+    <div
+      id="packages"
+      className={`${frostCard} p-6 space-y-4 scroll-mt-20 ${
+        needsPackage ? "ring-1 ring-neutral-900/15 shadow-md" : ""
+      }`}
+    >
+      <div className="text-start">
+        <h2 className="text-base font-semibold text-neutral-900">
+          {needsPackage ? "בחירת חבילת שיעורים" : "רכישת שיעורים נוספים"}
+        </h2>
+        <p className="text-xs text-neutral-500 mt-1">
+          כל שיעור נמשך 50 דקות. התשלום מתבצע בעמוד סליקה מאובטח.
+        </p>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {packageTiles.map((pkg) => (
+          <button
+            key={pkg.type}
+            disabled={purchaseLoading}
+            onClick={() => handlePurchase(pkg.type)}
+            className="bg-neutral-50 hover:bg-white border border-neutral-200 hover:border-neutral-400 p-5 rounded-xl text-start transition-all disabled:opacity-50 group flex flex-col justify-between h-32 relative overflow-hidden"
+          >
+            {pkg.popular && (
+              <div className="absolute top-0 start-0 bg-neutral-900 text-[10px] font-semibold px-2 py-0.5 rounded-ee-lg text-white">
+                פופולרי
+              </div>
+            )}
+            <div>
+              <div className="text-xs font-medium text-neutral-500 group-hover:text-neutral-700">
+                {pkg.label}
+              </div>
+              <div className="text-xl font-semibold text-neutral-900 mt-1">{pkg.title}</div>
+            </div>
+            <div className="text-xs text-neutral-700 font-mono font-medium bg-neutral-100 border border-neutral-200 px-2 py-1 rounded-md w-fit">
+              {pkg.price}
+            </div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
   return (
     <div className={`${pageCanvas} p-6 sm:p-8 pt-12`} dir="rtl">
       <div className="max-w-6xl mx-auto space-y-8">
@@ -758,8 +844,8 @@ export default function DashboardPage() {
                   ? "מנהל תפעול"
                   : "מנהל מערכת"
                 : user.role === "TEACHER"
-                  ? "מורה פרימיום - יומן עבודה"
-                  : "אזור סטודנטים והורים"}
+                  ? "יומן העבודה שלך"
+                  : "האזור האישי"}
             </span>
             <h1 className="text-2xl font-semibold text-neutral-900">שלום, {user.name}</h1>
           </div>
@@ -802,7 +888,11 @@ export default function DashboardPage() {
               <p className="text-sm text-neutral-600 leading-relaxed">
                 {user.isApproved
                   ? "החשבון אושר. השלימו את השלבים הבאים כדי להתחיל לקבל שיבוצים מתלמידים."
-                  : "ההרשמה התקבלה בהצלחה. צוות PROJECT8 מלווה את תהליך הקליטה — עדכונים יופיעו כאן."}
+                  : (
+                    <>
+                      ההרשמה התקבלה בהצלחה. צוות <BrandWordmark /> מלווה את תהליך הקליטה — עדכונים יופיעו כאן.
+                    </>
+                  )}
               </p>
             </div>
             <TeacherOnboardingTimeline onboarding={teacherOnboarding} />
@@ -821,17 +911,14 @@ export default function DashboardPage() {
                   <div className="text-center space-y-6 py-4">
                     <div className="w-14 h-14 bg-neutral-100 border border-neutral-200 rounded-2xl flex items-center justify-center mx-auto text-xs font-semibold text-neutral-700">P8</div>
                     <div className="space-y-2">
-                      <h2 className="text-xl font-semibold text-neutral-900">התאמת מורה פרטי ברמת פרימיום</h2>
-                      <p className="text-xs text-neutral-500 leading-relaxed max-w-md mx-auto">
-                        כדי שנוכל לסווג את הפרופיל הלימודי המדויק ולהתאים לכם מרצה מומחה, נשמח לעבור אפיון מקצועי קצרצר.
+                      <h2 className="text-xl font-semibold text-neutral-900">נכיר אותך רגע לפני שנמצא מורה</h2>
+                      <p className="text-sm text-neutral-500 leading-relaxed max-w-md mx-auto">
+                        כמה שאלות קצרות על המקצוע ועל מה שקשה לך, כדי שנציע מורים שמתאימים בדיוק לך.
                       </p>
                     </div>
-                    <div className="flex flex-col sm:flex-row gap-3 justify-center pt-2">
+                    <div className="flex justify-center pt-2">
                       <button onClick={() => setQuizStep("branch_select")} className={primaryCta}>
-                        התחל אבחון דיאגנוסטי מודרך
-                      </button>
-                      <button onClick={() => { setQuizStep("branch_select"); }} className={secondaryCta}>
-                        יודע כבר במה הקושי?
+                        בואו נתחיל
                       </button>
                     </div>
                   </div>
@@ -840,7 +927,7 @@ export default function DashboardPage() {
                 {/* 2. מסך פיצול הענפים המרכזי */}
                 {quizStep === "branch_select" && (
                   <div className="space-y-4">
-                    <h2 className="text-lg font-semibold text-neutral-900 text-center">אנא בחרו את מסלול הלימודים הרלוונטי:</h2>
+                    <h2 className="text-lg font-semibold text-neutral-900 text-center">איפה את/ה לומד/ת?</h2>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
                       <button onClick={() => { setQuizBranch("school"); setQuizStep("school_form"); }} className="bg-neutral-50 hover:bg-white border border-neutral-200 hover:border-neutral-400 p-6 rounded-2xl text-start transition-all flex flex-col justify-between h-32">
                         <span className="text-xs font-medium text-neutral-500 tracking-wide">בית ספר</span>
@@ -864,7 +951,7 @@ export default function DashboardPage() {
                 {/* ענף א': טופס ממוקד בית ספר */}
                 {quizStep === "school_form" && (
                   <div className="space-y-5">
-                    <h2 className="text-lg font-semibold text-neutral-900 border-b border-neutral-200 pb-2">אפיון ממוקד - מסלול בית ספר</h2>
+                    <h2 className="text-lg font-semibold text-neutral-900 border-b border-neutral-200 pb-2">כמה פרטים על הלימודים בבית הספר</h2>
                     
                     <div className="space-y-2">
                       <label className="text-xs font-medium text-neutral-500">באיזה מקצוע הקושי? (חובה)</label>
@@ -928,7 +1015,7 @@ export default function DashboardPage() {
                     </div>
 
                     <button onClick={() => handleSaveQuiz("school")} className={`${primaryCta} w-full mt-4`}>
-                      שמור נתוני אבחון ונעל פרופיל תלמיד
+                      שמירה והצגת מורים מתאימים
                     </button>
                   </div>
                 )}
@@ -936,11 +1023,11 @@ export default function DashboardPage() {
                 {/* ענף ב': טופס ממוקד אקדמיה */}
                 {quizStep === "academia_form" && (
                   <div className="space-y-5">
-                    <h2 className="text-lg font-semibold text-neutral-900 border-b border-neutral-200 pb-2">אפיון ממוקד - מסלול אקדמיה</h2>
+                    <h2 className="text-lg font-semibold text-neutral-900 border-b border-neutral-200 pb-2">כמה פרטים על הקורס</h2>
                     
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-1.5">
-                        <label className="text-xs font-medium text-neutral-500">מוסד הלימודים Academic Institution</label>
+                        <label className="text-xs font-medium text-neutral-500">מוסד לימודים</label>
                         <input type="text" value={academyInstitution} onChange={(e) => setAcademyInstitution(e.target.value)} placeholder="למשל: הטכניון, אוניברסיטת תל אביב" className={fieldClass} />
                       </div>
                       <div className="space-y-1.5">
@@ -985,7 +1072,7 @@ export default function DashboardPage() {
                     </div>
 
                     <button onClick={() => handleSaveQuiz("academia")} className={`${primaryCta} w-full mt-4`}>
-                      שמור נתוני אבחון ונעל פרופיל אקדמי
+                      שמירה והצגת מורים מתאימים
                     </button>
                   </div>
                 )}
@@ -993,8 +1080,71 @@ export default function DashboardPage() {
               </div>
             ) : (
               
-              /* הדאשבורד של הסטודנט נפתח במלואו רק לאחר שמירת האבחון בענן */
+              /* הדאשבורד של הסטודנט נפתח במלואו רק לאחר שמירת האבחון */
               <div className="space-y-6 animate-fadeIn">
+                <div className={`${frostCard} p-6 sm:p-8 flex flex-col sm:flex-row sm:items-center justify-between gap-5 text-start`}>
+                  <div className="space-y-1.5">
+                    <span className={`${eyebrow} block`}>
+                      {nextLesson ? "השיעור הבא שלך" : "השלב הבא"}
+                    </span>
+                    <h2 className="text-xl sm:text-2xl font-semibold text-neutral-900 tracking-tight">
+                      {nextLesson
+                        ? `${new Date(nextLesson.scheduledAt).toLocaleString("he-IL", {
+                            weekday: "long",
+                            day: "numeric",
+                            month: "long",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                            timeZone: "Asia/Jerusalem",
+                          })} עם ${nextLesson.teacher.name}`
+                        : needsPackage
+                          ? "בחירת חבילת שיעורים"
+                          : hasBookedLesson
+                            ? "בחירת שעה לשיעור הבא"
+                            : "בחירת שעה לשיעור ראשון"}
+                    </h2>
+                    <p className="text-sm text-neutral-500">
+                      {nextLesson
+                        ? "לדחייה או ביטול, לחצו על ⚙️ ליד השיעור בלוח השעות."
+                        : needsPackage
+                          ? "אחרי שתבחרו חבילה, תוכלו לקבוע שעה עם אחד המורים שמתאימים לך."
+                          : "בחרו מורה מהרשימה, ואז לחצו על שעה פנויה בלוח."}
+                    </p>
+                  </div>
+                  <div className="flex flex-col items-start sm:items-end gap-2 shrink-0">
+                    <span className={badgeNeutral}>
+                      {user.lessonCredits === 0
+                        ? "אין עדיין שיעורים בחבילה"
+                        : user.lessonCredits === 1
+                          ? "שיעור אחד בחבילה"
+                          : `${user.lessonCredits} שיעורים בחבילה`}
+                    </span>
+                    {nextLesson ? (
+                      <button type="button" onClick={() => scrollToSection("schedule-board")} className={secondaryCta}>
+                        ללוח השעות
+                      </button>
+                    ) : needsPackage ? (
+                      <button type="button" onClick={() => scrollToSection("packages")} className={primaryCta}>
+                        לבחירת חבילה
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={slotsLoading}
+                        onClick={async () => {
+                          await openBookingFlow();
+                          scrollToSection("schedule-board");
+                        }}
+                        className={`${primaryCta} disabled:opacity-50`}
+                      >
+                        {slotsLoading ? "טוענים שעות..." : "לבחירת שעה"}
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {needsPackage && packagesSection}
+
                 <StudentTimePreferenceBar
                   value={timePreference}
                   busy={matchLoading}
@@ -1012,14 +1162,14 @@ export default function DashboardPage() {
                   <div className={`${frostCard} p-6 text-start space-y-4`}>
                     <div>
                       <h3 className="text-sm font-semibold text-neutral-900">
-                        מורים פנויים — דירוג Fair Dispatch
+                        מורים מומלצים בהתאם למקצוע ולזמינות שלך
                       </h3>
-                      <p className="text-[11px] text-neutral-500 mt-1">
-                        מקצוע וחומר לימוד · חפיפת שעות · עומס שבועי מאוזן. לחצו על כרטיס לפתיחת הלוח.
+                      <p className="text-xs text-neutral-500 mt-1">
+                        לחצו על מורה כדי לראות את השעות הפנויות שלו בלוח.
                       </p>
                     </div>
                     {matchLoading && rankedMatches.length === 0 ? (
-                      <p className="text-xs text-neutral-500">מחשב התאמה שוויונית...</p>
+                      <p className="text-xs text-neutral-500">מחפשים מורים מתאימים...</p>
                     ) : rankedMatches.length > 0 ? (
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         {rankedMatches.slice(0, 6).map((match, index) => {
@@ -1040,20 +1190,17 @@ export default function DashboardPage() {
                                   <div className="flex flex-wrap items-center gap-2">
                                     {index === 0 && (
                                       <span className={isSelected ? "inline-flex items-center rounded-full bg-white/15 text-white text-[10px] font-medium px-2.5 py-1" : badgeSuccess}>
-                                        מומלץ ביותר
+                                        הכי מתאים לך
                                       </span>
                                     )}
                                     {match.exactAvailabilityMatch && (
                                       <span className={isSelected ? "inline-flex items-center rounded-full bg-emerald-400/20 text-emerald-100 text-[10px] font-medium px-2.5 py-1" : badgeSuccess}>
-                                        {typeof match.overlapCount === "number" &&
-                                        match.overlapCount > 0
-                                          ? `${match.overlapCount} חפיפות`
-                                          : "פנוי בחלון"}
+                                        זמין בשעות דומות לבקשתך
                                       </span>
                                     )}
-                                    {match.isSoftRecommendation && (
+                                    {match.isSoftRecommendation && match.openSlotsCount === 0 && (
                                       <span className={isSelected ? "inline-flex items-center rounded-full bg-amber-400/20 text-amber-100 text-[10px] font-medium px-2.5 py-1" : badgeWarning}>
-                                        המלצה רכה
+                                        מתאים לחומר, עדיין בלי שעות פנויות
                                       </span>
                                     )}
                                     <span className={`text-sm font-semibold ${isSelected ? "text-white" : "text-neutral-900"}`}>
@@ -1061,17 +1208,13 @@ export default function DashboardPage() {
                                     </span>
                                   </div>
                                   <p className={`text-[11px] ${isSelected ? "text-neutral-300" : "text-neutral-500"}`}>
-                                    ציון {match.matchScore}
-                                    {typeof match.weeklyLessonCount === "number" &&
-                                      ` · עומס שבועי ${match.weeklyLessonCount}`}
-                                    {" · "}
                                     {match.openSlotsCount > 0
                                       ? `${match.openSlotsCount} שעות פנויות`
                                       : "אין שעות פנויות כרגע"}
                                   </p>
                                   {match.nearestSlotStart && !match.exactAvailabilityMatch && (
                                     <p className={`text-[11px] ${isSelected ? "text-amber-200" : "text-amber-800"}`}>
-                                      חלון קרוב:{" "}
+                                      המועד הפנוי הקרוב:{" "}
                                       {new Date(match.nearestSlotStart).toLocaleString("he-IL", {
                                         weekday: "short",
                                         day: "numeric",
@@ -1086,15 +1229,12 @@ export default function DashboardPage() {
                                       {match.subjects.join(" · ")}
                                     </p>
                                   )}
-                                  {match.reasons.length > 0 && (
+                                  {studentFacingReasons(match.reasons).length > 0 && (
                                     <p className={`text-[11px] ${isSelected ? "text-neutral-400" : "text-neutral-500"}`}>
-                                      {match.reasons.slice(0, 3).join(" · ")}
+                                      {studentFacingReasons(match.reasons).slice(0, 3).join(" · ")}
                                     </p>
                                   )}
                                 </div>
-                                <span className={`text-[10px] font-mono shrink-0 ${isSelected ? "text-neutral-400" : "text-neutral-500"}`}>
-                                  #{index + 1}
-                                </span>
                               </div>
                             </button>
                           );
@@ -1102,56 +1242,14 @@ export default function DashboardPage() {
                       </div>
                     ) : (
                       <div className={emptyState}>
-                        <p className="text-sm font-medium text-neutral-900">אין כרגע מורה מתאים</p>
-                        <p className="text-xs text-neutral-500">ודאו שיש מורים מאושרים עם פרופיל מלא, או שנו את העדפות הזמן.</p>
+                        <p className="text-sm font-medium text-neutral-900">עדיין לא מצאנו מורה פנוי</p>
+                        <p className="text-xs text-neutral-500">נסו לסמן ימים או שעות נוספים, או לחזור בקרוב.</p>
                       </div>
                     )}
                   </div>
                 )}
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  <div className={`${frostCard} p-6 flex flex-col justify-between`}>
-                    <div>
-                      <h3 className="text-sm font-medium text-neutral-500 mb-2">יתרת שיעורים בחבילה</h3>
-                      <div className="text-5xl font-semibold text-neutral-900 tracking-tight mb-2">
-                        {user.lessonCredits} <span className="text-xl font-medium text-neutral-500">שיעורים</span>
-                      </div>
-                    </div>
-                    <p className="text-xs text-neutral-500">כל שיעור מחושב לפי 50 דקות עבודה ממוקדות.</p>
-                  </div>
-
-                  <div className={`${frostCard} p-6 flex flex-col justify-between`}>
-                    <div>
-                      <h3 className="text-sm font-semibold text-neutral-900 mb-2">שיבוץ שעות מול מורה</h3>
-                      <p className="text-xs text-neutral-500 leading-relaxed">
-                        {recommendedMatch
-                          ? recommendedMatch.isSoftRecommendation &&
-                            recommendedMatch.openSlotsCount === 0
-                            ? `${recommendedMatch.teacherName} מומלץ לפי חומר הלימוד (המלצה רכה). כשתיפתח זמינות — שבצו מהלוח.`
-                            : `הלוח מציג את שעות המורה המשודך (${recommendedMatch.teacherName}). לחצו או גררו משבצת פנויה.`
-                          : "בחרו שעה פנויה על לוח השעות הגרפי. כל שיבוץ מנכה קרדיט אחד."}
-                      </p>
-                    </div>
-                    <button
-                      onClick={openBookingFlow}
-                      disabled={slotsLoading}
-                      className={`${primaryCta} w-full mt-4`}
-                    >
-                      {slotsLoading ? "מעדכן לוח..." : "רענון שעות פנויות בלוח"}
-                    </button>
-                  </div>
-
-                  <div className={`${frostCard} p-6 flex flex-col justify-between`}>
-                    <div>
-                      <h3 className="text-sm font-semibold text-neutral-900 mb-2">חדר בקרה - WhatsApp</h3>
-                      <p className="text-xs text-neutral-500 leading-relaxed">צוות הניהול מקים כעת קבוצה ייעודית מבוקרת הכוללת את המורה הפרטי, הסטודנט וההורה לצורך מעקב רציף.</p>
-                    </div>
-                    <div className="text-center text-xs text-neutral-600 border border-neutral-200 bg-neutral-50 py-2 rounded-xl mt-4 font-mono">
-                      סנכרון פעיל
-                    </div>
-                  </div>
-                </div>
-
+                <div id="schedule-board" className="scroll-mt-20">
                 <WeeklyScheduleBoard
                   mode="student"
                   slots={openSlots}
@@ -1186,10 +1284,11 @@ export default function DashboardPage() {
                     void selectMatchedTeacher(full);
                   }}
                 />
+                </div>
 
-                {myLessons.length > 0 ? (
+                {myLessons.length > 0 && (
                   <div className={`${frostCard} p-6 space-y-3`}>
-                    <h2 className="text-sm font-semibold text-neutral-900">רשימת השיעורים המשובצים</h2>
+                    <h2 className="text-sm font-semibold text-neutral-900">השיעורים שלך</h2>
                     <div className="space-y-2">
                       {myLessons.map((lesson) => (
                         <LessonRow
@@ -1204,46 +1303,23 @@ export default function DashboardPage() {
                       ))}
                     </div>
                   </div>
-                ) : (
-                  <div className={emptyState}>
-                    <p className="text-sm font-medium text-neutral-900">אין שיעורים משובצים עדיין</p>
-                    <p className="text-xs text-neutral-500">בחרו מורה ושיבצו שעה פנויה בלוח השעות.</p>
-                    <button type="button" onClick={openBookingFlow} className={`${primaryCta} inline-block`}>
-                      רענון שעות פנויות
-                    </button>
-                  </div>
                 )}
 
-                {/* חלון רכישת חבילות וסימולציית סליקה מאובטחת */}
-                <div className={`${frostCard} p-6`}>
-                  <h2 className="text-sm font-semibold text-neutral-900 mb-4">רכישת חבילת שיעורים פרימיום (סליקה מאובטחת)</h2>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    <button disabled={purchaseLoading} onClick={() => handlePurchase("SINGLE")} className="bg-neutral-50 hover:bg-white border border-neutral-200 hover:border-neutral-400 p-5 rounded-xl text-start transition-all disabled:opacity-50 group flex flex-col justify-between h-32">
-                      <div>
-                        <div className="text-xs font-medium text-neutral-500 group-hover:text-neutral-700">חבילת יסוד</div>
-                        <div className="text-xl font-semibold text-neutral-900 mt-1">שיעור בודד</div>
-                      </div>
-                      <div className="text-xs text-neutral-700 font-mono font-medium bg-neutral-100 border border-neutral-200 px-2 py-1 rounded-md w-fit">180 ₪</div>
-                    </button>
-
-                    <button disabled={purchaseLoading} onClick={() => handlePurchase("TRIO")} className="bg-neutral-50 hover:bg-white border border-neutral-200 hover:border-neutral-400 p-5 rounded-xl text-start transition-all disabled:opacity-50 group flex flex-col justify-between h-32 relative overflow-hidden">
-                      <div className="absolute top-0 start-0 bg-neutral-900 text-[10px] font-semibold px-2 py-0.5 rounded-ee-lg text-white">פופולרי</div>
-                      <div>
-                        <div className="text-xs font-medium text-neutral-500 group-hover:text-neutral-700">חבילת תגבור מקיפה</div>
-                        <div className="text-xl font-semibold text-neutral-900 mt-1">שלשה (3 שיעורים)</div>
-                      </div>
-                      <div className="text-xs text-neutral-700 font-mono font-medium bg-neutral-100 border border-neutral-200 px-2 py-1 rounded-md w-fit">510 ₪</div>
-                    </button>
-
-                    <button disabled={purchaseLoading} onClick={() => handlePurchase("MULTI")} className="bg-neutral-50 hover:bg-white border border-neutral-200 hover:border-neutral-400 p-5 rounded-xl text-start transition-all disabled:opacity-50 group flex flex-col justify-between h-32">
-                      <div>
-                        <div className="text-xs font-medium text-neutral-500 group-hover:text-neutral-700">חבילת מרתון פרימיום</div>
-                        <div className="text-xl font-semibold text-neutral-900 mt-1">חמישייה (5 שיעורים)</div>
-                      </div>
-                      <div className="text-xs text-neutral-700 font-mono font-medium bg-neutral-100 border border-neutral-200 px-2 py-1 rounded-md w-fit">800 ₪</div>
-                    </button>
+                <div className={`${frostCard} p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-start`}>
+                  <div>
+                    <h3 className="text-sm font-semibold text-neutral-900">קבוצת ליווי ב-WhatsApp</h3>
+                    <p className="text-xs text-neutral-500 leading-relaxed mt-1">
+                      {hasBookedLesson
+                        ? "בחבילות של 3 שיעורים ומעלה, קישור לקבוצת הליווי עם המורה והצוות הפדגוגי יישלח אליך ב-WhatsApp."
+                        : "בחבילות של 3 שיעורים ומעלה נפתחת קבוצת ליווי עם המורה והצוות הפדגוגי, אחרי שיבוץ השיעור הראשון."}
+                    </p>
                   </div>
+                  {!hasBookedLesson && (
+                    <span className={`${badgeNeutral} shrink-0 self-start sm:self-center`}>ייפתח לאחר שיבוץ</span>
+                  )}
                 </div>
+
+                {!needsPackage && packagesSection}
               </div>
             )}
           </div>

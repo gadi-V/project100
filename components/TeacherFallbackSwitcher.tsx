@@ -2,7 +2,6 @@
 
 import { useMemo, useState } from "react";
 import {
-  badgeNeutral,
   badgeSuccess,
   badgeWarning,
   fieldClass,
@@ -60,10 +59,10 @@ export default function TeacherFallbackSwitcher({
           <h3 className="text-sm font-semibold text-neutral-900">
             {forceOpen
               ? "אין שעות פנויות למורה בשבוע זה"
-              : "החלפת מורה / חיפוש חלופי"}
+              : "רוצה לבדוק מורה אחר?"}
           </h3>
           <p className="text-[11px] text-neutral-500 mt-0.5">
-            מורים חלופיים לפי ציון התאמה ומקצוע — בחירה מרעננת את הלוח מיד.
+            מורים נוספים שמתאימים למקצוע שלך. בחירה תציג את השעות שלהם בלוח.
           </p>
         </div>
         <button
@@ -112,13 +111,12 @@ export default function TeacherFallbackSwitcher({
                     {teacher.teacherName}
                   </div>
                   <div className="flex flex-wrap gap-1 mt-1.5">
-                    <span className={badgeNeutral}>ציון {teacher.matchScore}</span>
                     {teacher.openSlotsCount > 0 ? (
                       <span className={badgeSuccess}>
-                        {teacher.openSlotsCount} פנויות
+                        {teacher.openSlotsCount} שעות פנויות
                       </span>
                     ) : (
-                      <span className={badgeWarning}>ללא שעות</span>
+                      <span className={badgeWarning}>אין שעות פנויות כרגע</span>
                     )}
                   </div>
                   {teacher.subjects.length > 0 && (

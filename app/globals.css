@@ -10,6 +10,16 @@ body {
   position: relative;
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
 /* -------------------------------------------------------------------------- */
 /* Ruri Liquid Glass — pure CSS backdrop-filter (no SVG displacement)         */
 /* Semi-transparent frost so ambient mesh orbs read through the surface.      */

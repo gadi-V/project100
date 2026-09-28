@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import BrandWordmark from "./BrandWordmark";
 
 type NavItem = {
   label: string;
@@ -15,7 +16,7 @@ type NavItem = {
 
 /** Group A — in-page scroll anchors (mirrors landing vertical order) */
 const SCROLL_NAV_ITEMS: NavItem[] = [
-  { label: "האתגר", href: "/#challenge", sectionId: "challenge" },
+  { label: "דף הבית", href: "/#challenge", sectionId: "challenge" },
   { label: "השיטה", href: "/#method", sectionId: "method" },
   {
     label: "מחירון",
@@ -23,6 +24,7 @@ const SCROLL_NAV_ITEMS: NavItem[] = [
     sectionId: "pricing",
     routes: ["/pricing"],
   },
+  { label: "אודות", href: "/#about", sectionId: "about" },
   { label: "שאלות ותשובות", href: "/#faq", sectionId: "faq" },
 ];
 
@@ -35,7 +37,7 @@ const DIAGNOSTIC_ITEM: NavItem = {
 
 const PERSONAL_AREA_ROUTES = ["/dashboard", "/login"];
 
-const SCROLL_SECTION_IDS = ["challenge", "method", "pricing", "faq"] as const;
+const SCROLL_SECTION_IDS = ["challenge", "method", "pricing", "about", "faq"] as const;
 
 function pathMatchesRoute(pathname: string, route: string): boolean {
   return pathname === route || pathname.startsWith(`${route}/`);
@@ -171,8 +173,8 @@ export default function Navbar() {
       }`}>
         {/* Right cluster: logo + Group A scroll anchors */}
         <div className="flex items-center gap-8">
-          <Link href="/" className="text-sm font-black tracking-wider text-[#1d1d1f]">
-            PROJECT8
+          <Link href="/" className="text-lg" aria-label="PROJECT100 – דף הבית">
+            <BrandWordmark />
           </Link>
           <nav className="hidden md:flex items-center gap-1" aria-label="ניווט עמוד">
             {SCROLL_NAV_ITEMS.map((item) =>

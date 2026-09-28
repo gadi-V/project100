@@ -310,9 +310,9 @@ export default function WeeklyScheduleBoard({
     if (scheduledLessons.length > 0) {
       const ics = buildIcsCalendar(
         scheduledLessons.map(lessonToIcs),
-        "Project8 — שיעורים"
+        "PROJECT100 — שיעורים"
       );
-      downloadIcsFile(ics, "project8-lessons.ics");
+      downloadIcsFile(ics, "project100-lessons.ics");
     }
   };
 
@@ -321,7 +321,7 @@ export default function WeeklyScheduleBoard({
       const res = await fetch("/api/calendar/export");
       if (!res.ok) throw new Error("ייצוא נכשל");
       const ics = await res.text();
-      downloadIcsFile(ics, "project8-lessons.ics");
+      downloadIcsFile(ics, "project100-lessons.ics");
 
       const webcal = buildWebcalUrl(window.location.origin);
       // Prefer a new tab/window so the dashboard stays open; Safari may still prompt Calendar.
@@ -730,12 +730,12 @@ export default function WeeklyScheduleBoard({
       <div className="flex flex-col lg:flex-row justify-between lg:items-center gap-4 border-b border-neutral-200/80 pb-4">
         <div>
           <h2 className="text-lg font-semibold text-neutral-900">
-            {mode === "teacher" ? "יומן השעות המנוהל שלך" : "לוח השעות האינטראקטיבי"}
+            {mode === "teacher" ? "יומן השעות המנוהל שלך" : "לוח השעות"}
           </h2>
           <p className="text-xs text-neutral-500">
             {mode === "teacher"
               ? "סימון, גרירת משבצות של 60 דק', וניהול שיעורים עם ⚙️ — סנכרון Google / Apple"
-              : "לחצו על משבצת פנויה לאישור שיבוץ · ⚙️ לדחייה/ביטול · Google / Apple"}
+              : "לחצו על שעה פנויה כדי לקבוע שיעור. לדחייה או ביטול, לחצו על ⚙️ ליד השיעור."}
           </p>
         </div>
 

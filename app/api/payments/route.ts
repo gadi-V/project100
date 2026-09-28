@@ -7,9 +7,10 @@ import { prisma } from "../../../lib/prisma";
 import { writeLedgerEntryInTransaction } from "../../../lib/services/LedgerService";
 
 const PACKAGES: Record<string, { price: number; credits: number; label: string }> = {
-  SINGLE: { price: 180, credits: 1, label: "שיעור בודד" },
-  TRIO: { price: 510, credits: 3, label: "חבילת 3 שיעורים" },
-  MULTI: { price: 800, credits: 5, label: "חבילת 5 שיעורים" },
+  SINGLE: { price: 200, credits: 1, label: "שיעור בודד" },
+  TRIO: { price: 540, credits: 3, label: "חבילת 3 שיעורים" },
+  MULTI: { price: 850, credits: 5, label: "חבילת 5 שיעורים" },
+  TEN: { price: 1600, credits: 10, label: "חבילת 10 שיעורים" },
 };
 
 function getStripe(): Stripe {

@@ -17,6 +17,7 @@ const SECTION_ALIASES: Record<string, AmbientSection> = {
   challenge: "challenge",
   method: "challenge",
   pricing: "pricing",
+  about: "faq",
   faq: "faq",
   contact: "faq",
 };
@@ -27,6 +28,7 @@ const OBSERVE_IDS = [
   "challenge",
   "method",
   "pricing",
+  "about",
   "faq",
   "contact",
 ] as const;

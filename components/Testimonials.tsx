@@ -1,12 +1,26 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { frostCard } from "../lib/ui";
+import BrandWordmark from "./BrandWordmark";
 
-const TESTIMONIALS = [
+type Testimonial = {
+  name: string;
+  role: string;
+  text: ReactNode;
+  rating: number;
+  avatar: string;
+};
+
+const TESTIMONIALS: Testimonial[] = [
   {
     name: "עדי לוי",
     role: "סטודנטית להנדסה, אוניברסיטת תל אביב",
-    text: "הגעתי ל-Project8 שבוע לפני מבחן במועד ב' בחדו''א כשאני מיואשת לחלוטין. המורה עבר איתי על חומרי הלימוד בצורה שלא ראיתי באף הרצאה באוניברסיטה. פירקנו הכל לחלקים קטנים וסיימתי עם 92! שווה כל שקל.",
+    text: (
+      <>
+        הגעתי ל-<BrandWordmark /> שבוע לפני מבחן במועד ב&apos; בחדו&apos;&apos;א כשאני מיואשת לחלוטין. המורה עבר איתי על חומרי הלימוד בצורה שלא ראיתי באף הרצאה באוניברסיטה. פירקנו הכל לחלקים קטנים וסיימתי עם 92! שווה כל שקל.
+      </>
+    ),
     rating: 5,
     avatar: "ע"
   },

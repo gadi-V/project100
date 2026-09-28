@@ -2195,8 +2195,8 @@ export default function OnboardingDiagnosticPage() {
                     <div className="space-y-2 pt-1">
                       <p className="text-[11px] text-neutral-500 font-medium">
                         {recommendedPackage === "MULTI"
-                          ? "מומלץ: חבילת MULTI — 5 שיעורים · ₪800"
-                          : "מומלץ: חבילת TRIO — 3 שיעורים · ₪510"}
+                          ? "מומלץ: חבילת MULTI — 5 שיעורים · ₪850"
+                          : "מומלץ: חבילת TRIO — 3 שיעורים · ₪540"}
                       </p>
                       <Link
                         href={pricingHref}

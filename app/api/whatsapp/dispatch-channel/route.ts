@@ -44,9 +44,9 @@ export async function POST(request: NextRequest) {
     };
 
     const packageType = (body.packageType ?? "").toString().toUpperCase() as PackageSize;
-    if (!["SINGLE", "TRIO", "MULTI"].includes(packageType)) {
+    if (!["SINGLE", "TRIO", "MULTI", "TEN"].includes(packageType)) {
       return NextResponse.json(
-        { success: false, error: "packageType חייב להיות SINGLE, TRIO או MULTI" },
+        { success: false, error: "packageType חייב להיות SINGLE, TRIO, MULTI או TEN" },
         { status: 400 }
       );
     }

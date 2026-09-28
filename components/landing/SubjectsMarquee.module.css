@@ -1,0 +1,27 @@
+/* Each track holds two identical copies, so shifting by 50% loops seamlessly. */
+@keyframes slide {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(50%);
+  }
+}
+
+.track {
+  animation: slide 40s linear infinite;
+}
+
+.reverse {
+  animation-direction: reverse;
+}
+
+.root:hover .track {
+  animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .track {
+    animation: none;
+  }
+}

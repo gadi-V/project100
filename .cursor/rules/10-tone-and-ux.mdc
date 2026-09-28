@@ -1,0 +1,44 @@
+---
+description: "Student-facing tone of voice, banned jargon, truthful status copy, and anti-slop UX rules"
+globs:
+  - "app/**/*.tsx"
+  - "components/**/*.tsx"
+  - "lib/whatsapp.ts"
+---
+
+# Tone of Voice & Anti-Slop UX
+
+Applies to every string a student, parent, or teacher can see: headings, labels, badges, buttons, empty states, toasts, WhatsApp messages. Code comments and internal identifiers are out of scope.
+
+## 1. Interface language
+- Natural, warm, educational, concise Hebrew. Write the way a good teacher talks to a student: short sentences, plain words, one idea per line.
+- Prefer telling the user what to do next over describing how the system works.
+- A card gets one heading and at most one short supporting sentence. If it needs more, the card is doing too much.
+- Keep English only for proper names the user already knows (Google Calendar, Apple Calendar, WhatsApp).
+
+## 2. Banned in rendered UI
+- Engineering terms: "Fair Dispatch", "Day×Hour", "Override", "Soft Recommendation" / "המלצה רכה", "חפיפות" / "חפיפת שעות", "משבצות חופפות".
+- Role enums and DB values: "STUDENT", "TEACHER", "MANAGER", "SCHEDULED", etc. Use "תלמיד/ה", "מורה", "מנהל/ת".
+- Internal algorithm metrics: match scores ("ציון 87"), weekly load ("עומס שבועי 0"), rank numbers ("#1"), referral counts. These drive ordering; they are never shown to students.
+- Overused marketing words: "פרימיום" (at most once per screen, preferably never), "מומחה" as filler, "מקיף", "מתקדם", "חכם".
+- Redundant phrasing: "אבחון דיאגנוסטי", "אפיון מקצועי קצרצר", "נעל פרופיל".
+- Mixed-language labels such as "מוסד לימודים Academic Institution".
+- Decorative emojis in student-facing copy.
+
+## 3. Truthful status only
+- Never render a status the backend has not confirmed. No "סנכרון פעיל", "מחובר", "פעיל" placeholders.
+- WhatsApp accompaniment group: a group opens only for packages of 3+ lessons after a teacher is assigned (see `/api/whatsapp/dispatch-channel`). Show it as pending ("ייפתח לאחר שיבוץ") or hide it. Never claim it already exists.
+- Never show fake processing copy ("מעבד ומנתח בענן", "מפענח את פרופיל הלמידה") for a plain DB read/write. Use honest verbs: "שומרים...", "טוענים...".
+- Recommendation badges must match the data: do not say a teacher is available when `openSlotsCount === 0`.
+
+## 4. Hierarchy & cognitive load
+- Every dashboard state has exactly one primary next step, shown first ("השלב הבא: ...").
+- If the student has 0 lesson credits, surface package selection before booking controls so they never hit a credit error.
+- Do not duplicate the same action in two buttons with different labels.
+- Required surfaces from `02-matching-scheduling.mdc` (weekly board, calendar export, "החלף מורה", time-preference bar with "בחר הכל") stay; simplify their copy, never remove them.
+
+## 5. Mapping internal signals to student copy
+- Ranking by subject + availability + fair load → "מורים מומלצים בהתאם למקצוע ולזמינות שלך".
+- Exact availability overlap → "זמין בשעות דומות לבקשתך".
+- Soft recommendation (high fit, no slots) → "מתאים לחומר, עדיין בלי שעות פנויות".
+- Load-balancing / referral reasons are dropped from student-facing reason lists.

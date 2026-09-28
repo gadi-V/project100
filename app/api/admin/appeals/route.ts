@@ -4,7 +4,7 @@ import { prisma } from "../../../../lib/prisma";
 import { requireAuth } from "../../../../lib/api-auth";
 import { writeAuditLog } from "../../../../lib/audit";
 
-const LESSON_VALUE_ILS = 180;
+const LESSON_VALUE_ILS = 200;
 
 /**
  * List lessons with PENDING fine appeals.

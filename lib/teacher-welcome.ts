@@ -139,14 +139,14 @@ export async function dispatchTeacherWelcomeEnvelope({
   // Dispatch Welcome WhatsApp message
   const welcomeMessage =
     `שלום ${teacher.name}! 🌟\n` +
-    `ברכותינו! מועמדותך אושרה והצטרפת לנבחרת המורים המובילה של Project8! 🚀\n\n` +
+    `ברכותינו! מועמדותך אושרה והצטרפת לנבחרת המורים המובילה של PROJECT100! 🚀\n\n` +
     `הנה ערכת הקליטה האישית שלך:\n` +
     `1. 💻 כיתה וירטואלית קבועה שלך:\n${permanentRoomUrl}\n\n` +
     `2. 💬 קהילת המורים הרשמית ב-WhatsApp:\n${whatsappGroupUrl}\n\n` +
     `3. 🎓 מסלול הכשרה פדגוגי מואץ (50 שעות):\n${trainingTrackUrl}\n\n` +
     `4. 📅 לכניסה לדאשבורד ופתיחת שעות זמינות ביומן:\n${appUrl}/dashboard\n\n` +
     `מאחלים לך הצלחה רבה והוראה מעצימה!\n` +
-    `צוות Project8`;
+    `צוות PROJECT100`;
 
   try {
     await sendWhatsAppText(teacher.phone, welcomeMessage);

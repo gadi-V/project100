@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { frostHeader } from "../lib/ui";
+import BrandWordmark from "./BrandWordmark";
 
 type Crumb = { label: string; href?: string };
 
@@ -80,9 +81,10 @@ export default function InternalAppHeader() {
         <div className="flex items-center gap-3 min-w-0">
           <Link
             href="/"
-            className="text-sm font-black tracking-wider text-neutral-900 shrink-0"
+            className="text-lg shrink-0"
+            aria-label="PROJECT100 – דף הבית"
           >
-            PROJECT8
+            <BrandWordmark />
           </Link>
           <nav
             aria-label="פירורי לחם"

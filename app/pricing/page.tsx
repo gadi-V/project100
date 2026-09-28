@@ -3,6 +3,8 @@ import { Suspense, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "react-hot-toast";
 import Testimonials from "../../components/Testimonials";
+import BenefitsBar from "../../components/landing/BenefitsBar";
+import BrandWordmark from "../../components/BrandWordmark";
 import {
   frostCard,
   frostCardSelected,
@@ -15,28 +17,57 @@ const PACKAGES = [
   {
     id: "SINGLE",
     name: "שיעור בודד",
-    price: 180,
-    perLesson: 180,
+    price: 200,
+    perLesson: 200,
     description: "פתרון ממוקד לפני מבחן, הגשת עבודה או לחיזוק נושא ספציפי בכל מקצוע",
-    features: ["שיעור מלא של 50 דקות", "מורה מותאם אישית (לפי מקצוע/קורס)", "חומרי לימוד וסיכומים מותאמים", "ביטול חינם עד 24 שעות לפני"],
+    features: [
+      "שיעור מלא של 50 דקות",
+      "מורה מותאם אישית (לפי מקצוע/קורס)",
+      "חומרי לימוד וסיכומים מותאמים",
+      "ביטול חינם עד 24 שעות לפני",
+    ],
     popular: false,
   },
   {
     id: "TRIO",
-    name: "חבילת שלשייה (TRIO)",
-    price: 510,
-    perLesson: 170,
+    name: "חבילת שלישייה",
+    price: 540,
+    perLesson: 180,
     description: "המסלול המומלץ לסגירת פערים, הכנה לבגרויות או למבחני סמסטר באקדמיה",
-    features: ["3 שיעורים במערכת", "עזרה אונליין בין המפגשים", "מעקב התקדמות אישי", "חיסכון של ₪30"],
+    features: [
+      "3 שיעורים במערכת",
+      "עזרה אונליין בין המפגשים",
+      "מעקב התקדמות אישי",
+      "חיסכון של ₪60",
+    ],
     popular: true,
   },
   {
     id: "MULTI",
     name: "נבחרת חמישייה",
-    price: 800,
-    perLesson: 160,
+    price: 850,
+    perLesson: 170,
     description: "ליווי רציף להצלחה מוכחת לאורך הסמסטר או שנת הלימודים בכל חומרי הלימוד",
-    features: ["5 שיעורים (לשימוש בכל המקצועות)", "תעדוף בבחירת השעות והמורים", "הכנה מקיפה למרתונים ומבחנים", "חיסכון של ₪100"],
+    features: [
+      "5 שיעורים (לשימוש בכל המקצועות)",
+      "תעדוף בבחירת השעות והמורים",
+      "הכנה מקיפה למרתונים ומבחנים",
+      "חיסכון של ₪150",
+    ],
+    popular: false,
+  },
+  {
+    id: "TEN",
+    name: "חבילת עשירייה",
+    price: 1600,
+    perLesson: 160,
+    description: "מסלול מורחב לליווי רציף לאורך תקופת מבחנים או סמסטר מלא",
+    features: [
+      "10 שיעורים (לשימוש בכל המקצועות)",
+      "גמישות מקסימלית בשיבוץ",
+      "ליווי צמוד לאורך כל התקופה",
+      "חיסכון של ₪400",
+    ],
     popular: false,
   },
 ];
@@ -208,7 +239,7 @@ function PricingPageInner() {
 
   return (
     <div className={`${pageCanvas} py-16 px-4 sm:px-6`} dir="rtl">
-      <div className="max-w-6xl mx-auto">
+      <div className="max-w-7xl mx-auto">
         <div className="text-center max-w-3xl mx-auto mb-16 space-y-4">
           <h1 className="text-4xl sm:text-5xl font-semibold tracking-tight text-neutral-900 [text-wrap:balance]">
             כל המקצועות. כל החומרים. הבנה מלאה.
@@ -223,7 +254,9 @@ function PricingPageInner() {
           )}
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 items-stretch mb-28 pt-4 overflow-visible">
+        <BenefitsBar className="mb-12 overflow-hidden rounded-2xl border-x" />
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-8 items-stretch mb-28 pt-4 overflow-visible">
           {PACKAGES.map((pkg) => {
             const isHighlighted = highlightedPackageId
               ? highlightedPackageId === pkg.id
@@ -245,14 +278,14 @@ function PricingPageInner() {
                   <h3 className="text-2xl font-semibold text-neutral-900 mb-2 text-start">{pkg.name}</h3>
                   <p className="text-neutral-500 text-sm mb-6 min-h-[40px] text-start">{pkg.description}</p>
 
-                  <div className="mb-6 border-b border-neutral-200/80 pb-6 text-start space-y-2">
-                    <div className="flex items-baseline gap-1.5 justify-start" dir="ltr">
-                      <span className="text-sm font-medium text-neutral-500">/ חבילה</span>
+                  <div className="mb-6 border-b border-neutral-200/80 pb-6 text-center space-y-2">
+                    <div className="flex items-baseline gap-1.5 justify-center" dir="ltr">
                       <span className="text-4xl font-extrabold text-neutral-900 tracking-tight tabular-nums">
                         ₪{pkg.price}
                       </span>
+                      <span className="text-sm font-medium text-neutral-500">/ חבילה</span>
                     </div>
-                    <div className="text-neutral-600 text-sm font-medium tabular-nums">
+                    <div className="text-neutral-600 text-sm font-medium tabular-nums text-center">
                       ({pkg.perLesson} ₪ בלבד למפגש)
                     </div>
                   </div>
@@ -317,7 +350,9 @@ function PricingPageInner() {
             <div className={`${frostCardSelected} p-6`}>
               <h3 className="text-lg font-semibold text-neutral-900 mb-4 flex items-center gap-2 text-start">
                 <span>✓</span>
-                המעטפת החכמה של Project8
+                <span>
+                  המעטפת החכמה של <BrandWordmark />
+                </span>
               </h3>
               <ul className="space-y-4 text-neutral-700 text-sm text-start">
                 <li className="flex gap-2">

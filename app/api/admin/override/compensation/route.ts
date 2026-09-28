@@ -20,7 +20,7 @@ import { writeAuditLog } from "../../../../../lib/audit";
  */
 
 const LESSON_CREDIT_COMPENSATION = 1;
-const LESSON_VALUE_ILS = 180;
+const LESSON_VALUE_ILS = 200;
 
 async function hasIssuedCompensationToday(studentId: string, now: Date): Promise<boolean> {
   const startOfDay = new Date(now);
