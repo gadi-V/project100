@@ -47,13 +47,12 @@ export default function RegisterHubPage() {
           <h1 className="text-4xl font-semibold text-neutral-900 tracking-tight pt-4">
             הרשמה ל-PROJECT100
           </h1>
-          <p className="text-sm text-neutral-500">לתלמידים, לסטודנטים ולהורים.</p>
         </div>
 
         <Link href="/register/student" className={`${frostCard} block p-6 text-start space-y-3`}>
-          <h2 className="text-xl font-semibold text-neutral-900">תלמיד/ה, סטודנט/ית או הורה</h2>
+          <h2 className="text-xl font-semibold text-neutral-900">תלמיד/סטודנט</h2>
           <p className="text-sm text-neutral-500 leading-relaxed">
-            פותחים חשבון, עושים אבחון קצר ומקבלים התאמה למורה.
+            הרשמה מהירה ופתיחת חשבון
           </p>
           <span className="inline-flex items-center text-sm font-medium text-neutral-900 pt-2">
             <ForwardArrow />
@@ -71,7 +70,7 @@ export default function RegisterHubPage() {
           <p className="text-xs text-neutral-400">
             מעוניין ללמד אצלנו?{" "}
             <Link href="/careers" className="text-neutral-600 hover:text-neutral-900 hover:underline">
-              הגש מועמדות להוראה
+              הגש מועמדות
             </Link>
           </p>
         </div>

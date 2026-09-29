@@ -78,11 +78,8 @@ function LoginForm() {
       <div className={`max-w-md w-full space-y-8 ${frostCard} p-8`}>
         <div className="text-center space-y-2">
           <h2 className="text-3xl font-semibold tracking-tight text-neutral-900">
-            כניסה למערכת
+            כניסה למנויים
           </h2>
-          <p className="text-xs text-neutral-500">
-            כניסה לתלמידים ולהורים.
-          </p>
           <p className="text-sm text-neutral-500">
             עדיין אין לך חשבון?{" "}
             <Link

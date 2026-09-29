@@ -185,6 +185,28 @@ Fresh databases apply all migrations normally with `npx prisma migrate deploy`.
 | 10b | Student screen `/portal/students/[id]` with 5 tabs (profile, courses, meetings, communication, standing orders) and standard summary templates for teacher, representative and pedagogic manager (`4ae5da2`) | ✅ Completed |
 | 11 | Customer / student directory `/portal/students` + `GET /api/portal/students` (search, status and grade filters, pagination), shared portal header with היום / קורסים / לקוחות tabs and global student search, teacher dashboard links to student files | ✅ Completed |
 | 11b | Vercel build fix: `prisma generate` runs before `next build` and on `postinstall`; `force-dynamic` confirmed on all session/DB portal pages | ✅ Completed |
+| 11c | Neon migration P3018 fixed: `sync_missing_models` made idempotent, failed record resolved, all pending migrations deployed; `package.json#prisma` moved to `prisma.config.ts` | ✅ Completed |
+
+### Neon migration recovery (Sprint 11c)
+
+- **Symptom:** `prisma migrate deploy` failed with P3018 / `42710` — `type "TeacherVettingStage" already exists` in
+  `20260929152923_sync_missing_models`. The record stayed failed, blocking `user_whatsapp_group_id`,
+  `add_intake_assessment` and `add_student_tabs_and_communication`.
+- **Root cause:** the production DB already contained every object in that migration (schema earlier synced via
+  `db push`): all 6 enums, the 6 tables, the added columns, indexes and FKs. Guarding only the enums would have failed
+  on the next statement (`ADD COLUMN "academicYear"`).
+- **Fix (`prisma/migrations/20260929152923_sync_missing_models/migration.sql`):** the whole file is idempotent with
+  identical definitions — `CREATE TYPE` and `ADD CONSTRAINT … FOREIGN KEY` wrapped in
+  `DO $$ BEGIN … EXCEPTION WHEN duplicate_object THEN null; END $$;`, plus `ADD COLUMN IF NOT EXISTS`,
+  `CREATE TABLE IF NOT EXISTS`, `CREATE [UNIQUE] INDEX IF NOT EXISTS`. Safe on both fresh and pre-synced databases.
+- **Recovery:** `prisma migrate resolve --rolled-back 20260929152923_sync_missing_models` → `prisma migrate deploy`
+  applied all four migrations ("All migrations have been successfully applied."). Pre-deploy
+  `migrate diff` (live DB → `schema.prisma`) showed exactly the three pending migrations and nothing else.
+- **Config:** the deprecated `package.json#prisma` block was removed; the seed command now lives in
+  `prisma.config.ts` (`migrations.seed: "tsx prisma/seed.ts"`), silencing the CLI deprecation warning.
+- **Known:** `_prisma_migrations` also holds five legacy 2025 records (`20250708093000_init` …
+  `20260821144500_add_lesson_duration`) with no local folder; `migrate status` reports them but they do not block deploy.
+- **Verified:** `prisma validate`, `tsc --noEmit`, `npm test` (17 files / 342 tests).
 
 ### Vercel build pipeline fix (Sprint 11b)
 
@@ -339,7 +361,7 @@ Fresh databases apply all migrations normally with `npx prisma migrate deploy`.
 
 - **Public UI is for students and parents only.** `components/Navbar.tsx` and the home-page hero contain no staff
   or teacher-recruitment entry (verified; there were none to remove). `components/Footer.tsx` has one discreet link,
-  "הצטרפות לנבחרת ההוראה" → `/careers`. `/login` copy now reads "כניסה לתלמידים ולהורים."
+  "הצטרפות לנבחרת ההוראה" → `/careers`. `/login` heading reads "כניסה למנויים"; `/register` hub card reads "תלמיד/סטודנט".
 - **Staff gate `/portal/login`** (`app/portal/login/page.tsx`): rendered without the marketing Navbar/Footer
   (`AppShell` treats `/portal/*` like the classroom). It posts to `/api/login` with `portal: "staff"`; the route
   verifies the password, then returns `403` **before** signing a session if the role is not in

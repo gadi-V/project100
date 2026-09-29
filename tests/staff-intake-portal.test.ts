@@ -116,7 +116,7 @@ describe("public registration is for students and parents only", () => {
     expect(src).toContain('href="/register/student"');
     expect(src).toContain('href="/careers"');
     expect(src).toContain("הרשמה ל-PROJECT100");
-    expect(src).toContain("הגש מועמדות להוראה");
+    expect(src).toContain("הגש מועמדות");
   });
 
   it("/register/teacher redirects to /careers and no longer renders a sign-up form", async () => {
