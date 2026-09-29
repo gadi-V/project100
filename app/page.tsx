@@ -5,6 +5,7 @@ import { toast } from "react-hot-toast";
 import BenefitsBar from "../components/landing/BenefitsBar";
 import AboutSection from "../components/landing/AboutSection";
 import SubjectsMarquee from "../components/landing/SubjectsMarquee";
+import MethodFlipCards from "../components/landing/MethodFlipCards";
 
 export default function HomePage() {
   const [activeFaq, setActiveFaq] = useState<number | null>(null);
@@ -177,37 +178,12 @@ export default function HomePage() {
           <span className="text-xs font-bold tracking-widest text-[#6e6e73] uppercase block">נבחרת המרצים</span>
           <h2 className="text-4xl font-black text-[#1d1d1f] tracking-tight">מורים בעלי תוצאות מוכחות בשטח</h2>
           <p className="text-xs font-bold text-[#6e6e73] max-w-xl">
-            כל המורים בפלטפורמה נבחרו בקפידה ועברו תהליך סינון קשוח ומסלול הכשרה פדגוגי מקיף בארגון. הם מתמחים ב-3 נתיבי פעולה ברורים:
+            כל המורים בפלטפורמה נבחרו בקפידה ועברו תהליך סינון קשוח ומסלול הכשרה פדגוגי מקיף בארגון. התאמה אישית לפי 5 נתיבי למידה ממוקדים: מסגירת פערים ועד להצטיינות.
           </p>
         </div>
 
         {/* חמשת הכרטיסים האינטראקטיביים המשקפים שקיפות ומבנה כרטיסיות */}
-        <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
-          {[
-            { step: "A", title: "סגירת פערים", desc: "איתור חורים לימודיים ופערי עבר מהיסוד, ובניית הבסיס הפדגוגי הדרוש להתקדמות." },
-            { step: "B", title: "הכנה למבחנים", desc: "מרתונים ממוקדים, פתרון מבחני עבר וטקטיקות עבודה ייעודיות להעלאת הציון בטווח קצר." },
-            { step: "C", title: "ליווי שוטף", desc: "ליווי עקבי לאורך כל הסמסטר או שנת הלימודים לשמירה על יציבות, משמעת עצמית והבנה עמוקה." },
-            { step: "D", title: "מערכת כרטיסיות", desc: "שקיפות מלאה. טוענים חבילת מפגשים מוגדרת (1, 3 או 5 שיעורים). אין התחייבויות ארוכות טווח או קנסות." },
-            { step: "E", title: "חופש בחירה", desc: "המערכת מאפשרת לכם להישאר עם המורה שלכם או להחליף למרצה אחר בנבחרת בכל רגע, בהתאם לזמינות הלוז." }
-          ].map((item, idx) => (
-            <div key={idx} className="group w-full h-72 [perspective:1000px] cursor-pointer">
-              <div className="relative w-full h-full duration-500 [transform-style:preserve-3d] group-hover:[transform:rotateY(180deg)] shadow-sm hover:shadow-md transition-all rounded-2xl">
-                
-                {/* צד קדמי */}
-                <div className="absolute inset-0 w-full h-full liquid-glass rounded-2xl p-6 flex flex-col justify-between [backface-visibility:hidden]">
-                  <span className="text-5xl font-black text-[#e5e5e7] font-mono block text-right">{item.step}</span>
-                  <h4 className="font-extrabold text-sm text-[#1d1d1f] leading-snug">{item.title}</h4>
-                </div>
-
-                {/* צד אחורי */}
-                <div className="absolute inset-0 w-full h-full bg-[#1d1d1f] rounded-2xl p-6 flex flex-col justify-center text-right [backface-visibility:hidden] [transform:rotateY(180deg)]">
-                  <p className="text-xs font-bold text-[#f5f5f7] leading-relaxed">{item.desc}</p>
-                </div>
-
-              </div>
-            </div>
-          ))}
-        </div>
+        <MethodFlipCards />
 
       </section>
 
