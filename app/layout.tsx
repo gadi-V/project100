@@ -6,7 +6,8 @@ import AppShell from "../components/AppShell";
 
 export const metadata: Metadata = {
   title: "PROJECT100 - פלטפורמת למידה",
-  description: "מערכת חכמה לשיבוץ ורכישת שיעורים פרטיים",
+  description:
+    "פלטפורמת השיעורים הפרטיים האקדמית המובילה בישראל. הוראה מותאמת אישית 1-על-1, אבחון פערי הבנה ותרגול ממוקד להצלחה במבחנים.",
 };
 
 export default function RootLayout({

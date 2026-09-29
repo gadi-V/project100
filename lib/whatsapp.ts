@@ -599,7 +599,7 @@ export function analyzeGapsAndGenerateOutreach(params: {
     studentName,
     trackName,
     identifiedGaps,
-    portalUrl = "https://project8.edu/dashboard",
+    portalUrl = `${getAppUrl()}/dashboard`,
   } = params;
 
   const gapsCount = identifiedGaps.length;

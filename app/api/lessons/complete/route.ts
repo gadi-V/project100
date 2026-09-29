@@ -19,7 +19,7 @@ function appBaseUrl(): string {
   return (
     process.env.APP_URL?.replace(/\/$/, "") ||
     process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ||
-    "https://app.project8.co.il"
+    "https://project100.vercel.app"
   );
 }
 

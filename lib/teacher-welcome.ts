@@ -5,7 +5,7 @@ function getAppUrl(): string {
   return (
     process.env.APP_URL?.replace(/\/$/, "") ||
     process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ||
-    "https://app.project8.co.il"
+    "https://project100.vercel.app"
   );
 }
 
@@ -78,7 +78,7 @@ export async function dispatchTeacherWelcomeEnvelope({
   adminId,
   customRoomUrl,
   whatsappGroupUrl = "https://chat.whatsapp.com/project8-teachers-guild",
-  trainingTrackUrl = "https://training.project8.co.il/track-50h",
+  trainingTrackUrl = `${getAppUrl()}/teachers/onboarding/status`,
 }: WelcomeEnvelopeInput): Promise<WelcomeEnvelopeResult> {
   const teacher = await prisma.user.findUnique({
     where: { id: teacherId },
