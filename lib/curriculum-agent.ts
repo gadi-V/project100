@@ -1,15 +1,25 @@
-import { config as loadEnv } from "dotenv";
-import { resolve } from "path";
-import OpenAI from "openai";
+import OpenAI, { APIConnectionTimeoutError } from "openai";
 
-// A Next.js server only loads the root `.env` automatically. The OpenRouter
-// key used by the Agent Hive lives in `agents_hive/.env`, so we explicitly
-// load it as a fallback so the admin curriculum route can reach the agent.
-loadEnv({ path: resolve(process.cwd(), "agents_hive", ".env") });
+/** Kept below the 60 s serverless function limit so the route can still answer. */
+export const DEFAULT_CURRICULUM_AGENT_TIMEOUT_MS = 45_000;
 
-const API_KEY = process.env.OPENROUTER_API_KEY?.trim();
-const BASE_URL = process.env.OPENROUTER_BASE_URL?.trim() || "https://openrouter.ai/api/v1";
-const MODEL = process.env.MODEL_ARCHITECT?.trim() || "deepseek/deepseek-r1";
+/**
+ * Read per call from the platform environment (root `.env` locally, Vercel env
+ * in production). Never loads files from disk — serverless bundles have no
+ * `agents_hive/.env`.
+ */
+function getAgentConfig() {
+  const timeoutFromEnv = Number(process.env.CURRICULUM_AGENT_TIMEOUT_MS);
+  return {
+    apiKey: process.env.OPENROUTER_API_KEY?.trim() || null,
+    baseURL: process.env.OPENROUTER_BASE_URL?.trim() || "https://openrouter.ai/api/v1",
+    model: process.env.MODEL_ARCHITECT?.trim() || "deepseek/deepseek-r1",
+    timeoutMs:
+      Number.isFinite(timeoutFromEnv) && timeoutFromEnv > 0
+        ? timeoutFromEnv
+        : DEFAULT_CURRICULUM_AGENT_TIMEOUT_MS,
+  };
+}
 
 export type SyllabusParseResult = {
   success: boolean;
@@ -28,16 +38,20 @@ export type SyllabusParseResult = {
 export async function parseSyllabusWithHive(
   rawTextOrMarkdown: string
 ): Promise<SyllabusParseResult> {
-  if (!API_KEY) {
+  const { apiKey, baseURL, model, timeoutMs } = getAgentConfig();
+  if (!apiKey) {
     return {
       success: false,
       error: "OPENROUTER_API_KEY is not configured server-side (see .env)",
     };
   }
 
+  // maxRetries: 0 keeps the total wall-clock time bounded by `timeoutMs`.
   const client = new OpenAI({
-    baseURL: BASE_URL,
-    apiKey: API_KEY,
+    baseURL,
+    apiKey,
+    timeout: timeoutMs,
+    maxRetries: 0,
   });
 
   const systemPrompt = `You are an expert EdTech Curriculum Architect.
@@ -57,7 +71,7 @@ Output ONLY raw JSON (an array of objects). Do not include markdown codeblocks o
 
   try {
     const response = await client.chat.completions.create({
-      model: MODEL,
+      model,
       temperature: 0.1,
       messages: [
         { role: "system", content: systemPrompt },
@@ -81,6 +95,12 @@ Output ONLY raw JSON (an array of objects). Do not include markdown codeblocks o
 
     return { success: true, topics: parsed, provider: "openrouter-deepseek-r1" };
   } catch (error: unknown) {
+    if (error instanceof APIConnectionTimeoutError) {
+      return {
+        success: false,
+        error: `Agent parse call timed out after ${Math.round(timeoutMs / 1000)}s`,
+      };
+    }
     const msg = error instanceof Error ? error.message : String(error);
     return { success: false, error: `Agent parse call failed: ${msg}` };
   }

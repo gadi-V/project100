@@ -62,7 +62,7 @@ describe("fail-open without Redis outside production", () => {
     const first = await checkRateLimit(request("/api/login"), "auth");
     const second = await checkRateLimit(request("/api/leads"), "api");
 
-    expect(first).toMatchObject({ success: true, bypassed: true, unavailable: false });
+    expect(first).toMatchObject({ success: true, bypassed: true, degraded: false });
     expect(second.success).toBe(true);
     expect(warn).toHaveBeenCalledTimes(1);
     expect(rl.limit).not.toHaveBeenCalled();
@@ -78,19 +78,60 @@ describe("fail-open without Redis outside production", () => {
     expect(res.headers.get("x-middleware-next")).toBe("1");
   });
 
-  it("fails closed with 503 in production when Redis is not configured", async () => {
+});
+
+describe("monitored fail-open in production without Redis", () => {
+  it("never returns 503 — auth routes stay reachable", async () => {
     vi.stubEnv("NODE_ENV", "production");
-    const error = vi.spyOn(console, "error").mockImplementation(() => {});
-    const { checkRateLimit } = await loadRateLimit();
+    vi.spyOn(console, "error").mockImplementation(() => {});
     const middleware = await loadMiddleware();
 
-    const result = await checkRateLimit(request("/api/login"), "auth");
-    const res = await middleware(request("/api/login"));
+    for (const path of ["/api/login", "/api/register", "/api/auth/forgot-password"]) {
+      const res = await middleware(request(path));
+      expect(res.status).not.toBe(503);
+      expect(res.status).not.toBe(429);
+      expect(res.headers.get("x-middleware-next")).toBe("1");
+    }
+  });
 
-    expect(result).toMatchObject({ success: false, unavailable: true });
-    expect(res.status).toBe(503);
-    expect(res.headers.get("Retry-After")).toBe("60");
+  it("flags the result as degraded and logs a DEGRADED error", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { checkRateLimit } = await loadRateLimit();
+
+    const result = await checkRateLimit(request("/api/login"), "auth");
+
+    expect(result).toMatchObject({ success: true, bypassed: true, degraded: true });
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("DEGRADED"));
     expect(error).toHaveBeenCalledWith(expect.stringContaining("UPSTASH_REDIS_REST_URL"));
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("re-alerts at most once per interval per instance", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubEnv("NODE_ENV", "production");
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+      const { checkRateLimit, DEGRADED_ALERT_INTERVAL_MS } = await loadRateLimit();
+
+      for (let i = 0; i < 5; i++) await checkRateLimit(request("/api/login"), "auth");
+      expect(error).toHaveBeenCalledTimes(1);
+
+      vi.advanceTimersByTime(DEGRADED_ALERT_INTERVAL_MS);
+      await checkRateLimit(request("/api/login"), "auth");
+      expect(error).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("limits", () => {
+  it("allows 15 auth requests per 60 s (classroom behind one NAT IP) and 30 api requests", async () => {
+    const { RATE_LIMITS } = await loadRateLimit();
+    expect(RATE_LIMITS.auth).toEqual({ requests: 15, window: "60 s" });
+    expect(RATE_LIMITS.api).toEqual({ requests: 30, window: "60 s" });
   });
 });
 
@@ -166,7 +207,7 @@ describe("/api/cron/* exemption", () => {
 describe("middleware with Redis configured", () => {
   it("returns 429 JSON with Retry-After when the auth limit is exceeded", async () => {
     configureRedis();
-    rl.limit.mockResolvedValue({ success: false, limit: 5, remaining: 0, reset: Date.now() + 30_000 });
+    rl.limit.mockResolvedValue({ success: false, limit: 15, remaining: 0, reset: Date.now() + 30_000 });
     const middleware = await loadMiddleware();
 
     const res = await middleware(request("/api/login", { "x-forwarded-for": "203.0.113.7" }));
@@ -174,7 +215,7 @@ describe("middleware with Redis configured", () => {
     expect(res.status).toBe(429);
     expect(await res.json()).toEqual({ error: "Too Many Requests" });
     expect(res.headers.get("Retry-After")).toBe("30");
-    expect(res.headers.get("X-RateLimit-Limit")).toBe("5");
+    expect(res.headers.get("X-RateLimit-Limit")).toBe("15");
     expect(res.headers.get("X-RateLimit-Remaining")).toBe("0");
   });
 
@@ -213,6 +254,7 @@ describe("middleware with Redis configured", () => {
     const res = await middleware(request("/api/login"));
 
     expect(res.status).not.toBe(429);
+    expect(res.status).not.toBe(503);
     expect(error).toHaveBeenCalledWith(
       expect.stringContaining("Upstash Redis error"),
       expect.any(Error)

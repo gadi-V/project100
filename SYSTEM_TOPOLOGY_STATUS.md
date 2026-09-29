@@ -96,7 +96,8 @@ Verified by `test_hive_mcp_tools.py`:
 | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_STORAGE_*` | Board PDF storage |
 | `WHATSAPP_API_URL`, `WHATSAPP_API_KEY` | WhatsApp transactional alerts |
 | `CRON_SECRET` | Cron auth (Vercel Cron + QStash forwarded header) |
-| `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | Distributed rate limiting (required in production — auth routes return 503 without them) |
+| `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | Distributed rate limiting (without them production fails open and logs `[rate-limit] DEGRADED`) |
+| `CURRICULUM_AGENT_TIMEOUT_MS` | Optional syllabus-agent timeout (default 45000 ms, no retries) |
 | `OPENROUTER_API_KEY`, `OPENROUTER_BASE_URL`, `MODEL_*` | Agent Hive reasoning/generation |
 | `HIVE_MONITOR_SECRET` | Head-of-Desk server-to-server auth |
 | `DAILY_ENABLE_CLOUD_RECORDING` | Daily cloud-recording opt-in |
@@ -153,19 +154,33 @@ Fresh databases apply all migrations normally with `npx prisma migrate deploy`.
 |---|---|---|
 | 1 | E.164 phone normalization, time-boxed Daily/Stream tokens, chat moderation (`afb23e5`) | ✅ Completed |
 | 2 | Teacher-welcome WhatsApp normalization, Prisma migration sync, `.env.example` (`2ce50ad`) | ✅ Completed |
-| 3 | GitHub Actions CI + distributed rate limiting on Upstash Redis | ✅ Completed |
+| 3 | GitHub Actions CI + distributed rate limiting on Upstash Redis (`f50e01d`, `93139be`) | ✅ Completed |
+| 4 | Production 503 prevention, classroom-sized auth limit, serverless-safe curriculum agent & storage | ✅ Completed |
 
-### Rate limiting (Sprint 3)
+### Rate limiting (Sprints 3–4)
 
 - `lib/security/rate-limit.ts` — `checkRateLimit(req, "auth" | "api")`, Upstash sliding window keyed by
   `path + client IP` (first `x-forwarded-for` hop, then `x-real-ip`).
-  - `auth`: 5 requests / 60 s — `/api/login`, `/api/register`, `/api/auth/*`.
+  - `auth`: 15 requests / 60 s — `/api/login`, `/api/register`, `/api/auth/*` (sized for a classroom behind
+    one school NAT IP; raised from 5 in Sprint 4).
   - `api`: 30 requests / 60 s — `/api/leads`.
 - `middleware.ts` returns `429` JSON + `Retry-After` when a limit is exceeded. `/api/cron/*` is fully exempt.
+  It never returns `503` for rate-limiter problems.
 - The per-instance in-memory `Map` limiter (`lib/rate-limit.ts`) was **removed**; no rate-limit state lives
   in instance memory anymore.
-- Failure policy: Redis unset outside production → bypass + one-time `console.warn`; Redis unset in
-  production → `503` (fail closed); Redis runtime error/timeout → allow + `console.error`.
+- Failure policy (monitored fail-open since Sprint 4):
+  - Redis unset outside production → bypass + one-time `console.warn`.
+  - Redis unset in production, or a Redis runtime error → request allowed, result flagged `degraded`, and
+    `console.error("[rate-limit] DEGRADED …")` at most once per minute per instance — alert on that string.
+
+### Serverless hardening (Sprint 4)
+
+- `lib/curriculum-agent.ts` no longer loads `agents_hive/.env` via dotenv; config is read per call from the
+  platform env. OpenRouter calls use a 45 s timeout (`CURRICULUM_AGENT_TIMEOUT_MS`) with `maxRetries: 0`,
+  and timeouts return a clear error instead of hanging the admin route.
+- `lib/storage.ts` — the `public/uploads` local-disk fallback for board images runs only in development.
+  On Vercel / Lambda / Netlify or in production without Supabase, `uploadBoardImage` throws a clear
+  configuration error instead of attempting a write to the read-only filesystem.
 
 ### CI (`.github/workflows/ci.yml`)
 

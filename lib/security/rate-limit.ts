@@ -14,14 +14,18 @@ export type RateLimitResult = {
   remaining: number;
   /** Unix epoch (ms) when the current window resets. */
   reset: number;
-  /** True when no limiter ran (exempt path, or Redis unset outside production). */
+  /** True when no limiter ran (exempt path, Redis unset, or Redis error). */
   bypassed: boolean;
-  /** True when the request was denied because the limiter is not configured in production. */
-  unavailable: boolean;
+  /** True when the limiter should have run but could not (fail-open in production or Redis error). */
+  degraded: boolean;
 };
 
+/**
+ * `auth` is sized for a classroom logging in together from one school NAT IP;
+ * the key is per path + IP, so each auth endpoint has its own budget.
+ */
 export const RATE_LIMITS: Record<RateLimitType, { requests: number; window: `${number} s` }> = {
-  auth: { requests: 5, window: "60 s" },
+  auth: { requests: 15, window: "60 s" },
   api: { requests: 30, window: "60 s" },
 };
 
@@ -30,8 +34,20 @@ const RATE_LIMIT_EXEMPT_PREFIXES = ["/api/cron/"] as const;
 /** Upper bound on added latency per request; Upstash allows the request on timeout. */
 const REDIS_TIMEOUT_MS = 2000;
 
+/** Degraded-mode errors are re-logged at most this often per instance (log-based alerting). */
+export const DEGRADED_ALERT_INTERVAL_MS = 60_000;
+
 let limiters: { key: string; byType: Record<RateLimitType, Ratelimit> } | null = null;
 let warnedMissingConfig = false;
+let lastDegradedAlertAt = Number.NEGATIVE_INFINITY;
+
+function alertDegraded(message: string, error?: unknown): void {
+  const now = Date.now();
+  if (now - lastDegradedAlertAt < DEGRADED_ALERT_INTERVAL_MS) return;
+  lastDegradedAlertAt = now;
+  if (error === undefined) console.error(message);
+  else console.error(message, error);
+}
 
 export function isRateLimitExempt(pathname: string): boolean {
   return RATE_LIMIT_EXEMPT_PREFIXES.some((prefix) => pathname.startsWith(prefix));
@@ -76,7 +92,7 @@ function passThrough(type: RateLimitType): RateLimitResult {
     remaining: requests,
     reset: Date.now(),
     bypassed: true,
-    unavailable: false,
+    degraded: false,
   };
 }
 
@@ -90,13 +106,10 @@ export async function checkRateLimit(
   const byType = getLimiters();
   if (!byType) {
     if (process.env.NODE_ENV === "production") {
-      if (!warnedMissingConfig) {
-        warnedMissingConfig = true;
-        console.error(
-          "[rate-limit] UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN are not set in production — denying rate-limited requests"
-        );
-      }
-      return { ...passThrough(type), success: false, remaining: 0, bypassed: false, unavailable: true };
+      alertDegraded(
+        "[rate-limit] DEGRADED: UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN are not set in production — failing open (requests are NOT rate limited)"
+      );
+      return { ...passThrough(type), degraded: true };
     }
     if (!warnedMissingConfig) {
       warnedMissingConfig = true;
@@ -110,9 +123,9 @@ export async function checkRateLimit(
   const identifier = `${pathname}:${getClientIp(req)}`;
   try {
     const { success, limit, remaining, reset } = await byType[type].limit(identifier);
-    return { success, limit, remaining, reset, bypassed: false, unavailable: false };
+    return { success, limit, remaining, reset, bypassed: false, degraded: false };
   } catch (error) {
-    console.error("[rate-limit] Upstash Redis error — allowing request:", error);
-    return passThrough(type);
+    alertDegraded("[rate-limit] DEGRADED: Upstash Redis error — failing open:", error);
+    return { ...passThrough(type), degraded: true };
   }
 }

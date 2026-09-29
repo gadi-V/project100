@@ -54,12 +54,6 @@ export async function middleware(request: NextRequest) {
   const rateLimitType = rateLimitTypeForPath(pathname);
   if (rateLimitType) {
     const limited = await checkRateLimit(request, rateLimitType);
-    if (limited.unavailable) {
-      return NextResponse.json(
-        { error: "Service Unavailable" },
-        { status: 503, headers: { "Retry-After": "60" } }
-      );
-    }
     if (!limited.success) {
       const retryAfter = Math.max(1, Math.ceil((limited.reset - Date.now()) / 1000));
       return NextResponse.json(

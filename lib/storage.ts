@@ -34,6 +34,17 @@ function getSupabaseStorageConfig(): SupabaseStorageConfig | null {
   };
 }
 
+/**
+ * Local `public/uploads` fallback is dev-only: serverless filesystems are
+ * read-only, and files written at runtime are never served in production.
+ */
+export function canUseLocalDiskStorage(): boolean {
+  const isServerless = Boolean(
+    process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NETLIFY
+  );
+  return !isServerless && process.env.NODE_ENV !== "production";
+}
+
 function publicObjectUrl(cfg: SupabaseStorageConfig, objectPath: string): string {
   return `${cfg.url}/storage/v1/object/public/${cfg.bucket}/${objectPath}`;
 }
@@ -116,7 +127,8 @@ export async function uploadLessonPdf(
 
 /**
  * Upload a whiteboard image (webp/jpeg/png) and return a resolvable URL.
- * Falls back to a local `/uploads/board/…` path when Supabase is not configured.
+ * Without Supabase: local `/uploads/board/…` in development only; throws on
+ * serverless / production instead of writing to disk.
  */
 export async function uploadBoardImage(
   imageId: string,
@@ -129,6 +141,11 @@ export async function uploadBoardImage(
   const cfg = getSupabaseStorageConfig();
 
   if (!cfg) {
+    if (!canUseLocalDiskStorage()) {
+      throw new Error(
+        "Board image storage is not configured: set SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY (local disk writes are disabled on serverless/production)"
+      );
+    }
     const { mkdir, writeFile } = await import("fs/promises");
     const path = await import("path");
     const dir = path.join(process.cwd(), "public", "uploads", "board");
