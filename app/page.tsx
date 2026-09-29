@@ -178,7 +178,7 @@ export default function HomePage() {
           <span className="text-xs font-bold tracking-widest text-[#6e6e73] uppercase block">נבחרת המרצים</span>
           <h2 className="text-4xl font-black text-[#1d1d1f] tracking-tight">מורים בעלי תוצאות מוכחות בשטח</h2>
           <p className="text-xs font-bold text-[#6e6e73] max-w-xl">
-            כל המורים בפלטפורמה נבחרו בקפידה ועברו תהליך סינון קשוח ומסלול הכשרה פדגוגי מקיף בארגון. התאמה אישית לפי 5 נתיבי למידה ממוקדים: מסגירת פערים ועד להצטיינות.
+            כל המורים בפלטפורמה עברו סינון קפדני והכשרה מעשית בהוראה 1-על-1. התאמה אישית לפי 5 נתיבי למידה ממוקדים: מסגירת פערים ועד להצטיינות.
           </p>
         </div>
 
