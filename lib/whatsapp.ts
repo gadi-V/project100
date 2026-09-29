@@ -3,6 +3,8 @@
  * Bidirectional chat stays in-app (Stream Chat); never relay participant phones.
  */
 
+import { normalizeToE164, normalizeToWhatsAppJid } from "./utils/phone";
+
 function getAppUrl(): string {
   return (
     process.env.APP_URL?.replace(/\/$/, "") ||
@@ -18,13 +20,17 @@ function getWhatsAppConfig(): { apiUrl: string; apiKey: string } | null {
   return { apiUrl: apiUrl.replace(/\/$/, ""), apiKey };
 }
 
-function normalizeWhatsAppPhone(phone: string): string {
-  return phone.replace(/[\s\-()+/]/g, "").trim();
+/** Personal numbers → `972XXXXXXXXX@c.us`; existing group JIDs (`…@g.us`) pass through. */
+function resolveWhatsAppRecipient(target: string): { phone: string; chatId: string } {
+  const trimmed = target.trim();
+  const chatId = trimmed.endsWith("@g.us") ? trimmed : normalizeToWhatsAppJid(trimmed);
+  return { phone: chatId.slice(0, chatId.indexOf("@")), chatId };
 }
 
 export async function sendWhatsAppText(phone: string, message: string): Promise<void> {
   const config = getWhatsAppConfig();
-  const chatId = normalizeWhatsAppPhone(phone);
+  const recipient = resolveWhatsAppRecipient(phone);
+  const chatId = recipient.chatId;
 
   if (!config) {
     console.log("================== MOCK WHATSAPP (text) ==================");
@@ -41,8 +47,8 @@ export async function sendWhatsAppText(phone: string, message: string): Promise<
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      phone: chatId,
-      chatId: `${chatId}@c.us`,
+      phone: recipient.phone,
+      chatId,
       message,
     }),
   });
@@ -60,7 +66,8 @@ async function sendWhatsAppDocument(
   fileName = "board-summary.pdf"
 ): Promise<void> {
   const config = getWhatsAppConfig();
-  const chatId = normalizeWhatsAppPhone(phone);
+  const recipient = resolveWhatsAppRecipient(phone);
+  const chatId = recipient.chatId;
 
   if (!config) {
     console.log("================== MOCK WHATSAPP (document) ==================");
@@ -72,8 +79,8 @@ async function sendWhatsAppDocument(
   }
 
   const form = new FormData();
-  form.append("phone", chatId);
-  form.append("chatId", `${chatId}@c.us`);
+  form.append("phone", recipient.phone);
+  form.append("chatId", chatId);
   form.append("caption", caption);
   form.append(
     "file",
@@ -333,7 +340,7 @@ export async function createWhatsAppQuadGroup(
     .filter((m) => m.phone?.trim())
     .map((m) => ({
       role: m.role,
-      phone: normalizeWhatsAppPhone(m.phone),
+      phone: normalizeToE164(m.phone).slice(1),
       name: m.name?.trim() || null,
     }));
 
@@ -411,7 +418,6 @@ export type QuadLessonSummaryInput = {
  * Optimizes cost and keeps student, parent, teacher, and manager completely aligned.
  */
 export async function dispatchQuadLessonSummary({
-  groupUrl,
   groupChatId,
   studentName,
   teacherName,
@@ -421,7 +427,10 @@ export async function dispatchQuadLessonSummary({
   pdfUrl,
   videoStreamingUrl,
 }: QuadLessonSummaryInput): Promise<void> {
-  const targetId = groupChatId || groupUrl || "quad-group";
+  if (!groupChatId?.trim().endsWith("@g.us")) {
+    throw new Error("dispatchQuadLessonSummary requires a WhatsApp group chat id (…@g.us)");
+  }
+  const targetId = groupChatId.trim();
   const topicsPart =
     topicsMastered && topicsMastered.length > 0
       ? `\nנושאים ומיומנויות שתורגלו בהצלחה:\n• ${topicsMastered.join("\n• ")}\n`
@@ -728,12 +737,12 @@ export async function dispatchWhatsAppCloser(
         members: [
           {
             role: "ADMIN",
-            phone: process.env.WHATSAPP_ADMIN_PHONE || "0000000000",
+            phone: process.env.WHATSAPP_ADMIN_PHONE?.trim() ?? "",
             name: "מנהל פדגוגי",
           },
           {
             role: "TEACHER",
-            phone: process.env.WHATSAPP_TEACHER_PLACEHOLDER_PHONE || "0000000001",
+            phone: process.env.WHATSAPP_TEACHER_PLACEHOLDER_PHONE?.trim() ?? "",
             name: teacherName || "מורה מומחה (ישובץ בהמשך)",
           },
           {

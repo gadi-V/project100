@@ -1,11 +1,15 @@
 import { StreamChat } from "stream-chat";
 import {
   STREAM_EMAIL_BLOCK_PATTERNS,
+  STREAM_LINK_BLOCK_PATTERNS,
   STREAM_PHONE_BLOCK_PATTERNS,
 } from "./chat-moderation";
 
 const PRIVACY_PHONE_BLOCKLIST = "project8_phone_pii";
 const PRIVACY_EMAIL_BLOCKLIST = "project8_email_pii";
+const PRIVACY_LINK_BLOCKLIST = "project8_external_links";
+
+export const STREAM_TOKEN_TTL_SECONDS = 4 * 60 * 60;
 
 let streamClient: StreamChat | null = null;
 let moderationReady: Promise<void> | null = null;
@@ -49,12 +53,13 @@ export function streamChannelIdForPackage(packageId: string): string {
   return `package-${packageId}`;
 }
 
-/** Standard user JWT for connecting the browser SDK. */
+/** User JWT for connecting the browser SDK; hard-expires 4 hours after issuance. */
 export function generateStreamToken(userId: string): string {
   if (!hasStreamCredentials()) {
     return `mock-stream-token-${userId}`;
   }
-  return getStreamServerClient().createToken(userId);
+  const exp = Math.floor(Date.now() / 1000) + STREAM_TOKEN_TTL_SECONDS;
+  return getStreamServerClient().createToken(userId, exp);
 }
 
 async function ensureBlockList(
@@ -97,15 +102,22 @@ export async function ensureStreamPrivacyModeration(): Promise<void> {
         STREAM_EMAIL_BLOCK_PATTERNS,
         "regex"
       );
+      await ensureBlockList(
+        client,
+        PRIVACY_LINK_BLOCKLIST,
+        STREAM_LINK_BLOCK_PATTERNS,
+        "regex"
+      );
 
       try {
-        // Attach both privacy blocklists to messaging channels (mask/block PII server-side).
+        // Attach privacy blocklists to messaging channels (block PII / external links server-side).
         await client.updateChannelType("messaging", {
           automod: "simple",
           automod_behavior: "flag",
           blocklists: [
             { blocklist: PRIVACY_PHONE_BLOCKLIST, behavior: "block" },
             { blocklist: PRIVACY_EMAIL_BLOCKLIST, behavior: "block" },
+            { blocklist: PRIVACY_LINK_BLOCKLIST, behavior: "block" },
           ],
         });
       } catch (error) {

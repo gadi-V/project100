@@ -9,9 +9,9 @@ globs:
 # Daily.co & image.pngRecording Security
 
 - Dynamic Meeting Tokens:
-  - Meeting tokens must be time-boxed dynamically to the lesson schedule:
-    * `nbf` (Not Before): `scheduledAt` minus 10 minutes.
-    * `exp` (Expiration): `scheduledAt` + `durationMinutes` + 10% grace buffer (no rigid 2-hour cap to support 60/120/180 min lessons).
+  - Every meeting token MUST be time-boxed to the lesson schedule (never issue a token without `nbf`/`exp`):
+    * `nbf` (Not Before): `scheduledAt` minus 15 minutes.
+    * `exp` (Expiration): `scheduledAt` + `durationMinutes` + 30-minute max extension (no rigid 2-hour cap to support 60/120/180 min lessons).
 - Tutor vs Student Permissions:
   - Tutor / Manager / Admin token: `is_owner: true` (screen sharing, auto cloud recording).
   - Student token: `is_owner: false` (join-only participant).

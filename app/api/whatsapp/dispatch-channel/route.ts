@@ -202,12 +202,12 @@ export async function POST(request: NextRequest) {
           members: [
             {
               role: "ADMIN",
-              phone: manager?.phone || process.env.WHATSAPP_ADMIN_PHONE || "0000000000",
+              phone: manager?.phone || process.env.WHATSAPP_ADMIN_PHONE?.trim() || "",
               name: manager?.name || "מנהל פדגוגי",
             },
             {
               role: "TEACHER",
-              phone: process.env.WHATSAPP_TEACHER_PLACEHOLDER_PHONE || "0000000001",
+              phone: process.env.WHATSAPP_TEACHER_PLACEHOLDER_PHONE?.trim() || "",
               name: "מורה מומחה (ישובץ בהמשך)",
             },
             {

@@ -61,7 +61,10 @@ export default async function LessonPage(props: {
       user.role === "ADMIN";
 
     try {
-      dailyToken = await generateDailyToken(roomName, isOwner, user.id);
+      dailyToken = await generateDailyToken(roomName, isOwner, user.id, {
+        scheduledAt: lesson.scheduledAt,
+        durationMinutes: lesson.durationMinutes ?? 60,
+      });
     } catch (error) {
       console.error("Failed to generate Daily meeting token:", error);
     }

@@ -162,54 +162,72 @@ export async function createDailyRoom(
   };
 }
 
+export const DAILY_TOKEN_EARLY_JOIN_MINUTES = 15;
+export const DAILY_TOKEN_MAX_EXTENSION_MINUTES = 30;
+const DEFAULT_LESSON_DURATION_MINUTES = 60;
+
 /**
- * Meeting token for a participant.
+ * Hard join window for a lesson meeting token (Unix seconds):
+ * - `nbf`: scheduledAt − 15 minutes.
+ * - `exp`: scheduledAt + durationMinutes + 30-minute max extension.
+ */
+export function computeDailyTokenWindow(
+  scheduledAt: Date,
+  durationMinutes: number = DEFAULT_LESSON_DURATION_MINUTES
+): { nbf: number; exp: number } {
+  const start = scheduledAt.getTime();
+  if (!Number.isFinite(start)) {
+    throw new Error("computeDailyTokenWindow: scheduledAt is not a valid date");
+  }
+  const duration =
+    Number.isFinite(durationMinutes) && durationMinutes > 0
+      ? durationMinutes
+      : DEFAULT_LESSON_DURATION_MINUTES;
+
+  const nbfMs = start - DAILY_TOKEN_EARLY_JOIN_MINUTES * 60 * 1000;
+  const expMs = start + (duration + DAILY_TOKEN_MAX_EXTENSION_MINUTES) * 60 * 1000;
+
+  return {
+    nbf: Math.floor(nbfMs / 1000),
+    exp: Math.floor(expMs / 1000),
+  };
+}
+
+/**
+ * Meeting token for a participant, always time-boxed to the lesson window
+ * (see `computeDailyTokenWindow`).
  * - Teacher / owner: is_owner + start_cloud_recording (background auto-record)
  * - Student: join-only token (no recording permissions / UI)
- *
- * When `scheduledAt` is provided, the token is bound to the lesson window:
- * - `nbf` (join opens): scheduledAt − 10 minutes (Unix seconds).
- * - `bufferMinutes`: ceil(10% of duration) grace period.
- * - `exp` (full expiry): scheduledAt + (durationMinutes + bufferMinutes) minutes.
- * No arbitrary 2-hour cap — supports double/triple lessons (120/180 min).
  */
 export async function generateDailyToken(
   roomName: string,
   isOwner: boolean,
   userId: string,
   options: {
-    /** Lesson scheduled start. When provided, the token is time-boxed to the lesson window. */
-    scheduledAt?: Date;
+    /** Lesson scheduled start. */
+    scheduledAt: Date;
     /** Planned lesson duration in minutes. Defaults to 60. */
     durationMinutes?: number;
-  } = {}
+  }
 ): Promise<string> {
   if (!getDailyApiKey()) {
     return `mock-daily-token-${roomName}-${userId}-${isOwner ? "owner" : "guest"}`;
   }
 
-  const DEFAULT_DURATION_MINUTES = 60;
-  const durationMinutes = options.durationMinutes ?? DEFAULT_DURATION_MINUTES;
-  const bufferMinutes = Math.ceil(durationMinutes * 0.1);
+  const { nbf, exp } = computeDailyTokenWindow(
+    options.scheduledAt,
+    options.durationMinutes ?? DEFAULT_LESSON_DURATION_MINUTES
+  );
 
   const properties: Record<string, unknown> = {
     room_name: roomName,
     user_id: userId,
     is_owner: isOwner,
+    nbf,
+    exp,
     // Auto cloud recording starts when the owner (teacher) joins — no client record button.
     ...(isOwner ? { start_cloud_recording: true, enable_recording: "cloud" } : {}),
   };
-
-  if (options.scheduledAt) {
-    const scheduledAt = options.scheduledAt;
-    const nbf = new Date(scheduledAt.getTime() - 10 * 60 * 1000);
-    const exp = new Date(
-      scheduledAt.getTime() + (durationMinutes + bufferMinutes) * 60 * 1000
-    );
-
-    properties.nbf = Math.floor(nbf.getTime() / 1000);
-    properties.exp = Math.floor(exp.getTime() / 1000);
-  }
 
   const result = await dailyFetch<{ token: string }>("/meeting-tokens", {
     method: "POST",

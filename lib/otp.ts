@@ -3,6 +3,8 @@
  * Production SMS via Twilio (or compatible REST). Console fallback in development only.
  */
 
+import { normalizeToE164 } from "./utils/phone";
+
 export function normalizePhone(raw: string): string {
   return raw.replace(/[\s\-()]/g, "").trim();
 }
@@ -29,7 +31,7 @@ async function sendViaTwilio(phone: string, message: string): Promise<SmsProvide
     throw new Error("Twilio env not configured");
   }
 
-  const to = phone.startsWith("+") ? phone : `+${phone.replace(/^\+/, "")}`;
+  const to = normalizeToE164(phone);
   const body = new URLSearchParams({ To: to, From: from, Body: message });
 
   const response = await fetch(
