@@ -1,5 +1,26 @@
 @import "tailwindcss";
 
+/* Site-wide type scale: every Tailwind text size is +3px over the default. */
+@theme {
+  --text-xs: calc(0.75rem + 3px);
+  --text-sm: calc(0.875rem + 3px);
+  --text-base: calc(1rem + 3px);
+  --text-lg: calc(1.125rem + 3px);
+  --text-xl: calc(1.25rem + 3px);
+  --text-2xl: calc(1.5rem + 3px);
+  --text-3xl: calc(1.875rem + 3px);
+  --text-4xl: calc(2.25rem + 3px);
+  --text-5xl: calc(3rem + 3px);
+  --text-6xl: calc(3.75rem + 3px);
+  --text-7xl: calc(4.5rem + 3px);
+  --text-8xl: calc(6rem + 3px);
+  --text-9xl: calc(8rem + 3px);
+}
+
+body {
+  font-size: var(--text-base);
+}
+
 /* -------------------------------------------------------------------------- */
 /* Ambient canvas base — orbs in AmbientCanvas sit above this tone */
 /* -------------------------------------------------------------------------- */

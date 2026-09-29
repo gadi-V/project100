@@ -227,7 +227,7 @@ export default function AdminLessonsPage() {
         <div className={`${ledgerCard} p-5`}>
           <div className="mb-4 flex flex-wrap items-start justify-between gap-3 border-b border-neutral-800 pb-3">
             <div>
-              <p className="text-[10px] font-medium uppercase tracking-widest text-neutral-400">
+              <p className="text-[13px] font-medium uppercase tracking-widest text-neutral-400">
                 Ledger control
               </p>
               <h2 className="mt-1 text-base font-semibold text-neutral-50">
@@ -238,9 +238,9 @@ export default function AdminLessonsPage() {
               </p>
             </div>
             {selected && (
-              <div className="rounded-xl border border-neutral-700 bg-neutral-900 px-3 py-2 text-[11px] text-neutral-200">
+              <div className="rounded-xl border border-neutral-700 bg-neutral-900 px-3 py-2 text-[14px] text-neutral-200">
                 <p className="font-medium text-neutral-50">שיעור נבחר</p>
-                <p className="font-mono text-[10px] text-neutral-400">{selected.id}</p>
+                <p className="font-mono text-[13px] text-neutral-400">{selected.id}</p>
                 <p>
                   {selected.student.name ?? "תלמיד"} · {selected.teacher.name ?? "מורה"}
                 </p>
@@ -268,7 +268,7 @@ export default function AdminLessonsPage() {
               {actionLoading === "cancel" ? "מבטל..." : "ביטול שיעור ללא קנס"}
             </button>
           </div>
-          <p className="mt-3 text-[11px] text-neutral-500">
+          <p className="mt-3 text-[14px] text-neutral-500">
             לאחר פיצוי מוצלח יוצג toast עם{" "}
             <span className="font-mono text-neutral-300">transactionId</span> מ־BillingLedger.
           </p>
@@ -310,7 +310,7 @@ export default function AdminLessonsPage() {
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full min-w-[720px] text-start text-sm">
-                <thead className="bg-neutral-50/80 text-[11px] font-medium uppercase tracking-wide text-neutral-500">
+                <thead className="bg-neutral-50/80 text-[14px] font-medium uppercase tracking-wide text-neutral-500">
                   <tr className="border-b border-neutral-100">
                     <th className="px-5 py-4 text-start">בחירה</th>
                     <th className="px-5 py-4 text-start">מועד</th>
@@ -350,7 +350,7 @@ export default function AdminLessonsPage() {
                           <p className="font-medium text-neutral-900">
                             {lesson.student.name || "ללא שם"}
                           </p>
-                          <p className="font-mono text-[10px] text-neutral-400">
+                          <p className="font-mono text-[13px] text-neutral-400">
                             {lesson.studentId}
                           </p>
                         </td>
@@ -358,7 +358,7 @@ export default function AdminLessonsPage() {
                           <p className="font-medium text-neutral-900">
                             {lesson.teacher.name || "ללא שם"}
                           </p>
-                          <p className="text-[10px] text-neutral-400">
+                          <p className="text-[13px] text-neutral-400">
                             {lesson.teacher.phone || "—"}
                           </p>
                         </td>

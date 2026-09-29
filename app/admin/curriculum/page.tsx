@@ -281,7 +281,7 @@ export default function AdminCurriculumPage() {
                           <span className="text-sm font-semibold text-neutral-900 block truncate">
                             {t.topicName}
                           </span>
-                          <span className="text-[11px] font-medium text-neutral-500">
+                          <span className="text-[14px] font-medium text-neutral-500">
                             {t.subject} · {GRADE_LABELS[t.gradeLevel]}
                           </span>
                         </div>
@@ -358,7 +358,7 @@ export default function AdminCurriculumPage() {
                           <span className="text-sm font-semibold text-neutral-900">
                             {group.subject}
                           </span>
-                          <span className="ms-2 text-[11px] font-medium text-neutral-500">
+                          <span className="ms-2 text-[14px] font-medium text-neutral-500">
                             {GRADE_LABELS[group.gradeLevel as GradeLevel] ?? group.gradeLevel}
                           </span>
                         </div>
@@ -433,7 +433,7 @@ export default function AdminCurriculumPage() {
                                     </span>
                                   ))}
                                   {topic.teacherNames.length > 6 && (
-                                    <span className="text-[10px] font-medium text-neutral-500">
+                                    <span className="text-[13px] font-medium text-neutral-500">
                                       +{topic.teacherNames.length - 6} נוספים
                                     </span>
                                   )}

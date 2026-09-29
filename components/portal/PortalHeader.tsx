@@ -158,7 +158,7 @@ function QuickStudentSearch() {
                     }`}
                   >
                     <span className="text-xs font-medium text-neutral-900 truncate">{student.fullName}</span>
-                    <span className="text-[11px] text-neutral-500 shrink-0" dir="ltr">
+                    <span className="text-[14px] text-neutral-500 shrink-0" dir="ltr">
                       {student.phone}
                     </span>
                   </button>
@@ -169,7 +169,7 @@ function QuickStudentSearch() {
           <Link
             href={`/portal/students?search=${encodeURIComponent(query.trim())}`}
             onClick={() => setOpen(false)}
-            className="block border-t border-neutral-100 px-4 py-2 text-[11px] font-medium text-neutral-600 hover:bg-neutral-50"
+            className="block border-t border-neutral-100 px-4 py-2 text-[14px] font-medium text-neutral-600 hover:bg-neutral-50"
           >
             לכל התוצאות ברשימת הלקוחות
           </Link>
@@ -226,7 +226,7 @@ export default function PortalHeader({ userName, role }: PortalHeaderProps) {
           <QuickStudentSearch />
           <span className="hidden md:flex flex-col items-end leading-tight shrink-0">
             <span className="text-xs font-medium text-neutral-800">{userName}</span>
-            <span className="text-[11px] text-neutral-500">{STAFF_ROLE_LABELS[role] ?? ""}</span>
+            <span className="text-[14px] text-neutral-500">{STAFF_ROLE_LABELS[role] ?? ""}</span>
           </span>
           <button
             type="button"

@@ -477,7 +477,7 @@ export default function StudentRegisterPage() {
                     <div className="text-xs font-black text-[#1d1d1f]">
                       מרתון ממוקד בטווח הקצר
                     </div>
-                    <div className="text-[11px] text-[#6e6e73] mt-0.5">
+                    <div className="text-[14px] text-[#6e6e73] mt-0.5">
                       הכנה אינטנסיבית לקראת מבחן קרוב.
                     </div>
                   </button>
@@ -494,7 +494,7 @@ export default function StudentRegisterPage() {
                     <div className="text-xs font-black text-[#1d1d1f]">
                       ליווי סמסטריאלי / שנתי שוטף
                     </div>
-                    <div className="text-[11px] text-[#6e6e73] mt-0.5">
+                    <div className="text-[14px] text-[#6e6e73] mt-0.5">
                       סגירת פערים עקבית ובניית ביטחון ארוך טווח.
                     </div>
                   </button>
@@ -540,7 +540,7 @@ export default function StudentRegisterPage() {
                     }`}
                   >
                     <div className="text-xs font-black text-[#1d1d1f]">{card.title}</div>
-                    <div className="text-[11px] text-[#6e6e73] mt-1">{card.desc}</div>
+                    <div className="text-[14px] text-[#6e6e73] mt-1">{card.desc}</div>
                   </button>
                 ))}
               </div>
@@ -582,7 +582,7 @@ export default function StudentRegisterPage() {
                     dir="ltr"
                   />
                 </div>
-                <p className="text-[11px] font-bold text-[#6e6e73] bg-[#f5f5f7] p-3 rounded-xl border border-slate-200">
+                <p className="text-[14px] font-bold text-[#6e6e73] bg-[#f5f5f7] p-3 rounded-xl border border-slate-200">
                   החשבון ייפתח כתלמיד/ה (STUDENT) ויועבר לדאשבורד התלמיד.
                 </p>
               </div>

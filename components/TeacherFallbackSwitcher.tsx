@@ -61,7 +61,7 @@ export default function TeacherFallbackSwitcher({
               ? "אין שעות פנויות למורה בשבוע זה"
               : "רוצה לבדוק מורה אחר?"}
           </h3>
-          <p className="text-[11px] text-neutral-500 mt-0.5">
+          <p className="text-[14px] text-neutral-500 mt-0.5">
             מורים נוספים שמתאימים למקצוע שלך. בחירה תציג את השעות שלהם בלוח.
           </p>
         </div>
@@ -69,7 +69,7 @@ export default function TeacherFallbackSwitcher({
           type="button"
           disabled={busy}
           onClick={() => setManualOpen((v) => !v)}
-          className={`${secondaryCta} self-start text-[11px] py-2 px-3`}
+          className={`${secondaryCta} self-start text-[14px] py-2 px-3`}
         >
           {isOpen && !forceOpen ? "סגור חיפוש" : "החלף מורה"}
         </button>
@@ -120,7 +120,7 @@ export default function TeacherFallbackSwitcher({
                     )}
                   </div>
                   {teacher.subjects.length > 0 && (
-                    <div className="text-[10px] text-neutral-500 mt-1.5 truncate">
+                    <div className="text-[13px] text-neutral-500 mt-1.5 truncate">
                       {teacher.subjects.slice(0, 2).join(" · ")}
                     </div>
                   )}

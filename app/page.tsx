@@ -55,10 +55,10 @@ export default function HomePage() {
         <div className="md:col-span-7 space-y-6 text-right">
           <span className="text-sm font-black tracking-widest text-[#0071e3] uppercase block">הסוף לחיפוש מורים</span>
           <h1 dir="ltr" className="text-4xl sm:text-6xl font-black text-[#1d1d1f] tracking-tight leading-none text-right">
-            <span className="text-[31px] sm:text-[55px] text-blue-950">PROJECT</span>
+            <span className="text-[34px] sm:text-[58px] text-blue-950">PROJECT</span>
             <span className="text-[#3987ec]">100</span>
           </h1>
-          <h2 className="text-[15px] sm:text-[21px] font-bold text-[#6e6e73] tracking-tight leading-tight">
+          <h2 className="text-[18px] sm:text-[24px] font-bold text-[#6e6e73] tracking-tight leading-tight">
             פלטפורמת למידה מרחוק למקצועות וקורסים מתיכון ועד אקדמיה
           </h2>
           <div className="pt-4 flex flex-col sm:flex-row gap-4">
@@ -100,7 +100,7 @@ export default function HomePage() {
             {/* קוביה 1: גדולה ומרכזית (רוחב 7 מתוך 12) - משלבת טקסט וצילום ממשק */}
             <div className="md:col-span-7 liquid-glass rounded-3xl overflow-hidden flex flex-col justify-between hover:shadow-md transition-all group">
               <div className="p-8 space-y-2">
-                <span className="text-[11px] font-black text-[#0071e3] tracking-wider uppercase">קביעת שיעור בלייב</span>
+                <span className="text-[14px] font-black text-[#0071e3] tracking-wider uppercase">קביעת שיעור בלייב</span>
                 <h4 className="text-xl font-black text-[#1d1d1f]">גישה ישירה ללו&quot;ז המורה</h4>
                 <p className="text-xs font-bold text-[#6e6e73] max-w-md leading-relaxed">
                   מערכת קביעת שיעורים עצמאית לחלוטין. רואים חלונות זמן פנויים, בוחרים קליק, ומשריינים מפגש בלייב
@@ -126,7 +126,7 @@ export default function HomePage() {
             {/* קוביה 2: צרה וגבוהה (רוחב 5 מתוך 12) - ממוקדת לו"ז */}
             <div className="md:col-span-5 liquid-glass rounded-3xl p-8 flex flex-col justify-between hover:shadow-md transition-all">
               <div className="space-y-2">
-                <span className="text-[11px] font-black text-[#0071e3] tracking-wider uppercase">מגוון רחב של תחומים</span>
+                <span className="text-[14px] font-black text-[#0071e3] tracking-wider uppercase">מגוון רחב של תחומים</span>
                 <h4 className="text-xl font-black text-[#1d1d1f]">בגרות ואקדמיה תחת קורת גג אחת</h4>
                 <p className="text-xs font-bold text-[#6e6e73] leading-relaxed">
                   מענה שלם לכל מקצועות הבגרות ולכל התארים האקדמיים. התמחות מיוחדת בעולמות ההנדסה והמדעים המדויקים, המותאמת לקצב ההבנה האישי שלך.
@@ -139,21 +139,21 @@ export default function HomePage() {
             {/* קוביה 3: צרה (רוחב 5 מתוך 12) - קבוצות ווטסאפ */}
             <div className="md:col-span-5 liquid-glass rounded-3xl p-8 flex flex-col justify-between hover:shadow-md transition-all">
               <div className="space-y-2">
-                <span className="text-[11px] font-black text-[#0071e3] tracking-wider uppercase">בקרת איכות עליונה</span>
+                <span className="text-[14px] font-black text-[#0071e3] tracking-wider uppercase">בקרת איכות עליונה</span>
                 <h4 className="text-xl font-black text-[#1d1d1f]">קבוצות ווטסאפ משולשות</h4>
                 <p className="text-xs font-bold text-[#6e6e73] leading-relaxed">
                   כל שיבוץ פותח אוטומטית ערוץ תקשורת מבוקר הכולל את המורה, ההורה או הסטודנט, ונציג מלווה קבוע מטעמנו כדי לוודא שאף אחד לא הולך לאיבוד.
                 </p>
               </div>
               <div className="mt-4 flex gap-2 justify-end">
-                <span className="bg-emerald-50 text-emerald-700 text-[10px] font-black py-1 px-3 rounded-full border border-emerald-200">צ'אט בקרה פעיל</span>
+                <span className="bg-emerald-50 text-emerald-700 text-[13px] font-black py-1 px-3 rounded-full border border-emerald-200">צ'אט בקרה פעיל</span>
               </div>
             </div>
 
             {/* קוביה 4: רחבה (רוחב 7 מתוך 12) - ממוקדת בנבחרת המורים המנוסה */}
             <div className="md:col-span-7 liquid-glass rounded-3xl overflow-hidden flex flex-col justify-between hover:shadow-md transition-all group">
               <div className="p-8 space-y-2">
-                <span className="text-[11px] font-black text-[#0071e3] tracking-wider uppercase">הון אנושי עילית</span>
+                <span className="text-[14px] font-black text-[#0071e3] tracking-wider uppercase">הון אנושי עילית</span>
                 <h4 className="text-xl font-black text-[#1d1d1f]">כל המורים עברו תהליך הכשרה פדגוגי קשיח</h4>
                 <p className="text-xs font-bold text-[#6e6e73] leading-relaxed">
                   אנחנו לא אינדקס פתוח לכל אחד. נבחרת המרצים שלנו מורכבת מאנשי מקצוע שעברו סינון קפדני בן 7 שלבים, מבחני מומחיות והסמכה מקיפה בארגון.
@@ -163,7 +163,7 @@ export default function HomePage() {
               <div className="h-32 bg-slate-100/70 flex items-center justify-center text-slate-400 font-bold text-xs relative overflow-hidden">
                 {/* כאן תבוא תמונת קלוז-אפ איכותית (למשל עט דיגיטלי כותב על מסך אייפד בתוכנת GoodNotes) */}
                 <div className="absolute inset-0 bg-gradient-to-t from-slate-200/50 to-transparent" />
-                <span className="z-10 text-[10px] text-slate-500 font-mono">// צילום מאקרו: כתיבה פדגוגית חכמה על טאבלט דיגיטלי</span>
+                <span className="z-10 text-[13px] text-slate-500 font-mono">// צילום מאקרו: כתיבה פדגוגית חכמה על טאבלט דיגיטלי</span>
               </div>
             </div>
 

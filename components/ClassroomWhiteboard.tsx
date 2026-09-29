@@ -3406,7 +3406,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
                   className="block rounded-full bg-neutral-800"
                   style={{ width: [5, 8, 12][i], height: [5, 8, 12][i] }}
                 />
-                <span className="text-[10px] text-neutral-600">{wp.label}</span>
+                <span className="text-[13px] text-neutral-600">{wp.label}</span>
               </button>
             ))}
           </div>
@@ -3421,7 +3421,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
               onChange={(e) => setMm(parseFloat(e.target.value))}
               className={`flex-1 cursor-pointer ${isHl ? "accent-yellow-400" : "accent-emerald-400"}`}
             />
-            <span className="text-[10px] text-neutral-700 w-10 text-start">
+            <span className="text-[13px] text-neutral-700 w-10 text-start">
               {currentMm.toFixed(isHl ? 1 : 2)}
             </span>
           </div>
@@ -3501,8 +3501,8 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
                   height: Math.max(4, preset.diameter / 2.2),
                 }}
               />
-              <span className="text-[11px] text-neutral-700">{preset.label}</span>
-              <span className="text-[9px] text-neutral-400 ms-auto">{preset.diameter}px</span>
+              <span className="text-[14px] text-neutral-700">{preset.label}</span>
+              <span className="text-[12px] text-neutral-400 ms-auto">{preset.diameter}px</span>
             </button>
           ))}
         </div>
@@ -3514,7 +3514,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
               type="button"
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => setEraserMode(m)}
-              className={`h-8 px-2 rounded-lg text-[11px] font-bold text-start transition-all ${
+              className={`h-8 px-2 rounded-lg text-[14px] font-bold text-start transition-all ${
                 eraserMode === m
                   ? "bg-neutral-900 text-white ring-1 ring-neutral-900"
                   : "text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100"
@@ -3541,7 +3541,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
               type="button"
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => setLassoStyle(ls.value)}
-              className={`h-8 px-2 rounded-lg flex items-center gap-2 text-[11px] font-bold transition-all ${
+              className={`h-8 px-2 rounded-lg flex items-center gap-2 text-[14px] font-bold transition-all ${
                 lassoStyle === ls.value
                   ? "bg-neutral-900 text-white ring-1 ring-neutral-900"
                   : "text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100"
@@ -3697,7 +3697,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
                 className="h-8 px-2.5 shrink-0 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center justify-center gap-1 transition-all shadow-sm active:scale-95"
               >
                 <span className="text-sm leading-none">+</span>
-                <span className="text-[11px] font-semibold">A4</span>
+                <span className="text-[14px] font-semibold">A4</span>
               </button>
 
               <div className="h-4 w-px bg-neutral-200 mx-0.5" />
@@ -3708,7 +3708,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
                 onClick={exportPdfDirect}
                 className="h-8 px-2.5 shrink-0 rounded-full bg-white hover:bg-neutral-50 text-neutral-700 border border-neutral-200 text-xs font-medium flex items-center gap-1.5 transition-all shadow-sm active:scale-95"
               >
-                <span className="text-[11px]">PDF</span>
+                <span className="text-[14px]">PDF</span>
               </button>
 
               <button
@@ -3717,7 +3717,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
                 onClick={exportPngDirect}
                 className="h-8 px-2.5 shrink-0 rounded-full bg-white hover:bg-neutral-50 text-neutral-700 border border-neutral-200 text-xs font-medium flex items-center gap-1.5 transition-all shadow-sm active:scale-95"
               >
-                <span className="text-[11px]">PNG</span>
+                <span className="text-[14px]">PNG</span>
               </button>
 
               <span title={syncLabel} className="shrink-0 flex items-center ms-1">
@@ -3914,7 +3914,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
                           >
                             <button
                               type="button"
-                              className="px-2 py-1.5 text-[11px] text-neutral-700 hover:bg-neutral-100 rounded-lg text-start"
+                              className="px-2 py-1.5 text-[14px] text-neutral-700 hover:bg-neutral-100 rounded-lg text-start"
                               onMouseDown={(e) => e.preventDefault()}
                               onClick={bringSelectionToFront}
                             >
@@ -3922,7 +3922,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
                             </button>
                             <button
                               type="button"
-                              className="px-2 py-1.5 text-[11px] text-neutral-700 hover:bg-neutral-100 rounded-lg text-start"
+                              className="px-2 py-1.5 text-[14px] text-neutral-700 hover:bg-neutral-100 rounded-lg text-start"
                               onMouseDown={(e) => e.preventDefault()}
                               onClick={sendSelectionToBack}
                             >
@@ -3932,7 +3932,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
                               <>
                                 <button
                                   type="button"
-                                  className="px-2 py-1.5 text-[11px] text-neutral-700 hover:bg-neutral-100 rounded-lg text-start flex items-center justify-between"
+                                  className="px-2 py-1.5 text-[14px] text-neutral-700 hover:bg-neutral-100 rounded-lg text-start flex items-center justify-between"
                                   onMouseDown={(e) => e.preventDefault()}
                                   onClick={() => rotateSelectedImage(Math.PI / 2)}
                                 >
@@ -3940,7 +3940,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
                                 </button>
                                 <button
                                   type="button"
-                                  className="px-2 py-1.5 text-[11px] text-neutral-700 hover:bg-neutral-100 rounded-lg text-start"
+                                  className="px-2 py-1.5 text-[14px] text-neutral-700 hover:bg-neutral-100 rounded-lg text-start"
                                   onMouseDown={(e) => e.preventDefault()}
                                   onClick={toggleCropMode}
                                 >
@@ -3950,7 +3950,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
                             )}
                             <button
                               type="button"
-                              className="px-2 py-1.5 text-[11px] text-neutral-700 hover:bg-neutral-100 rounded-lg text-start"
+                              className="px-2 py-1.5 text-[14px] text-neutral-700 hover:bg-neutral-100 rounded-lg text-start"
                               onMouseDown={(e) => e.preventDefault()}
                               onClick={copySelection}
                             >
@@ -3983,14 +3983,14 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
                             title="גודל פונט"
                             onMouseDown={(e) => e.preventDefault()}
                             onClick={() => setTextMenu((p) => (p === "size" ? null : "size"))}
-                            className={`h-7 px-2 rounded-full flex items-center gap-0.5 text-[11px] font-bold transition-all ${
+                            className={`h-7 px-2 rounded-full flex items-center gap-0.5 text-[14px] font-bold transition-all ${
                               textMenu === "size"
                                 ? "bg-neutral-900 text-white ring-1 ring-neutral-900"
                                 : "text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100"
                             }`}
                           >
                             {editText.fontSize}
-                            <span className="text-[8px]">▾</span>
+                            <span className="text-[11px]">▾</span>
                           </button>
                           {textMenu === "size" && (
                             <Popover width={72}>
@@ -4004,7 +4004,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
                                       setEditText((p) => (p ? { ...p, fontSize: sz } : null));
                                       setTextMenu(null);
                                     }}
-                                    className={`h-7 rounded-lg text-[11px] font-bold transition-all ${
+                                    className={`h-7 rounded-lg text-[14px] font-bold transition-all ${
                                       editText.fontSize === sz
                                         ? "bg-neutral-900 text-white ring-1 ring-neutral-900"
                                         : "text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100"
@@ -4024,7 +4024,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
                             title="יישור"
                             onMouseDown={(e) => e.preventDefault()}
                             onClick={() => setTextMenu((p) => (p === "align" ? null : "align"))}
-                            className={`w-7 h-7 rounded-full flex items-center justify-center text-[11px] transition-all ${
+                            className={`w-7 h-7 rounded-full flex items-center justify-center text-[14px] transition-all ${
                               textMenu === "align"
                                 ? "bg-neutral-900 text-white ring-1 ring-neutral-900"
                                 : "text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100"
@@ -4050,7 +4050,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
                                       setEditText((p) => (p ? { ...p, align } : null));
                                       setTextMenu(null);
                                     }}
-                                    className={`h-7 px-2 rounded-lg flex items-center gap-2 text-[11px] transition-all ${
+                                    className={`h-7 px-2 rounded-lg flex items-center gap-2 text-[14px] transition-all ${
                                       editText.align === align
                                         ? "bg-neutral-900 text-white ring-1 ring-neutral-900"
                                         : "text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100"
@@ -4260,7 +4260,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
                 </div>
 
                 <p
-                  className="mt-2 text-[11px] font-bold select-none pointer-events-none"
+                  className="mt-2 text-[14px] font-bold select-none pointer-events-none"
                   style={{ color: "rgba(115,115,115,0.75)" }}
                 >
                   עמוד {page.pageNumber}
@@ -4302,7 +4302,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
 
             {assetsPanelOpen && (
               <div className="w-72 max-h-[min(420px,50vh)] overflow-y-auto rounded-2xl border border-neutral-200/80 bg-white/90 p-3 shadow-sm backdrop-blur-md">
-                <div className="mb-2 text-[11px] font-semibold text-neutral-500">
+                <div className="mb-2 text-[14px] font-semibold text-neutral-500">
                   הזנק ללוח A4 · PreLessonAsset
                 </div>
                 {assetsLoading ? (
@@ -4321,20 +4321,20 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
                         className="rounded-xl border border-neutral-200/80 bg-neutral-50 p-2.5"
                       >
                         <div className="mb-1.5 flex items-center gap-2">
-                          <span className="rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-900 border border-amber-100">
+                          <span className="rounded-full bg-amber-50 px-1.5 py-0.5 text-[13px] font-bold text-amber-900 border border-amber-100">
                             {asset.assetType}
                           </span>
-                          <span className="text-[10px] text-neutral-500">
+                          <span className="text-[13px] text-neutral-500">
                             {new Date(asset.createdAt).toLocaleDateString("he-IL")}
                           </span>
                         </div>
                         {asset.textContent && (
-                          <p className="mb-2 line-clamp-2 text-[11px] text-neutral-700">
+                          <p className="mb-2 line-clamp-2 text-[14px] text-neutral-700">
                             {asset.textContent}
                           </p>
                         )}
                         {asset.assetUrl && asset.assetType !== "TEXT_NOTE" && (
-                          <p className="mb-2 truncate text-[10px] text-neutral-500" title={asset.assetUrl}>
+                          <p className="mb-2 truncate text-[13px] text-neutral-500" title={asset.assetUrl}>
                             {asset.assetUrl}
                           </p>
                         )}
@@ -4342,7 +4342,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
                           type="button"
                           disabled={insertingAssetId === asset.id}
                           onClick={() => void insertPreLessonAsset(asset)}
-                          className="w-full rounded-full bg-neutral-900 px-2.5 py-1.5 text-[11px] font-bold text-white hover:bg-neutral-800 disabled:opacity-50"
+                          className="w-full rounded-full bg-neutral-900 px-2.5 py-1.5 text-[14px] font-bold text-white hover:bg-neutral-800 disabled:opacity-50"
                         >
                           {insertingAssetId === asset.id
                             ? "מזריק ללוח..."

@@ -117,12 +117,12 @@ export default function StudentTimePreferenceBar({
 
       <div className="space-y-1.5">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <label className="text-[11px] font-medium text-neutral-500">ימים</label>
+          <label className="text-[14px] font-medium text-neutral-500">ימים</label>
           <button
             type="button"
             disabled={busy}
             onClick={selectAllDays}
-            className="text-[10px] font-medium px-2.5 py-1 rounded-full border border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
+            className="text-[13px] font-medium px-2.5 py-1 rounded-full border border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
           >
             {allDaysSelected ? "בטל הכל" : "בחר הכל"}
           </button>
@@ -137,7 +137,7 @@ export default function StudentTimePreferenceBar({
                 disabled={busy}
                 aria-pressed={active}
                 onClick={() => toggleDay(day.value)}
-                className={`text-[11px] font-medium px-3 py-1.5 rounded-full border transition-all disabled:opacity-50 ${
+                className={`text-[14px] font-medium px-3 py-1.5 rounded-full border transition-all disabled:opacity-50 ${
                   active
                     ? "bg-neutral-900 border-neutral-900 text-white"
                     : "bg-white border-neutral-200 text-neutral-600 hover:border-neutral-400"
@@ -152,12 +152,12 @@ export default function StudentTimePreferenceBar({
 
       <div className="space-y-1.5">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <label className="text-[11px] font-medium text-neutral-500">שעות</label>
+          <label className="text-[14px] font-medium text-neutral-500">שעות</label>
           <button
             type="button"
             disabled={busy}
             onClick={selectAllHours}
-            className="text-[10px] font-medium px-2.5 py-1 rounded-full border border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
+            className="text-[13px] font-medium px-2.5 py-1 rounded-full border border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
           >
             {allSlotsSelected ? "בטל הכל" : "בחר הכל"}
           </button>
@@ -172,7 +172,7 @@ export default function StudentTimePreferenceBar({
                 disabled={busy}
                 aria-pressed={active}
                 onClick={() => toggleHour(hour)}
-                className={`text-[10px] sm:text-[11px] font-mono font-medium px-2 py-2 rounded-xl border transition-all disabled:opacity-50 ${
+                className={`text-[13px] sm:text-[14px] font-mono font-medium px-2 py-2 rounded-xl border transition-all disabled:opacity-50 ${
                   active
                     ? "bg-neutral-900 border-neutral-900 text-white"
                     : "bg-neutral-50 border-neutral-200 text-neutral-600 hover:border-neutral-400"
@@ -186,7 +186,7 @@ export default function StudentTimePreferenceBar({
       </div>
 
       {busy && (
-        <p className="text-[11px] text-neutral-500 text-start">מחפשים מורים פנויים...</p>
+        <p className="text-[14px] text-neutral-500 text-start">מחפשים מורים פנויים...</p>
       )}
     </div>
   );

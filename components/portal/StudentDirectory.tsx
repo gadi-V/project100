@@ -56,7 +56,7 @@ function LessonCell({ nextLessonAt, lastLessonAt }: { nextLessonAt: string | nul
   if (nextLessonAt) {
     return (
       <span className="flex flex-col">
-        <span className="text-[11px] text-neutral-500">הבא</span>
+        <span className="text-[14px] text-neutral-500">הבא</span>
         <span className="text-neutral-900">{formatIsraelDateTime(nextLessonAt)}</span>
       </span>
     );
@@ -64,7 +64,7 @@ function LessonCell({ nextLessonAt, lastLessonAt }: { nextLessonAt: string | nul
   if (lastLessonAt) {
     return (
       <span className="flex flex-col">
-        <span className="text-[11px] text-neutral-500">אחרון</span>
+        <span className="text-[14px] text-neutral-500">אחרון</span>
         <span className="text-neutral-700">{formatIsraelDateTime(lastLessonAt)}</span>
       </span>
     );
@@ -273,7 +273,7 @@ export default function StudentDirectory({
                               href={student.whatsappUrl}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="text-[11px] font-medium text-emerald-700 hover:underline underline-offset-4"
+                              className="text-[14px] font-medium text-emerald-700 hover:underline underline-offset-4"
                             >
                               WhatsApp
                             </a>

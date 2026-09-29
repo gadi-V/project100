@@ -53,7 +53,7 @@ export default function MethodFlipCards({ className = "" }: MethodFlipCardsProps
                     <span className="block text-sm font-extrabold leading-snug text-[#1d1d1f]">{item.title}</span>
                     <span
                       aria-hidden="true"
-                      className="hidden items-center gap-1 text-[11px] font-bold text-[#6e6e73] [@media(hover:none)]:flex"
+                      className="hidden items-center gap-1 text-[14px] font-bold text-[#6e6e73] [@media(hover:none)]:flex"
                     >
                       <Pointer className="h-3.5 w-3.5" strokeWidth={2} />
                       לחצו לפרטים

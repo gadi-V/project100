@@ -14,7 +14,7 @@ export default function TeacherOnboardingTimeline({ onboarding, compact = false 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
-        <p className="text-[11px] font-medium text-neutral-500">
+        <p className="text-[14px] font-medium text-neutral-500">
           מסלול קליטה · שלב {currentStep} מתוך {steps.length}
         </p>
         <span className={isFullyActive ? badgeSuccess : badgeWarning}>
@@ -55,14 +55,14 @@ export default function TeacherOnboardingTimeline({ onboarding, compact = false 
                 />
               )}
               <span
-                className={`relative z-10 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[10px] font-semibold ${dotClass}`}
+                className={`relative z-10 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[13px] font-semibold ${dotClass}`}
               >
                 {step.status === "completed" ? "✓" : step.id}
               </span>
               <div className="flex-1 pb-1 pt-0.5">
                 <p className={`text-xs leading-relaxed ${labelClass}`}>{step.label}</p>
                 {step.status === "current" && (
-                  <p className="text-[10px] text-neutral-500 mt-0.5">בטיפול כעת</p>
+                  <p className="text-[13px] text-neutral-500 mt-0.5">בטיפול כעת</p>
                 )}
               </div>
             </li>

@@ -129,7 +129,7 @@ export default function TeacherApplyPage() {
                 placeholder="https://drive.google.com/file/d/..."
                 className="w-full rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-800 outline-none focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600 transition"
               />
-              <span className="text-[11px] text-slate-400 mt-1 block">
+              <span className="text-[14px] text-slate-400 mt-1 block">
                 Make sure the link is public for anyone with the link.
               </span>
             </div>
@@ -155,7 +155,7 @@ export default function TeacherApplyPage() {
                       <span
                         className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
                           isChecked
-                            ? "border-indigo-600 bg-indigo-600 text-[10px] text-white"
+                            ? "border-indigo-600 bg-indigo-600 text-[13px] text-white"
                             : "border-slate-300 bg-white"
                         }`}
                       >

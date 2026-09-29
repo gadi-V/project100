@@ -104,7 +104,7 @@ export default function DiagnosticSummaryCard({
           <h3 className="text-sm font-bold text-neutral-900">
             Knowledge gap mapping and diagnostic quizzes
           </h3>
-          <p className="text-[11px] text-neutral-500 mt-0.5">
+          <p className="text-[14px] text-neutral-500 mt-0.5">
             {isTeacher
               ? "Topics to strengthen and mastery levels identified in the student's pre-lesson quizzes"
               : "Quiz results and recommended topics to practice with your teacher"}
@@ -204,14 +204,14 @@ export default function DiagnosticSummaryCard({
 
           {data.identifiedGaps.length > 0 && (
             <div>
-              <div className="text-[11px] font-bold text-neutral-700 mb-1.5">
+              <div className="text-[14px] font-bold text-neutral-700 mb-1.5">
                 Focus areas and topics to strengthen:
               </div>
               <div className="flex flex-wrap gap-2 justify-start">
                 {data.identifiedGaps.map((gap, idx) => (
                   <span
                     key={idx}
-                    className="inline-flex items-center rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-900 border border-amber-100"
+                    className="inline-flex items-center rounded-full bg-amber-50 px-2.5 py-1 text-[14px] font-medium text-amber-900 border border-amber-100"
                   >
                     {gap}
                   </span>

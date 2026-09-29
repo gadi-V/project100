@@ -519,7 +519,7 @@ export default function WeeklyScheduleBoard({
           e.stopPropagation();
           setMenuLessonId((id) => (id === lesson.id ? null : lesson.id));
         }}
-        className="w-6 h-6 flex items-center justify-center rounded-md bg-white/90 border border-neutral-200 hover:bg-neutral-50 text-[11px] text-neutral-700 shadow-sm"
+        className="w-6 h-6 flex items-center justify-center rounded-md bg-white/90 border border-neutral-200 hover:bg-neutral-50 text-[14px] text-neutral-700 shadow-sm"
       >
         ⚙️
       </button>
@@ -528,14 +528,14 @@ export default function WeeklyScheduleBoard({
           <button
             type="button"
             onClick={() => openReschedule(lesson)}
-            className="w-full text-start px-3 py-2 text-[11px] font-medium text-neutral-700 hover:bg-neutral-50 border-b border-neutral-100"
+            className="w-full text-start px-3 py-2 text-[14px] font-medium text-neutral-700 hover:bg-neutral-50 border-b border-neutral-100"
           >
             דחיית שיעור
           </button>
           <button
             type="button"
             onClick={() => openCancel(lesson)}
-            className="w-full text-start px-3 py-2 text-[11px] font-medium text-red-700 hover:bg-red-50"
+            className="w-full text-start px-3 py-2 text-[14px] font-medium text-red-700 hover:bg-red-50"
           >
             ביטול שיעור
           </button>
@@ -543,7 +543,7 @@ export default function WeeklyScheduleBoard({
             href={buildGoogleCalendarUrl(lessonToIcs(lesson))}
             target="_blank"
             rel="noopener noreferrer"
-            className="block w-full text-start px-3 py-2 text-[11px] font-medium text-neutral-600 hover:bg-neutral-50 border-t border-neutral-100"
+            className="block w-full text-start px-3 py-2 text-[14px] font-medium text-neutral-600 hover:bg-neutral-50 border-t border-neutral-100"
             onClick={() => setMenuLessonId(null)}
           >
             הוסף ל-Google
@@ -572,7 +572,7 @@ export default function WeeklyScheduleBoard({
             }`}
           >
             {displayLesson && renderGear(displayLesson)}
-            <div className="text-[9px] font-semibold bg-amber-100/80 text-amber-800 px-1 rounded w-fit uppercase mt-5">
+            <div className="text-[12px] font-semibold bg-amber-100/80 text-amber-800 px-1 rounded w-fit uppercase mt-5">
               {displayLesson ? displayLesson.student.name : "סגור"}
             </div>
             <div className="text-xs font-semibold font-mono tracking-tight">{hourStr}</div>
@@ -592,7 +592,7 @@ export default function WeeklyScheduleBoard({
             }`}
             title="גרור להזזת משבצת (60 דק')"
           >
-            <div className="text-[9px] font-semibold tracking-wide uppercase bg-emerald-100/80 px-1 rounded w-fit">
+            <div className="text-[12px] font-semibold tracking-wide uppercase bg-emerald-100/80 px-1 rounded w-fit">
               פנוי
             </div>
             <div className="text-xs font-semibold font-mono tracking-tight">{hourStr}</div>
@@ -600,7 +600,7 @@ export default function WeeklyScheduleBoard({
         );
       }
       return (
-        <span className="opacity-0 group-hover:opacity-100 text-neutral-400 text-[11px] font-medium transition-opacity font-mono">
+        <span className="opacity-0 group-hover:opacity-100 text-neutral-400 text-[14px] font-medium transition-opacity font-mono">
           + {hourStr}
         </span>
       );
@@ -615,7 +615,7 @@ export default function WeeklyScheduleBoard({
           }`}
         >
           {renderGear(lesson)}
-          <div className="text-[9px] font-semibold bg-amber-100/80 text-amber-800 px-1 rounded w-fit uppercase mt-5">
+          <div className="text-[12px] font-semibold bg-amber-100/80 text-amber-800 px-1 rounded w-fit uppercase mt-5">
             {lesson.teacher.name}
           </div>
           <div className="text-xs font-semibold font-mono tracking-tight">{hourStr}</div>
@@ -636,7 +636,7 @@ export default function WeeklyScheduleBoard({
           }`}
           title="לחץ לאישור שיבוץ · או גרור"
         >
-          <div className="text-[9px] font-semibold tracking-wide uppercase bg-emerald-100/80 px-1 rounded w-fit truncate max-w-full">
+          <div className="text-[12px] font-semibold tracking-wide uppercase bg-emerald-100/80 px-1 rounded w-fit truncate max-w-full">
             {slot.teacher?.name ?? "פנוי"}
           </div>
           <div className="text-xs font-semibold font-mono tracking-tight">{hourStr}</div>
@@ -757,7 +757,7 @@ export default function WeeklyScheduleBoard({
             <button
               type="button"
               onClick={() => setWeekStart(startOfWeekSunday(new Date()))}
-              className="px-3 py-1.5 text-[11px] font-medium text-neutral-700 hover:text-neutral-900"
+              className="px-3 py-1.5 text-[14px] font-medium text-neutral-700 hover:text-neutral-900"
             >
               היום
             </button>
@@ -791,14 +791,14 @@ export default function WeeklyScheduleBoard({
           <button
             type="button"
             onClick={handleSyncGoogle}
-            className={`${primaryCta} text-[11px] py-2 px-3`}
+            className={`${primaryCta} text-[14px] py-2 px-3`}
           >
             Google Calendar
           </button>
           <button
             type="button"
             onClick={handleSyncApple}
-            className={`${secondaryCta} text-[11px] py-2 px-3`}
+            className={`${secondaryCta} text-[14px] py-2 px-3`}
           >
             Apple Calendar
           </button>
@@ -825,7 +825,7 @@ export default function WeeklyScheduleBoard({
                   יום{" "}
                   {new Date().toLocaleDateString("he-IL", { weekday: "long" })}
                 </div>
-                <div className="text-[10px] text-neutral-500 font-mono mt-0.5">
+                <div className="text-[13px] text-neutral-500 font-mono mt-0.5">
                   {new Date().toLocaleDateString("he-IL", {
                     day: "numeric",
                     month: "numeric",
@@ -861,7 +861,7 @@ export default function WeeklyScheduleBoard({
                 return (
                   <div key={day.key} className="border-s border-neutral-200/80 last:border-0">
                     <div>יום {day.label}</div>
-                    <div className="text-[10px] text-neutral-500 font-mono mt-0.5">
+                    <div className="text-[13px] text-neutral-500 font-mono mt-0.5">
                       {dateObj?.getDate()}/{(dateObj?.getMonth() ?? 0) + 1}
                     </div>
                   </div>
@@ -944,12 +944,12 @@ export default function WeeklyScheduleBoard({
                   </span>
                   <div className="space-y-1 mt-1">
                     {openCount > 0 && (
-                      <div className="text-[10px] font-medium text-emerald-800 bg-emerald-50 border border-emerald-200 px-1 py-0.5 rounded text-center">
+                      <div className="text-[13px] font-medium text-emerald-800 bg-emerald-50 border border-emerald-200 px-1 py-0.5 rounded text-center">
                         {openCount} פנויים
                       </div>
                     )}
                     {bookedCount > 0 && (
-                      <div className="text-[10px] font-medium text-amber-800 bg-amber-50 border border-amber-200 px-1 py-0.5 rounded text-center">
+                      <div className="text-[13px] font-medium text-amber-800 bg-amber-50 border border-amber-200 px-1 py-0.5 rounded text-center">
                         {bookedCount} שיעורים
                       </div>
                     )}

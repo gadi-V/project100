@@ -98,24 +98,24 @@ export default function PackagePedagogicalReportPage({
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div className="rounded-xl bg-neutral-50 p-3.5 border border-neutral-100">
-              <div className="text-[11px] font-semibold text-neutral-500">Completed lessons</div>
+              <div className="text-[14px] font-semibold text-neutral-500">Completed lessons</div>
               <div className="text-lg font-bold text-neutral-900 mt-1">
                 {stats.completedLessonsCount} / {stats.totalLessons}
               </div>
             </div>
 
             <div className="rounded-xl bg-neutral-50 p-3.5 border border-neutral-100">
-              <div className="text-[11px] font-semibold text-neutral-500">Progress rate</div>
+              <div className="text-[14px] font-semibold text-neutral-500">Progress rate</div>
               <div className="text-lg font-bold text-neutral-900 mt-1">{stats.completionRate}%</div>
             </div>
 
             <div className="rounded-xl bg-neutral-50 p-3.5 border border-neutral-100">
-              <div className="text-[11px] font-semibold text-neutral-500">Open knowledge gaps</div>
+              <div className="text-[14px] font-semibold text-neutral-500">Open knowledge gaps</div>
               <div className="text-lg font-bold text-amber-700 mt-1">{stats.activeGapsCount}</div>
             </div>
 
             <div className="rounded-xl bg-neutral-50 p-3.5 border border-neutral-100">
-              <div className="text-[11px] font-semibold text-neutral-500">Quizzes completed</div>
+              <div className="text-[14px] font-semibold text-neutral-500">Quizzes completed</div>
               <div className="text-lg font-bold text-emerald-700 mt-1">{stats.quizzesCount}</div>
             </div>
           </div>
@@ -151,7 +151,7 @@ export default function PackagePedagogicalReportPage({
                     <span className="font-bold text-neutral-800">
                       Lesson with {lesson.teacher.user.name || "teacher"}
                     </span>
-                    <span className="text-[11px] text-neutral-400">
+                    <span className="text-[14px] text-neutral-400">
                       {new Date(lesson.scheduledAt).toLocaleDateString()}
                     </span>
                   </div>

@@ -527,7 +527,7 @@ export default function AdminPage() {
                   card.highlight ? "ring-1 ring-amber-200/80" : ""
                 }`}
               >
-                <div className="text-[11px] font-medium text-neutral-500 mb-2">{card.label}</div>
+                <div className="text-[14px] font-medium text-neutral-500 mb-2">{card.label}</div>
                 <div className="text-3xl font-semibold tracking-tight text-neutral-900">
                   {card.value}
                 </div>
@@ -557,12 +557,12 @@ export default function AdminPage() {
                         {teacher.phone}
                         {teacher.email ? ` · ${teacher.email}` : ""}
                       </p>
-                      <p className="text-[11px] text-neutral-500">
+                      <p className="text-[14px] text-neutral-500">
                         {teacher._count.availabilities} שעות פתוחות · {teacher._count.givenLessons}{" "}
                         שיעורים · נרשם {new Date(teacher.createdAt).toLocaleDateString("he-IL")}
                       </p>
                       {teacher.teacherProfile ? (
-                        <div className="text-[11px] text-neutral-600 space-y-0.5 pt-1">
+                        <div className="text-[14px] text-neutral-600 space-y-0.5 pt-1">
                           <p className="text-neutral-800 font-medium">
                             מקצועות: {teacher.teacherProfile.subjects.join(" · ") || "—"}
                           </p>
@@ -586,7 +586,7 @@ export default function AdminPage() {
                           ) : null}
                         </div>
                       ) : (
-                        <p className="text-[11px] text-amber-800">טרם הוגדר פרופיל מורה</p>
+                        <p className="text-[14px] text-amber-800">טרם הוגדר פרופיל מורה</p>
                       )}
                     </div>
                     <div className="flex flex-wrap gap-2 justify-start">
@@ -620,7 +620,7 @@ export default function AdminPage() {
                     <div className="border-t border-neutral-100 pt-4 space-y-4 text-start">
                       <h4 className={`${eyebrow}`}>עריכת TeacherProfile</h4>
                       <div className="space-y-1.5">
-                        <label className="text-[11px] font-medium text-neutral-500">
+                        <label className="text-[14px] font-medium text-neutral-500">
                           תחומי התמחות (מופרדים בפסיק)
                         </label>
                         <input
@@ -634,7 +634,7 @@ export default function AdminPage() {
                         />
                       </div>
                       <div className="space-y-2">
-                        <label className="text-[11px] font-medium text-neutral-500">
+                        <label className="text-[14px] font-medium text-neutral-500">
                           קבוצות גיל
                         </label>
                         <div className="flex flex-wrap gap-2 justify-start">
@@ -643,7 +643,7 @@ export default function AdminPage() {
                               key={group}
                               type="button"
                               onClick={() => toggleAgeGroup(group)}
-                              className={`text-[11px] font-medium px-3 py-1.5 rounded-full border transition-colors ${
+                              className={`text-[14px] font-medium px-3 py-1.5 rounded-full border transition-colors ${
                                 profileForm.ageGroups.includes(group)
                                   ? "bg-neutral-900 border-neutral-900 text-white"
                                   : "bg-white border-neutral-200 text-neutral-600 hover:bg-neutral-50"
@@ -655,7 +655,7 @@ export default function AdminPage() {
                         </div>
                       </div>
                       <div className="space-y-1.5">
-                        <label className="text-[11px] font-medium text-neutral-500">
+                        <label className="text-[14px] font-medium text-neutral-500">
                           ביוגרפיה קצרה
                         </label>
                         <textarea
@@ -669,7 +669,7 @@ export default function AdminPage() {
                         />
                       </div>
                       <div className="space-y-1.5">
-                        <label className="text-[11px] font-medium text-neutral-500">
+                        <label className="text-[14px] font-medium text-neutral-500">
                           קישור לתמונת פרופיל (אופציונלי)
                         </label>
                         <input
@@ -722,8 +722,8 @@ export default function AdminPage() {
                       {lead.phone}
                     </p>
                     <p className="text-xs text-neutral-700">{lead.grade}</p>
-                    <p className="text-[11px] text-neutral-500">{lead.requestedHours}</p>
-                    <p className="text-[11px] text-neutral-400">
+                    <p className="text-[14px] text-neutral-500">{lead.requestedHours}</p>
+                    <p className="text-[14px] text-neutral-400">
                       {new Date(lead.createdAt).toLocaleString("he-IL")}
                     </p>
                   </div>
@@ -764,7 +764,7 @@ export default function AdminPage() {
                   <div key={item.id} className={`${frostCard} p-5 text-start space-y-2`}>
                     <div className="flex items-center justify-between gap-3">
                       <h3 className="font-semibold text-neutral-900">{item.student.name}</h3>
-                      <span className="text-[10px] font-mono text-neutral-400">
+                      <span className="text-[13px] font-mono text-neutral-400">
                         {new Date(item.createdAt).toLocaleDateString("he-IL")}
                       </span>
                     </div>
@@ -774,10 +774,10 @@ export default function AdminPage() {
                     <p className="text-xs text-neutral-700 font-medium">
                       {item.ageGroup} · {item.subject}
                     </p>
-                    <p className="text-[11px] text-neutral-600 leading-relaxed">
+                    <p className="text-[14px] text-neutral-600 leading-relaxed">
                       {challengePreview}
                     </p>
-                    <p className="text-[11px] text-neutral-500">
+                    <p className="text-[14px] text-neutral-500">
                       יתרת קרדיטים: {item.student.lessonCredits}
                     </p>
                     <div className="flex flex-wrap gap-2 justify-start pt-2">
@@ -801,7 +801,7 @@ export default function AdminPage() {
                       )}
                     </div>
                     {matchPreview[item.student.id] && (
-                      <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-3 text-[11px] space-y-1">
+                      <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-3 text-[14px] space-y-1">
                         <p className="font-medium text-neutral-900">
                           מומלץ: {matchPreview[item.student.id]!.teacherName} · ציון{" "}
                           {matchPreview[item.student.id]!.matchScore}
@@ -875,7 +875,7 @@ export default function AdminPage() {
                       >
                         <td className="px-5 py-4">
                           <div className="font-medium text-neutral-900">{p.teacher.name}</div>
-                          <div className="text-neutral-500 font-mono text-[10px]" dir="ltr">
+                          <div className="text-neutral-500 font-mono text-[13px]" dir="ltr">
                             {p.teacher.phone}
                           </div>
                         </td>
@@ -893,7 +893,7 @@ export default function AdminPage() {
                                   ? ` · סניף ${p.teacher.bank.bankBranch}`
                                   : ""}
                               </div>
-                              <div className="font-mono text-[10px]" dir="ltr">
+                              <div className="font-mono text-[13px]" dir="ltr">
                                 {p.teacher.bank.accountNumber ?? "—"}
                               </div>
                               <div className="text-neutral-500">
@@ -920,7 +920,7 @@ export default function AdminPage() {
                               type="button"
                               disabled={actionLoading === p.id}
                               onClick={() => markPayoutAsPaid(p.id)}
-                              className="text-[11px] font-medium py-1.5 px-3 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-50"
+                              className="text-[14px] font-medium py-1.5 px-3 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-50"
                             >
                               {actionLoading === p.id ? "..." : "סמן כשולם"}
                             </button>
@@ -981,7 +981,7 @@ export default function AdminPage() {
                           <div className="font-medium text-neutral-900">
                             {a.title ?? "שיעור פרטי"}
                           </div>
-                          <div className="text-neutral-400 font-mono text-[10px]">{a.id}</div>
+                          <div className="text-neutral-400 font-mono text-[13px]">{a.id}</div>
                         </td>
                         <td className="px-5 py-4 text-neutral-700">{a.teacher.name}</td>
                         <td className="px-5 py-4 text-neutral-700">{a.student.name}</td>
@@ -997,7 +997,7 @@ export default function AdminPage() {
                               type="button"
                               disabled={actionLoading !== null}
                               onClick={() => resolveAppeal(a.id, "APPROVE")}
-                              className="text-[11px] font-medium py-1.5 px-3 rounded-full bg-emerald-700 hover:bg-emerald-800 text-white disabled:opacity-50"
+                              className="text-[14px] font-medium py-1.5 px-3 rounded-full bg-emerald-700 hover:bg-emerald-800 text-white disabled:opacity-50"
                             >
                               Approve
                             </button>

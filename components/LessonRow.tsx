@@ -235,7 +235,7 @@ export default function LessonRow({ lesson, userRole, onRefresh }: LessonRowProp
                     type="button"
                     onClick={handleAppeal}
                     disabled={isAppealing}
-                    className="w-full text-start px-3 py-2.5 text-[11px] font-medium text-red-700 hover:bg-red-50 transition-all disabled:opacity-50"
+                    className="w-full text-start px-3 py-2.5 text-[14px] font-medium text-red-700 hover:bg-red-50 transition-all disabled:opacity-50"
                   >
                     {isAppealing ? "מגיש ערעור..." : "הגש ערעור על הקנס"}
                   </button>
@@ -244,14 +244,14 @@ export default function LessonRow({ lesson, userRole, onRefresh }: LessonRowProp
                     <button
                       type="button"
                       onClick={openRescheduleModal}
-                      className="w-full text-start px-3 py-2.5 text-[11px] font-medium text-neutral-700 hover:bg-neutral-50 transition-all border-b border-neutral-100"
+                      className="w-full text-start px-3 py-2.5 text-[14px] font-medium text-neutral-700 hover:bg-neutral-50 transition-all border-b border-neutral-100"
                     >
                       הזזת מועד שיעור
                     </button>
                     <button
                       type="button"
                       onClick={openCancelModal}
-                      className="w-full text-start px-3 py-2.5 text-[11px] font-medium text-red-700 hover:bg-red-50 transition-all"
+                      className="w-full text-start px-3 py-2.5 text-[14px] font-medium text-red-700 hover:bg-red-50 transition-all"
                     >
                       ביטול שיעור
                     </button>

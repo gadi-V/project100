@@ -290,7 +290,7 @@ function PricingPageInner() {
                     </div>
                   </div>
 
-                  <p className="text-[11px] font-semibold tracking-wide text-neutral-500 mb-3 text-start">
+                  <p className="text-[14px] font-semibold tracking-wide text-neutral-500 mb-3 text-start">
                     סל החבילה
                   </p>
                   <ul className="space-y-4 mb-8 text-start">

@@ -231,7 +231,7 @@ export default function AdminPayoutsPage() {
                         <p className="text-xs text-neutral-500">
                           {p.teacher.phone} · {p.teacher.email ?? ""}
                         </p>
-                        <p className="mt-0.5 font-mono text-[10px] text-neutral-400">{p.id}</p>
+                        <p className="mt-0.5 font-mono text-[13px] text-neutral-400">{p.id}</p>
                       </td>
                       <td className="px-5 py-4 text-xs text-neutral-600">
                         {bank?.bankName ? (

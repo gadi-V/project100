@@ -88,7 +88,7 @@ export default function DiagnosticQuizRunPage({
               <span className="text-xs font-bold text-amber-900">Knowledge gaps identified for the lesson:</span>
               <div className="flex flex-wrap gap-1.5">
                 {resultData.identifiedGaps.map((gap, i) => (
-                  <span key={i} className="rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold text-amber-900 border border-amber-100">
+                  <span key={i} className="rounded-full bg-white px-2.5 py-1 text-[14px] font-semibold text-amber-900 border border-amber-100">
                     {gap}
                   </span>
                 ))}

@@ -69,7 +69,10 @@ export default function RegisterHubPage() {
           </p>
           <p className="text-xs text-neutral-400">
             מעוניין ללמד אצלנו?{" "}
-            <Link href="/careers" className="text-neutral-600 hover:text-neutral-900 hover:underline">
+            <Link
+              href="/careers"
+              className="inline-block bg-[#0071e3] hover:bg-[#0077ed] text-white font-bold py-1.5 px-4 rounded-full transition-all"
+            >
               הגש מועמדות
             </Link>
           </p>

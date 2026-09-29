@@ -29,7 +29,7 @@ export default function RootLayout({
                 background: "#ffffff",
                 color: "#1d1d1f",
                 border: "1px solid #e5e5e7",
-                fontSize: "14px",
+                fontSize: "17px",
                 borderRadius: "12px",
                 padding: "12px 24px",
                 boxShadow: "0 4px 12px rgba(0,0,0,0.05)",

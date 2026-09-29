@@ -185,13 +185,13 @@ export default function PreLessonAssetsSection({
             >
               <div className="space-y-1">
                 <div className="flex items-center gap-2">
-                  <span className="rounded-full bg-amber-50 text-amber-900 border border-amber-100 px-2 py-0.5 text-[10px] font-semibold">
+                  <span className="rounded-full bg-amber-50 text-amber-900 border border-amber-100 px-2 py-0.5 text-[13px] font-semibold">
                     {asset.assetType}
                   </span>
                   <span className="text-xs font-medium text-neutral-700">
                     by {asset.uploadedBy.name || asset.uploadedBy.email}
                   </span>
-                  <span className="text-[10px] text-neutral-400">
+                  <span className="text-[13px] text-neutral-400">
                     {new Date(asset.createdAt).toLocaleDateString()}
                   </span>
                 </div>

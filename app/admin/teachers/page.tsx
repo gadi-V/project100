@@ -162,7 +162,7 @@ export default function AdminTeachersListPage() {
                     <td className="px-5 py-4 font-medium text-neutral-900">{teacher.name}</td>
                     <td className="px-5 py-4 text-neutral-600 space-y-0.5">
                       <div>{teacher.email}</div>
-                      <div className="text-[11px] text-neutral-400" dir="ltr">
+                      <div className="text-[14px] text-neutral-400" dir="ltr">
                         {teacher.phone}
                       </div>
                     </td>
@@ -176,7 +176,7 @@ export default function AdminTeachersListPage() {
                             }}
                           />
                         </div>
-                        <span className="text-[11px] font-medium text-neutral-700">
+                        <span className="text-[14px] font-medium text-neutral-700">
                           {teacher.passedStepsCount}/{teacher.totalSteps}
                         </span>
                       </div>
@@ -187,7 +187,7 @@ export default function AdminTeachersListPage() {
                       </span>
                     </td>
                     <td className="px-5 py-4 text-neutral-600">{teacher.payoutType}</td>
-                    <td className="px-5 py-4 text-neutral-500 text-[11px]">
+                    <td className="px-5 py-4 text-neutral-500 text-[14px]">
                       {new Date(teacher.createdAt).toLocaleDateString()}
                     </td>
                     <td className="px-5 py-4">

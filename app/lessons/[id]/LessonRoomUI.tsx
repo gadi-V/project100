@@ -262,7 +262,7 @@ export default function LessonRoomUI({
             <div className={`${frostCard} p-3 text-xs text-neutral-700`}>
               <div className="flex items-center justify-between font-bold text-neutral-900 mb-1.5">
                 <span>תדריך פדגוגי מותאם</span>
-                <span className="bg-amber-50 text-amber-900 px-2 py-0.5 rounded-full text-[10px] border border-amber-100">
+                <span className="bg-amber-50 text-amber-900 px-2 py-0.5 rounded-full text-[13px] border border-amber-100">
                   {pedagogicalBrief.subject}
                 </span>
               </div>
@@ -277,7 +277,7 @@ export default function LessonRoomUI({
                     {pedagogicalBrief.topics.map((t, idx) => (
                       <span
                         key={idx}
-                        className="bg-amber-50 text-amber-900 font-medium px-2 py-0.5 rounded-full text-[11px] border border-amber-100"
+                        className="bg-amber-50 text-amber-900 font-medium px-2 py-0.5 rounded-full text-[14px] border border-amber-100"
                         title={t.subTopics.join(", ")}
                       >
                         {t.topicName}

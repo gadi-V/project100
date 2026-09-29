@@ -227,7 +227,7 @@ export default function TeacherExam581Page() {
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <h3 className="text-sm font-bold text-slate-700">{q.title}</h3>
                     <span
-                      className={`rounded-full px-2.5 py-0.5 text-[11px] font-black ${
+                      className={`rounded-full px-2.5 py-0.5 text-[14px] font-black ${
                         fileInputs[q.id]
                           ? "bg-emerald-100 text-emerald-700 border border-emerald-300"
                           : "bg-slate-200 text-slate-600"

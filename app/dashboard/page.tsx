@@ -68,7 +68,7 @@ function studentFileHref(studentId: string): string {
 }
 
 const studentFileLinkClass =
-  "inline-flex items-center whitespace-nowrap rounded-full border border-neutral-300/80 bg-white/70 px-3 py-1 text-[11px] font-medium text-neutral-800 hover:bg-white transition-colors";
+  "inline-flex items-center whitespace-nowrap rounded-full border border-neutral-300/80 bg-white/70 px-3 py-1 text-[14px] font-medium text-neutral-800 hover:bg-white transition-colors";
 
 interface LoggedInUser {
   id: string;
@@ -833,7 +833,7 @@ export default function DashboardPage() {
             className="bg-neutral-50 hover:bg-white border border-neutral-200 hover:border-neutral-400 p-5 rounded-xl text-start transition-all disabled:opacity-50 group flex flex-col justify-between h-32 relative overflow-hidden"
           >
             {pkg.popular && (
-              <div className="absolute top-0 start-0 bg-neutral-900 text-[10px] font-semibold px-2 py-0.5 rounded-ee-lg text-white">
+              <div className="absolute top-0 start-0 bg-neutral-900 text-[13px] font-semibold px-2 py-0.5 rounded-ee-lg text-white">
                 פופולרי
               </div>
             )}
@@ -964,7 +964,7 @@ export default function DashboardPage() {
                         <span className="text-xs font-medium text-neutral-500 tracking-wide">בית ספר</span>
                         <div>
                           <span className="block font-semibold text-sm text-neutral-900">תלמיד בית ספר / הורה</span>
-                          <span className="text-[11px] text-neutral-500 block mt-0.5">יסודי, חטיבה, תיכון והכנה לבגרויות</span>
+                          <span className="text-[14px] text-neutral-500 block mt-0.5">יסודי, חטיבה, תיכון והכנה לבגרויות</span>
                         </div>
                       </button>
 
@@ -972,7 +972,7 @@ export default function DashboardPage() {
                         <span className="text-xs font-medium text-neutral-500 tracking-wide">אקדמיה</span>
                         <div>
                           <span className="block font-semibold text-sm text-neutral-900">סטודנט באקדמיה</span>
-                          <span className="text-[11px] text-neutral-500 block mt-0.5">קורסים אקדמיים באוניברסיטאות ומכללות</span>
+                          <span className="text-[14px] text-neutral-500 block mt-0.5">קורסים אקדמיים באוניברסיטאות ומכללות</span>
                         </div>
                       </button>
                     </div>
@@ -1184,7 +1184,7 @@ export default function DashboardPage() {
                 />
 
                 {matchNotice && (
-                  <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-start">
+                  <p className="text-[14px] text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-start">
                     {matchNotice}
                   </p>
                 )}
@@ -1220,17 +1220,17 @@ export default function DashboardPage() {
                                 <div className="space-y-1 min-w-0">
                                   <div className="flex flex-wrap items-center gap-2">
                                     {index === 0 && (
-                                      <span className={isSelected ? "inline-flex items-center rounded-full bg-white/15 text-white text-[10px] font-medium px-2.5 py-1" : badgeSuccess}>
+                                      <span className={isSelected ? "inline-flex items-center rounded-full bg-white/15 text-white text-[13px] font-medium px-2.5 py-1" : badgeSuccess}>
                                         הכי מתאים לך
                                       </span>
                                     )}
                                     {match.exactAvailabilityMatch && (
-                                      <span className={isSelected ? "inline-flex items-center rounded-full bg-emerald-400/20 text-emerald-100 text-[10px] font-medium px-2.5 py-1" : badgeSuccess}>
+                                      <span className={isSelected ? "inline-flex items-center rounded-full bg-emerald-400/20 text-emerald-100 text-[13px] font-medium px-2.5 py-1" : badgeSuccess}>
                                         זמין בשעות דומות לבקשתך
                                       </span>
                                     )}
                                     {match.isSoftRecommendation && match.openSlotsCount === 0 && (
-                                      <span className={isSelected ? "inline-flex items-center rounded-full bg-amber-400/20 text-amber-100 text-[10px] font-medium px-2.5 py-1" : badgeWarning}>
+                                      <span className={isSelected ? "inline-flex items-center rounded-full bg-amber-400/20 text-amber-100 text-[13px] font-medium px-2.5 py-1" : badgeWarning}>
                                         מתאים לחומר, עדיין בלי שעות פנויות
                                       </span>
                                     )}
@@ -1238,13 +1238,13 @@ export default function DashboardPage() {
                                       {match.teacherName}
                                     </span>
                                   </div>
-                                  <p className={`text-[11px] ${isSelected ? "text-neutral-300" : "text-neutral-500"}`}>
+                                  <p className={`text-[14px] ${isSelected ? "text-neutral-300" : "text-neutral-500"}`}>
                                     {match.openSlotsCount > 0
                                       ? `${match.openSlotsCount} שעות פנויות`
                                       : "אין שעות פנויות כרגע"}
                                   </p>
                                   {match.nearestSlotStart && !match.exactAvailabilityMatch && (
-                                    <p className={`text-[11px] ${isSelected ? "text-amber-200" : "text-amber-800"}`}>
+                                    <p className={`text-[14px] ${isSelected ? "text-amber-200" : "text-amber-800"}`}>
                                       המועד הפנוי הקרוב:{" "}
                                       {new Date(match.nearestSlotStart).toLocaleString("he-IL", {
                                         weekday: "short",
@@ -1256,12 +1256,12 @@ export default function DashboardPage() {
                                     </p>
                                   )}
                                   {match.subjects.length > 0 && (
-                                    <p className={`text-[11px] ${isSelected ? "text-neutral-300" : "text-neutral-600"}`}>
+                                    <p className={`text-[14px] ${isSelected ? "text-neutral-300" : "text-neutral-600"}`}>
                                       {match.subjects.join(" · ")}
                                     </p>
                                   )}
                                   {studentFacingReasons(match.reasons).length > 0 && (
-                                    <p className={`text-[11px] ${isSelected ? "text-neutral-400" : "text-neutral-500"}`}>
+                                    <p className={`text-[14px] ${isSelected ? "text-neutral-400" : "text-neutral-500"}`}>
                                       {studentFacingReasons(match.reasons).slice(0, 3).join(" · ")}
                                     </p>
                                   )}
@@ -1415,19 +1415,19 @@ export default function DashboardPage() {
               </div>
               <div className="grid grid-cols-3 gap-3 text-center">
                 <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-3">
-                  <div className="text-[10px] text-neutral-500 font-medium">הפניות</div>
+                  <div className="text-[13px] text-neutral-500 font-medium">הפניות</div>
                   <div className="text-xl font-semibold text-neutral-900">
                     {teacherProfileForm.referralCount}
                   </div>
                 </div>
                 <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-3">
-                  <div className="text-[10px] text-neutral-500 font-medium">תלמידים פעילים</div>
+                  <div className="text-[13px] text-neutral-500 font-medium">תלמידים פעילים</div>
                   <div className="text-xl font-semibold text-neutral-900">
                     {teacherProfileForm.activeStudentsCount}
                   </div>
                 </div>
                 <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-3">
-                  <div className="text-[10px] text-neutral-500 font-medium">הפניה אחרונה</div>
+                  <div className="text-[13px] text-neutral-500 font-medium">הפניה אחרונה</div>
                   <div className="text-xs font-medium text-neutral-700 mt-1">
                     {teacherProfileForm.lastReferralAt
                       ? new Date(teacherProfileForm.lastReferralAt).toLocaleDateString("he-IL")
@@ -1436,7 +1436,7 @@ export default function DashboardPage() {
                 </div>
               </div>
               <div className="space-y-1.5">
-                <label className="text-[11px] font-medium text-neutral-500">
+                <label className="text-[14px] font-medium text-neutral-500">
                   תחומי התמחות (מופרדים בפסיק)
                 </label>
                 <input
@@ -1450,7 +1450,7 @@ export default function DashboardPage() {
                 />
               </div>
               <div className="space-y-2">
-                <label className="text-[11px] font-medium text-neutral-500">קבוצות גיל</label>
+                <label className="text-[14px] font-medium text-neutral-500">קבוצות גיל</label>
                 <div className="flex flex-wrap gap-2 justify-start">
                   {AGE_GROUP_OPTIONS.map((group) => (
                     <button
@@ -1464,7 +1464,7 @@ export default function DashboardPage() {
                             : [...p.ageGroups, group],
                         }))
                       }
-                      className={`text-[11px] font-medium px-3 py-1.5 rounded-full border transition-all ${
+                      className={`text-[14px] font-medium px-3 py-1.5 rounded-full border transition-all ${
                         teacherProfileForm.ageGroups.includes(group)
                           ? "bg-neutral-900 border-neutral-900 text-white"
                           : "bg-white border-neutral-200 text-neutral-600"
@@ -1476,7 +1476,7 @@ export default function DashboardPage() {
                 </div>
               </div>
               <div className="space-y-1.5">
-                <label className="text-[11px] font-medium text-neutral-500">אודות</label>
+                <label className="text-[14px] font-medium text-neutral-500">אודות</label>
                 <textarea
                   value={teacherProfileForm.bio}
                   onChange={(e) =>
@@ -1487,7 +1487,7 @@ export default function DashboardPage() {
                 />
               </div>
               <div className="space-y-1.5">
-                <label className="text-[11px] font-medium text-neutral-500">קישור לתמונה (אופציונלי)</label>
+                <label className="text-[14px] font-medium text-neutral-500">קישור לתמונה (אופציונלי)</label>
                 <input
                   type="url"
                   dir="ltr"
@@ -1502,13 +1502,13 @@ export default function DashboardPage() {
               <div className="border-t border-neutral-200 pt-4 space-y-3">
                 <div>
                   <h3 className="text-sm font-semibold text-neutral-900">פרטי בנק לתשלומים</h3>
-                  <p className="text-[11px] text-neutral-500">
+                  <p className="text-[14px] text-neutral-500">
                     נדרשים לסגירת תשלומים ידנית על ידי המנהל. הפרטים נשמרים בפרופיל בלבד.
                   </p>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="space-y-1.5">
-                    <label className="text-[11px] font-medium text-neutral-500">שם הבנק</label>
+                    <label className="text-[14px] font-medium text-neutral-500">שם הבנק</label>
                     <input
                       type="text"
                       value={teacherProfileForm.bankName}
@@ -1520,7 +1520,7 @@ export default function DashboardPage() {
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-[11px] font-medium text-neutral-500">סניף</label>
+                    <label className="text-[14px] font-medium text-neutral-500">סניף</label>
                     <input
                       type="text"
                       value={teacherProfileForm.bankBranch}
@@ -1532,7 +1532,7 @@ export default function DashboardPage() {
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-[11px] font-medium text-neutral-500">מספר חשבון</label>
+                    <label className="text-[14px] font-medium text-neutral-500">מספר חשבון</label>
                     <input
                       type="text"
                       dir="ltr"
@@ -1544,7 +1544,7 @@ export default function DashboardPage() {
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-[11px] font-medium text-neutral-500">שם בעל החשבון</label>
+                    <label className="text-[14px] font-medium text-neutral-500">שם בעל החשבון</label>
                     <input
                       type="text"
                       value={teacherProfileForm.accountHolderName}

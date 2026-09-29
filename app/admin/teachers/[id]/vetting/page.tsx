@@ -358,11 +358,11 @@ export default function TeacherVettingAdminPage({
                   >
                     {isFailed ? "X" : isSkipped ? "V" : isPassed ? "V" : "-"}
                   </div>
-                  <p className="text-[11px] font-medium text-neutral-800">
+                  <p className="text-[14px] font-medium text-neutral-800">
                     {STEP_LABELS[stepName].title.replace(/^\d+\.\s*/, "")}
                   </p>
                   <p
-                    className={`mt-0.5 text-[10px] font-medium ${
+                    className={`mt-0.5 text-[13px] font-medium ${
                       isSkipped ? "text-neutral-700" : "text-neutral-500"
                     }`}
                   >
@@ -375,7 +375,7 @@ export default function TeacherVettingAdminPage({
                           : "ממתין"}
                   </p>
                   {isDone && log?.bypassedByAdmin && (
-                    <p className="mt-0.5 text-[9px] font-medium text-neutral-500">
+                    <p className="mt-0.5 text-[12px] font-medium text-neutral-500">
                       Super-Override
                     </p>
                   )}
@@ -406,7 +406,7 @@ export default function TeacherVettingAdminPage({
                     </div>
                     <p className="text-xs text-neutral-500">{stepInfo.desc}</p>
                     {log?.completedAt && (
-                      <p className="text-[11px] text-neutral-400">
+                      <p className="text-[14px] text-neutral-400">
                         הושלם בתאריך: {new Date(log.completedAt).toLocaleString("he-IL")}
                       </p>
                     )}

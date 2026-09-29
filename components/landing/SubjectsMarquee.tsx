@@ -93,7 +93,7 @@ function Chips({ row }: { row: MarqueeRow }) {
       {row.items.map((item) => (
         <li
           key={item}
-          className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1.5 text-[11px] font-black shadow-sm ${TONE_CLASS[row.tone]}`}
+          className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1.5 text-[14px] font-black shadow-sm ${TONE_CLASS[row.tone]}`}
         >
           <Icon aria-hidden="true" size={12} strokeWidth={2.25} className="opacity-50" />
           {item}

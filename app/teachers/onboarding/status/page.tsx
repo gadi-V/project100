@@ -212,7 +212,7 @@ export default function TeacherVettingStatusPage() {
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-bold text-slate-900">{meta.title}</span>
                       <span
-                        className={`rounded px-2 py-0.5 text-[10px] font-bold ${
+                        className={`rounded px-2 py-0.5 text-[13px] font-bold ${
                           isPassed
                             ? "bg-emerald-100 text-emerald-700"
                             : isFailed
@@ -226,7 +226,7 @@ export default function TeacherVettingStatusPage() {
                       </span>
                     </div>
                     <p className="text-xs text-slate-500">{meta.desc}</p>
-                    <p className="text-[11px] text-indigo-900/80 font-medium pt-1">
+                    <p className="text-[14px] text-indigo-900/80 font-medium pt-1">
                       {meta.actionHint}
                     </p>
                     {log?.adminNotes && (

@@ -1584,7 +1584,7 @@ export default function OnboardingDiagnosticPage() {
                         <span className={checkDotClass(isSelected)}>{isSelected ? "✓" : ""}</span>
                         <div className="flex-1 ps-3 text-start">
                           <span className="text-xs font-semibold text-neutral-900 block">{g.title}</span>
-                          <span className="text-[11px] text-neutral-500 font-medium block mt-0.5">{g.desc}</span>
+                          <span className="text-[14px] text-neutral-500 font-medium block mt-0.5">{g.desc}</span>
                         </div>
                       </button>
                     );
@@ -1624,7 +1624,7 @@ export default function OnboardingDiagnosticPage() {
                       <div className="bg-neutral-50 border border-neutral-200 p-4 rounded-2xl space-y-3">
                         <div className="grid sm:grid-cols-3 gap-3">
                           <div>
-                            <label className="block text-[11px] font-medium text-neutral-500 mb-1 text-start">
+                            <label className="block text-[14px] font-medium text-neutral-500 mb-1 text-start">
                               חשיבה כמותית
                             </label>
                             <input
@@ -1644,13 +1644,13 @@ export default function OnboardingDiagnosticPage() {
                               className="w-full bg-white border border-neutral-200 rounded-xl p-2.5 text-sm font-mono text-center focus:outline-none focus:ring-2 focus:ring-neutral-900/10"
                             />
                             {isPsychometricScoreOutOfRange(prevPsychQuant) && (
-                              <p className="mt-1 text-[11px] text-amber-600 text-start">
+                              <p className="mt-1 text-[14px] text-amber-600 text-start">
                                 מומלץ טווח 50–150
                               </p>
                             )}
                           </div>
                           <div>
-                            <label className="block text-[11px] font-medium text-neutral-500 mb-1 text-start">
+                            <label className="block text-[14px] font-medium text-neutral-500 mb-1 text-start">
                               חשיבה מילולית
                             </label>
                             <input
@@ -1670,13 +1670,13 @@ export default function OnboardingDiagnosticPage() {
                               className="w-full bg-white border border-neutral-200 rounded-xl p-2.5 text-sm font-mono text-center focus:outline-none focus:ring-2 focus:ring-neutral-900/10"
                             />
                             {isPsychometricScoreOutOfRange(prevPsychVerbal) && (
-                              <p className="mt-1 text-[11px] text-amber-600 text-start">
+                              <p className="mt-1 text-[14px] text-amber-600 text-start">
                                 מומלץ טווח 50–150
                               </p>
                             )}
                           </div>
                           <div>
-                            <label className="block text-[11px] font-medium text-neutral-500 mb-1 text-start">
+                            <label className="block text-[14px] font-medium text-neutral-500 mb-1 text-start">
                               אנגלית
                             </label>
                             <input
@@ -1696,7 +1696,7 @@ export default function OnboardingDiagnosticPage() {
                               className="w-full bg-white border border-neutral-200 rounded-xl p-2.5 text-sm font-mono text-center focus:outline-none focus:ring-2 focus:ring-neutral-900/10"
                             />
                             {isPsychometricScoreOutOfRange(prevPsychEnglish) && (
-                              <p className="mt-1 text-[11px] text-amber-600 text-start">
+                              <p className="mt-1 text-[14px] text-amber-600 text-start">
                                 מומלץ טווח 50–150
                               </p>
                             )}
@@ -1719,7 +1719,7 @@ export default function OnboardingDiagnosticPage() {
                         onChange={(e) => setLastGrade(Number(e.target.value))}
                         className="w-full accent-neutral-900 cursor-pointer"
                       />
-                      <div className="flex justify-between text-[11px] text-neutral-400 font-medium">
+                      <div className="flex justify-between text-[14px] text-neutral-400 font-medium">
                         <span>30 (פער עמוק)</span>
                         <span>65 (בינוני)</span>
                         <span>100 (מצוינות)</span>
@@ -1936,7 +1936,7 @@ export default function OnboardingDiagnosticPage() {
               {englishWordCount > 0 &&
                 (englishWordCount < englishWritingPrompt.minWords ||
                   englishWordCount > englishWritingPrompt.maxWords) && (
-                  <p className="text-[11px] text-amber-600 text-start">
+                  <p className="text-[14px] text-amber-600 text-start">
                     מומלץ לעמוד בטווח המילים של הבחינה — המשימה עדיין רשות.
                   </p>
                 )}
@@ -1989,7 +1989,7 @@ export default function OnboardingDiagnosticPage() {
                     <span className="text-4xl sm:text-5xl font-semibold tracking-tight text-neutral-900">
                       {teaserData.estimatedScore}%
                     </span>
-                    <span className="block text-[10px] font-medium text-neutral-500 tracking-widest mt-1">
+                    <span className="block text-[13px] font-medium text-neutral-500 tracking-widest mt-1">
                       מדד מוכנות נוכחי
                     </span>
                   </div>
@@ -2161,7 +2161,7 @@ export default function OnboardingDiagnosticPage() {
                           <span className="h-4 w-20 bg-neutral-100 rounded-md" />
                         </div>
                         {typeof t.subTopicsCount === "number" && t.subTopicsCount > 0 && (
-                          <p className="text-[11px] text-neutral-500 font-medium text-start">
+                          <p className="text-[14px] text-neutral-500 font-medium text-start">
                             {t.subTopicsCount} תתי־נושאים · הסברים מפורטים · התאמת מורה
                           </p>
                         )}
@@ -2193,7 +2193,7 @@ export default function OnboardingDiagnosticPage() {
                     )}
 
                     <div className="space-y-2 pt-1">
-                      <p className="text-[11px] text-neutral-500 font-medium">
+                      <p className="text-[14px] text-neutral-500 font-medium">
                         {recommendedPackage === "MULTI"
                           ? "מומלץ: חבילת MULTI — 5 שיעורים · ₪850"
                           : "מומלץ: חבילת TRIO — 3 שיעורים · ₪540"}
@@ -2213,7 +2213,7 @@ export default function OnboardingDiagnosticPage() {
                         <ArrowLeft className="me-1" />
                         שחרור הדו״ח המלא והתאמת מורה
                       </Link>
-                      <p className="text-[10px] text-neutral-400 font-medium">
+                      <p className="text-[13px] text-neutral-400 font-medium">
                         {recommendedLessons} שיעורים · ללא שיבוץ לפני תשלום
                       </p>
                     </div>
