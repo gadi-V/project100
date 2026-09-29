@@ -1,5 +1,8 @@
 import { prisma } from "./prisma";
 import { writeAuditLog } from "./audit";
+import { normalizeToWhatsAppJid } from "./utils/phone";
+
+const DEFAULT_DAILY_DOMAIN = "project100.daily.co";
 
 function getAppUrl(): string {
   return (
@@ -16,13 +19,18 @@ function getWhatsAppConfig(): { apiUrl: string; apiKey: string } | null {
   return { apiUrl: apiUrl.replace(/\/$/, ""), apiKey };
 }
 
-function normalizeWhatsAppPhone(phone: string): string {
-  return phone.replace(/[\s\-()+/]/g, "").trim();
+function getDailyDomain(): string {
+  const domain = process.env.DAILY_DOMAIN?.trim();
+  if (domain) return domain;
+  console.warn(
+    `[teacher-welcome] DAILY_DOMAIN is not set — falling back to ${DEFAULT_DAILY_DOMAIN}`
+  );
+  return DEFAULT_DAILY_DOMAIN;
 }
 
-async function sendWhatsAppText(phone: string, message: string): Promise<void> {
+/** `chatId` must already be a normalized WhatsApp JID (`972XXXXXXXXX@c.us`). */
+async function sendWhatsAppText(chatId: string, message: string): Promise<void> {
   const config = getWhatsAppConfig();
-  const chatId = normalizeWhatsAppPhone(phone);
 
   if (!config) {
     console.log("================== MOCK WHATSAPP (teacher-welcome) ==================");
@@ -39,8 +47,8 @@ async function sendWhatsAppText(phone: string, message: string): Promise<void> {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      phone: chatId,
-      chatId: `${chatId}@c.us`,
+      phone: chatId.replace(/@c\.us$/, ""),
+      chatId,
       message,
     }),
   });
@@ -64,6 +72,8 @@ export type WelcomeEnvelopeResult = {
   permanentRoomUrl: string;
   welcomePackSentAt: Date;
   trainingTrackJoined: boolean;
+  /** False when the teacher phone is invalid or the gateway call failed. */
+  whatsappSent: boolean;
 };
 
 /**
@@ -90,9 +100,8 @@ export async function dispatchTeacherWelcomeEnvelope({
   }
 
   const appUrl = getAppUrl();
-  const roomDomain = process.env.DAILY_DOMAIN || "project8.daily.co";
   const slug = `tutor-${teacher.name.replace(/[^a-zA-Z0-9]/g, "").toLowerCase() || teacher.id.slice(0, 8)}`;
-  const permanentRoomUrl = customRoomUrl || `https://${roomDomain}/${slug}`;
+  const permanentRoomUrl = customRoomUrl || `https://${getDailyDomain()}/${slug}`;
   const now = new Date();
 
   await prisma.$transaction(async (tx) => {
@@ -148,10 +157,24 @@ export async function dispatchTeacherWelcomeEnvelope({
     `מאחלים לך הצלחה רבה והוראה מעצימה!\n` +
     `צוות PROJECT100`;
 
+  let chatId: string | null = null;
   try {
-    await sendWhatsAppText(teacher.phone, welcomeMessage);
+    chatId = normalizeToWhatsAppJid(teacher.phone);
   } catch (err) {
-    console.error("Failed to send WhatsApp welcome envelope:", err);
+    console.error(
+      `[teacher-welcome] Invalid phone for teacher ${teacherId}; WhatsApp welcome not sent:`,
+      err instanceof Error ? err.message : err
+    );
+  }
+
+  let whatsappSent = false;
+  if (chatId) {
+    try {
+      await sendWhatsAppText(chatId, welcomeMessage);
+      whatsappSent = true;
+    } catch (err) {
+      console.error("Failed to send WhatsApp welcome envelope:", err);
+    }
   }
 
   return {
@@ -159,5 +182,6 @@ export async function dispatchTeacherWelcomeEnvelope({
     permanentRoomUrl,
     welcomePackSentAt: now,
     trainingTrackJoined: true,
+    whatsappSent,
   };
 }

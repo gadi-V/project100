@@ -10,7 +10,7 @@
 
 | Layer | Files (responsibility) | Status |
 |---|---|---|
-| **L1 — Data / Prisma** | `prisma/schema.prisma` — 15 models, 12 enums; Postgres/Neon | ✅ Live (db push, additive-only) |
+| **L1 — Data / Prisma** | `prisma/schema.prisma` — 19 models, 9 enums; Postgres/Neon | ✅ Live (additive-only; migrations synced — see §6) |
 | **L2 — Services (`lib/`)** | `matching.ts`, `teacher-vetting.ts`, `lesson-summary.ts`, `package-chat.ts`, `diagnostic-quiz.ts`, `ledger/PayoutService`, `whatsapp.ts`, `daily.ts`, `stream.ts`, `scheduling.ts`, `storage.ts`, `curriculum-agent.ts`, `curriculum-rubric.ts` + more | ✅ Live |
 | **L3 — API (`app/api/`)** | teachers / diagnostic / lessons / packages / admin + whatsapp/closer + cron | ✅ Live (new endpoints verified) |
 | **L4 — Agent Hive & Desks** | `agents_hive/hive_mcp.py` (FastMCP, 10 tools) + `scanner_desk.py`, `creative_factory.py`, `head_of_desk.py`, `hive_orchestrator.py` | ✅ Live |
@@ -99,6 +99,12 @@ Verified by `test_hive_mcp_tools.py`:
 | `OPENROUTER_API_KEY`, `OPENROUTER_BASE_URL`, `MODEL_*` | Agent Hive reasoning/generation |
 | `HIVE_MONITOR_SECRET` | Head-of-Desk server-to-server auth |
 | `DAILY_ENABLE_CLOUD_RECORDING` | Daily cloud-recording opt-in |
+| `NEXT_PUBLIC_APP_URL` | Public origin fallback for client + WhatsApp links |
+| `INTERNAL_SERVICE_KEY` | Agent Hive → app service-to-service auth |
+| `WHATSAPP_ADMIN_PHONE`, `WHATSAPP_TEACHER_PLACEHOLDER_PHONE` | Quad-group admin / teacher members (omitted when empty — no fake fallbacks) |
+| `DAILY_DOMAIN` | Teacher permanent room links (`lib/teacher-welcome.ts`; warns + falls back to `project100.daily.co`) |
+| `NEXT_PUBLIC_EXAM_581_PDF_URL` | Teacher onboarding exam-581 PDF |
+| `TELEGRAM_BOT_TOKEN`, `MANAGER_ALERT_PHONE`, `MANAGER_ALERT_TELEGRAM_CHAT_ID` | Head-of-Desk manager alerts |
 
 ---
 
@@ -112,3 +118,28 @@ Verified by `test_hive_mcp_tools.py`:
 | `scripts/test-curriculum-e2e.ts` | matching-adjacent curriculum E2E | ✅ |
 
 **Feedback loop:** `npx tsc --noEmit` → `TSC EXIT: 0` on every station.
+
+---
+
+## 6. Prisma Migration History
+
+| Migration | Content |
+|---|---|
+| `0_init` | Base schema |
+| `20260827120000_p1_ratings_and_reschedule` | Lesson rating / reschedule counter, TeacherProfile rating aggregates |
+| `20260827160000_payment_status` | Payment status |
+| `20260929152923_sync_missing_models` | Catches up everything previously applied via `db push`: `Package`, `CurriculumTopic` (+ `_CurriculumTopicToDiagnosticQuiz`), `VettingStepLog`, `UnifiedPackageChat`, `PreLessonAsset`, 6 enums, new nullable/defaulted columns on `User` / `TeacherProfile` / `Lesson` / `DiagnosticQuiz`, and `Lesson.ratedAt` aligned to `TIMESTAMP(3)`. Additive only — no drops or renames. |
+
+Replaying all four migrations reproduces `prisma/schema.prisma` exactly.
+
+**Existing databases that were synced with `db push`** already contain these objects. Mark the sync
+migration as applied instead of executing it (running it would fail with "already exists"):
+
+```bash
+npx prisma migrate resolve --applied 20260929152923_sync_missing_models
+```
+
+If the database has no `_prisma_migrations` history at all, run `migrate resolve --applied` for each of
+the four migrations, in order.
+
+Fresh databases apply all migrations normally with `npx prisma migrate deploy`.
