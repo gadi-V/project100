@@ -218,6 +218,12 @@ export default function DashboardPage() {
         const data = await response.json();
         if (cancelled) return;
 
+        if (data.user.role === "REPRESENTATIVE") {
+          redirected.current = true;
+          router.replace("/portal/dashboard");
+          return;
+        }
+
         setUser(data.user);
         setHasCompletedQuiz(data.hasCompletedQuiz);
         if (data.teacherOnboarding) {

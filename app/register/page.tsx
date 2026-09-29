@@ -1,4 +1,3 @@
-"use client";
 import Link from "next/link";
 import { frostCard, pageCanvas } from "../../lib/ui";
 import BrandWordmark from "../../components/BrandWordmark";
@@ -36,7 +35,7 @@ function ForwardArrow({ className = "me-1.5 inline-block h-3.5 w-3.5" }: { class
 export default function RegisterHubPage() {
   return (
     <div className={`${pageCanvas} font-sans antialiased py-16 px-6`} dir="rtl">
-      <div className="max-w-xl mx-auto space-y-10">
+      <div className="max-w-md mx-auto space-y-10">
         <div className="text-center space-y-2">
           <Link
             href="/"
@@ -46,49 +45,36 @@ export default function RegisterHubPage() {
             <BackArrow />
           </Link>
           <h1 className="text-4xl font-semibold text-neutral-900 tracking-tight pt-4">
-            בחרו סוג הרשמה
+            הרשמה ל-PROJECT100
           </h1>
+          <p className="text-sm text-neutral-500">לתלמידים, לסטודנטים ולהורים.</p>
+        </div>
+
+        <Link href="/register/student" className={`${frostCard} block p-6 text-start space-y-3`}>
+          <h2 className="text-xl font-semibold text-neutral-900">תלמיד/ה, סטודנט/ית או הורה</h2>
+          <p className="text-sm text-neutral-500 leading-relaxed">
+            פותחים חשבון, עושים אבחון קצר ומקבלים התאמה למורה.
+          </p>
+          <span className="inline-flex items-center text-sm font-medium text-neutral-900 pt-2">
+            <ForwardArrow />
+            להרשמה
+          </span>
+        </Link>
+
+        <div className="text-center space-y-3">
           <p className="text-sm text-neutral-500">
-            תהליך נפרד לתלמידים/הורים ולמורים — כדי לאסוף בדיוק את הנתונים הנכונים.
+            כבר יש חשבון?{" "}
+            <Link href="/login" className="font-medium text-neutral-900 hover:underline">
+              התחברות
+            </Link>
+          </p>
+          <p className="text-xs text-neutral-400">
+            מעוניין ללמד אצלנו?{" "}
+            <Link href="/careers" className="text-neutral-600 hover:text-neutral-900 hover:underline">
+              הגש מועמדות להוראה
+            </Link>
           </p>
         </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <Link
-            href="/register/student"
-            className={`${frostCard} p-6 text-start space-y-3`}
-          >
-            <h2 className="text-xl font-semibold text-neutral-900">תלמיד/סטודנט</h2>
-            <p className="text-sm text-neutral-500 leading-relaxed">
-              אבחון לימודי, פתיחת חשבון והתאמת מורה לפי הפרופיל שלכם.
-            </p>
-            <span className="inline-flex items-center text-sm font-medium text-neutral-900 pt-2">
-              <ForwardArrow />
-              המשך להרשמת תלמיד
-            </span>
-          </Link>
-
-          <Link
-            href="/register/teacher"
-            className={`${frostCard} p-6 text-start space-y-3`}
-          >
-            <h2 className="text-xl font-semibold text-neutral-900">מורה / מרצה</h2>
-            <p className="text-sm text-neutral-500 leading-relaxed">
-              פרופיל מקצועי, תחומי התמחות וקבוצות גיל — לאחר אישור צוות.
-            </p>
-            <span className="inline-flex items-center text-sm font-medium text-neutral-900 pt-2">
-              <ForwardArrow />
-              המשך להרשמת מורה
-            </span>
-          </Link>
-        </div>
-
-        <p className="text-center text-sm text-neutral-500">
-          כבר יש חשבון?{" "}
-          <Link href="/login" className="font-medium text-neutral-900 hover:underline">
-            התחברות
-          </Link>
-        </p>
       </div>
     </div>
   );

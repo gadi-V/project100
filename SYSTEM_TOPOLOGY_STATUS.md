@@ -35,10 +35,12 @@
 - `GET/POST /api/teachers/me/vetting` — status + exam-581 submission (PENDING_REVIEW). Session-only identity (Sprint 5).
 - `GET/POST /api/admin/teachers` & `GET/POST /api/admin/teachers/[id]/vetting`.
 - `POST /api/careers/apply` — public job application from `/careers` (AuditLog `TEACHER_CANDIDATE_APPLIED`, no User created). Rate-limited (`api`) (Sprint 9).
+- `POST /api/register` — students/parents only; `role: "TEACHER"` → `403` (Sprint 10). `/register/teacher` redirects to `/careers`.
 
 ### Staff & intake
 - `POST /api/login` with `portal: "staff"` — staff gate used by `/portal/login`; non-staff roles get `403` and no cookie (Sprint 9).
 - `GET/POST /api/admin/intake` — mapping-call questionnaire (`IntakeAssessment`), REPRESENTATIVE / ADMIN / MANAGER only (Sprint 9).
+- Pages `/portal/dashboard` (staff dashboard) and `/portal/intake` (mapping-call workspace) — server-side role gate (Sprint 10).
 
 ### Diagnostics & packages
 - `POST /api/diagnostic/teaser` — 5-step funnel (also triggers WhatsApp Closer).
@@ -171,7 +173,48 @@ Fresh databases apply all migrations normally with `npx prisma migrate deploy`.
 | 6 | `teachers/apply` IDOR closed; serverless agent swarm: `lib/agents/core/llm.ts`, lead agent, cron-secured `/api/agents/dispatch` (`1c52282`) | ✅ Completed |
 | 7 | Lead dispatch loop closed: live WhatsApp send, AuditLog-based 14-day anti-spam cooldown, QStash schedule (`49d99da`) | ✅ Completed |
 | 8 | Live quad WhatsApp group (student + teacher + parent + admin) with structured welcome message and role split | ✅ Completed |
-| 9 | Public/staff UI split, isolated `/portal/login`, `/careers` + candidate API, unlock placeholder link removed, `IntakeAssessment` model + intake API | ✅ Completed |
+| 9 | Public/staff UI split, isolated `/portal/login`, `/careers` + candidate API, unlock placeholder link removed, `IntakeAssessment` model + intake API (`d2702e8`) | ✅ Completed |
+| 10 | Public teacher registration sealed (UI + API), representative dashboard `/portal/dashboard`, mapping-call workspace `/portal/intake` | ✅ Completed |
+
+### Teacher sign-up sealed, staff intake portal (Sprint 10)
+
+- **Public registration = students and parents only.**
+  - `app/register/page.tsx` has a single "תלמיד/ה, סטודנט/ית או הורה" card → `/register/student`, the heading
+    "הרשמה ל-PROJECT100", and a small footnote "מעוניין ללמד אצלנו? הגש מועמדות להוראה" → `/careers`.
+  - `app/register/teacher/page.tsx` only calls `redirect("/careers")`; the old direct sign-up form is gone.
+  - `POST /api/register` now returns `403` for `role: "TEACHER"` (any case) before touching the DB, and always
+    creates `STUDENT`. The TeacherProfile branch was removed. Without this, the API alone still opened teacher
+    accounts after the UI was removed.
+  - **Known gap:** there is no admin flow yet that turns an accepted `/careers` candidate into a teacher
+    account. Until one is built, teacher users can only be created directly in the database.
+- **Role routing** (`lib/auth/staff-roles.ts`): `staffPortalHome` → ADMIN/MANAGER `/admin`, REPRESENTATIVE
+  `/portal/dashboard`, TEACHER `/dashboard`. `/dashboard` sends a REPRESENTATIVE on to `/portal/dashboard`.
+- **Mapping-call queue** (`lib/intake-queue.ts`, server only): a candidate is pending until it has an
+  `IntakeAssessment`.
+  - Leads: `FallbackLead` with `isHandled = false` and no intake.
+  - Students: `role = STUDENT`, registered within 30 days (`NEW_STUDENT_WINDOW_DAYS`), no intake.
+  - Helpers: `countPendingIntakes`, `getPendingIntakeCandidates` (≤100 of each, merged newest first),
+    `getIntakeCandidate(kind, id)` for deep links, `getRecentIntakes(10)`.
+- **`/portal/dashboard`** (server component, `force-dynamic`): anonymous / STUDENT → `redirect("/portal/login")`;
+  TEACHER → `redirect("/dashboard")` (weekly board stays there); REPRESENTATIVE / ADMIN / MANAGER see the pending
+  count (leads + new students), one primary action "התחל שיחת מיפוי חדשה" → `/portal/intake`, the next 5 in queue
+  (deep links `?leadId=` / `?studentId=`), and the 10 latest intakes (name, grade, weak topic, representative,
+  date in Israel time). ADMIN/MANAGER also get a "לוח ניהול" link to `/admin`.
+- **`/portal/intake`** (server gate + `IntakeWorkspace.tsx` client): anything other than REPRESENTATIVE / ADMIN /
+  MANAGER → `redirect("/portal/login")`.
+  - Left panel: searchable queue (name or phone digits) showing name, phone, source, date and requested
+    subject / class track. A deep-linked candidate that is no longer pending is still loaded and preselected.
+  - Right panel: two tabs, "שאלון תלמיד" and "שאלון הורה". The field list lives in `lib/intake-form.ts`
+    (`STUDENT_INTAKE_FIELDS` / `PARENT_INTAKE_FIELDS`), covering every `IntakeAssessment` questionnaire field. It
+    uses text with suggestions, number, date, yes/no toggles and 1–5 ratings, and required fields are marked.
+  - Submit: `buildIntakePayload` turns form strings into the API body (numbers, booleans, `null` for blanks;
+    unparseable numbers are sent as-is so validation reports them). The same `parseIntakeAssessment` runs in the
+    browser first, then `POST /api/admin/intake`. Success shows "השאלון של … נשמר", removes the candidate from the
+    queue and offers the next call.
+- **Portal chrome:** `app/portal/PortalHeader.tsx` (staff nav, admin link, logout → `/portal/login`); the
+  marketing Navbar/Footer stay hidden on `/portal/*`.
+- Tests: `tests/staff-intake-portal.test.ts` (27 tests): register hub/redirect/API seal, page gates for
+  anonymous/STUDENT/TEACHER, queue filters, form ↔ API field and required-flag parity, payload → `POST` round trip.
 
 ### Public/staff split, careers and intake (Sprint 9)
 
@@ -184,8 +227,8 @@ Fresh databases apply all migrations normally with `npx prisma migrate deploy`.
   `STAFF_PORTAL_ROLES` (`TEACHER`, `REPRESENTATIVE`, `ADMIN`, `MANAGER`; `lib/auth/staff-roles.ts`). ADMIN/MANAGER
   land on `/admin`, TEACHER/REPRESENTATIVE on `/dashboard`. The regular `/login` still accepts every role.
 - **New role `REPRESENTATIVE`** (additive enum value). `/api/register` can still only create STUDENT/TEACHER, so
-  the role is assigned by an admin only. Representatives are redirected away from `/lessons/[id]`. The dashboard has
-  no representative-specific view yet.
+  the role is assigned by an admin only. Representatives are redirected away from `/lessons/[id]`; their
+  dashboard is `/portal/dashboard` (Sprint 10).
 - **`/careers`** (`app/careers/page.tsx`): full name, phone, email, education/degree, years of experience, teaching
   frameworks (`SCHOOL` / `INSTITUTE` / `PRIVATE` / `ACADEMIA` / `OTHER`) + previous institutions, subjects, and an
   https CV link (no anonymous file upload — `/api/upload` requires a session).

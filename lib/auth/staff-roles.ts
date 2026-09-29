@@ -15,7 +15,13 @@ export function isStaffPortalRole(role: string | null | undefined): boolean {
   return (STAFF_PORTAL_ROLES as readonly string[]).includes(role ?? "");
 }
 
+export function isIntakeRecorderRole(role: string | null | undefined): boolean {
+  return (INTAKE_RECORDER_ROLES as readonly string[]).includes(role ?? "");
+}
+
 /** Landing page after a successful staff sign-in. `/admin` only admits ADMIN / MANAGER. */
 export function staffPortalHome(role: string): string {
-  return role === "ADMIN" || role === "MANAGER" ? "/admin" : "/dashboard";
+  if (role === "ADMIN" || role === "MANAGER") return "/admin";
+  if (role === "REPRESENTATIVE") return "/portal/dashboard";
+  return "/dashboard";
 }

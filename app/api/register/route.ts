@@ -3,13 +3,10 @@ import bcrypt from "bcryptjs";
 import { prisma } from "../../../lib/prisma";
 import { signSession, sessionCookieOptions } from "../../../lib/auth";
 
-function parseStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .map((v) => (typeof v === "string" ? v.trim() : ""))
-    .filter(Boolean);
-}
-
+/**
+ * Public sign-up for students and parents only. Teacher accounts are never created here:
+ * candidates apply through `/careers` and are onboarded by the management team.
+ */
 export async function POST(request: Request) {
   try {
     const body = await request.json();
@@ -22,26 +19,16 @@ export async function POST(request: Request) {
       );
     }
 
-    if (password.length < 6) {
+    if (typeof role === "string" && role.toUpperCase() === "TEACHER") {
       return NextResponse.json(
-        { error: "הסיסמה חייבת להכיל לפחות 6 תווים" },
-        { status: 400 }
+        { error: "הרשמת מורים מתבצעת דרך הגשת מועמדות בעמוד /careers" },
+        { status: 403 }
       );
     }
 
-    const formattedRole = role.toUpperCase() === "TEACHER" ? "TEACHER" : "STUDENT";
-
-    const subjects = parseStringArray(body.subjects);
-    const ageGroups = parseStringArray(body.ageGroups);
-    const bio = typeof body.bio === "string" ? body.bio.trim() || null : null;
-    const profileImageUrl =
-      typeof body.profileImageUrl === "string"
-        ? body.profileImageUrl.trim() || null
-        : null;
-
-    if (formattedRole === "TEACHER" && subjects.length === 0) {
+    if (password.length < 6) {
       return NextResponse.json(
-        { error: "יש להזין לפחות מקצוע התמחות אחד בהרשמת מורה" },
+        { error: "הסיסמה חייבת להכיל לפחות 6 תווים" },
         { status: 400 }
       );
     }
@@ -71,32 +58,16 @@ export async function POST(request: Request) {
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    const newUser = await prisma.$transaction(async (tx) => {
-      const user = await tx.user.create({
-        data: {
-          name,
-          phone,
-          email: email || null,
-          password: hashedPassword,
-          role: formattedRole,
-          lessonCredits: 0,
-          isApproved: formattedRole === "TEACHER" ? false : true,
-        },
-      });
-
-      if (formattedRole === "TEACHER") {
-        await tx.teacherProfile.create({
-          data: {
-            userId: user.id,
-            subjects,
-            ageGroups,
-            bio,
-            profileImageUrl,
-          },
-        });
-      }
-
-      return user;
+    const newUser = await prisma.user.create({
+      data: {
+        name,
+        phone,
+        email: email || null,
+        password: hashedPassword,
+        role: "STUDENT",
+        lessonCredits: 0,
+        isApproved: true,
+      },
     });
 
     const token = await signSession(newUser.id);
