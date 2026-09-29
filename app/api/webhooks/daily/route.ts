@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { prisma } from "../../../../lib/prisma";
 import {
-  getRecordingDownloadUrl,
+  isValidDailyRecordingId,
   lessonIdFromDailyRoomName,
+  toDailyRecordingRef,
   verifyDailyWebhookSignature,
 } from "../../../../lib/daily";
 
@@ -13,6 +14,7 @@ type DailyWebhookBody = {
   id?: string;
   payload?: {
     recording_id?: string;
+    id?: string;
     room_name?: string;
     download_url?: string;
     download_link?: string;
@@ -112,11 +114,25 @@ export async function POST(request: Request) {
   }
 }
 
+/** `payload.recording_id` per Daily docs; `payload.id` is accepted as a fallback. */
+function extractRecordingId(body: DailyWebhookBody): string | null {
+  const payload = body.payload ?? {};
+  for (const candidate of [payload.recording_id, payload.id]) {
+    if (typeof candidate === "string" && isValidDailyRecordingId(candidate.trim())) {
+      return candidate.trim();
+    }
+  }
+  return null;
+}
+
+/**
+ * Persists `daily-rec:<recording_id>` on the lesson. Any `download_link` in the
+ * payload is ignored: it expires, and `/api/daily/signed-url` mints a fresh
+ * one from the recording id on every view.
+ */
 async function handleRecordingReady(body: DailyWebhookBody) {
   const payload = body.payload ?? {};
   const roomName = typeof payload.room_name === "string" ? payload.room_name : null;
-  const recordingId =
-    typeof payload.recording_id === "string" ? payload.recording_id : null;
 
   if (!roomName) {
     throw new Error("recording.ready-to-download missing room_name");
@@ -127,18 +143,9 @@ async function handleRecordingReady(body: DailyWebhookBody) {
     throw new Error(`Cannot map Daily room_name to lesson: ${roomName}`);
   }
 
-  // Prefer URL from payload when present; otherwise mint a signed access link.
-  let downloadUrl =
-    (typeof payload.download_url === "string" && payload.download_url) ||
-    (typeof payload.download_link === "string" && payload.download_link) ||
-    null;
-
-  if (!downloadUrl && recordingId) {
-    downloadUrl = await getRecordingDownloadUrl(recordingId);
-  }
-
-  if (!downloadUrl) {
-    throw new Error("No download_url available for recording");
+  const recordingId = extractRecordingId(body);
+  if (!recordingId) {
+    throw new Error("recording.ready-to-download missing a valid recording_id");
   }
 
   const lesson = await prisma.lesson.findUnique({ where: { id: lessonId } });
@@ -148,6 +155,6 @@ async function handleRecordingReady(body: DailyWebhookBody) {
 
   await prisma.lesson.update({
     where: { id: lessonId },
-    data: { videoRecordingUrl: downloadUrl },
+    data: { videoRecordingUrl: toDailyRecordingRef(recordingId) },
   });
 }

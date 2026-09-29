@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "../../../../../lib/prisma";
+import { requireAuth } from "../../../../../lib/api-auth";
 import {
   getTeacherVettingProgress,
   updateVettingStep,
@@ -7,14 +8,20 @@ import {
 import { VettingStepName, VettingStepStatus } from "@prisma/client";
 import { uploadBoardImage, uploadLessonPdf } from "../../../../../lib/storage";
 
-export async function GET(request: NextRequest) {
-  try {
-    const authHeader = request.headers.get("x-user-id");
+/**
+ * Identity comes only from the signed session cookie. The `x-user-id` request
+ * header is attacker-controllable and is never read here.
+ */
+function findOwnTeacherProfile(userId: string) {
+  return prisma.teacherProfile.findUnique({ where: { userId } });
+}
 
-    const teacherProfile = await prisma.teacherProfile.findFirst({
-      where: authHeader ? { userId: authHeader } : undefined,
-      orderBy: { createdAt: "desc" },
-    });
+export async function GET() {
+  const auth = await requireAuth();
+  if (auth.error) return auth.error;
+
+  try {
+    const teacherProfile = await findOwnTeacherProfile(auth.user.id);
 
     if (!teacherProfile) {
       return NextResponse.json(
@@ -40,11 +47,17 @@ export async function GET(request: NextRequest) {
  * ADMIN/MANAGER still has to pass it on the admin vetting dashboard.
  */
 export async function POST(request: NextRequest) {
-  try {
-    const authHeader = request.headers.get("x-user-id");
-    const contentType = request.headers.get("content-type") ?? "";
+  const auth = await requireAuth();
+  if (auth.error) return auth.error;
 
-    const body = (await request.json().catch(() => ({}))) as {
+  try {
+    const contentType = request.headers.get("content-type") ?? "";
+    const isMultipart = contentType.includes("multipart/form-data");
+
+    // The body stream can be read once: multipart is parsed via formData() below.
+    const body = (
+      isMultipart ? {} : await request.json().catch(() => ({}))
+    ) as {
       solutionUrl?: unknown;
       notes?: unknown;
       examSolutionUrl?: unknown;
@@ -58,17 +71,14 @@ export async function POST(request: NextRequest) {
         ? body.examSolutionUrl.trim()
         : null);
 
-    if (!solutionUrl && !contentType.includes("multipart/form-data")) {
+    if (!solutionUrl && !isMultipart) {
       return NextResponse.json(
         { error: "יש להזין קישור לקובץ הפתרון" },
         { status: 400 }
       );
     }
 
-    const teacherProfile = await prisma.teacherProfile.findFirst({
-      where: authHeader ? { userId: authHeader } : undefined,
-      orderBy: { createdAt: "desc" },
-    });
+    const teacherProfile = await findOwnTeacherProfile(auth.user.id);
 
     if (!teacherProfile) {
       return NextResponse.json(
@@ -81,7 +91,7 @@ export async function POST(request: NextRequest) {
     let uploadedSolutionUrls: string[] = [];
     let uploadedNotes = "";
 
-    if (contentType.includes("multipart/form-data")) {
+    if (isMultipart) {
       const formData = await request.formData();
       const files = formData.getAll("solutions").filter((f): f is File => f instanceof File);
 

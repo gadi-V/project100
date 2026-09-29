@@ -40,6 +40,21 @@ const PUBLIC_API_PREFIXES = ["/api/diagnostic", "/api/cron"] as const;
 
 const AUTH_PAGES = new Set(["/login", "/register", "/forgot-password"]);
 
+/**
+ * Identity header consumed by downstream route handlers. Client-supplied values
+ * are always dropped; it is only ever set from a verified session JWT.
+ */
+const TRUSTED_USER_ID_HEADER = "x-user-id";
+
+function forward(request: NextRequest, verifiedUserId: string | null = null) {
+  const headers = new Headers(request.headers);
+  headers.delete(TRUSTED_USER_ID_HEADER);
+  if (verifiedUserId) {
+    headers.set(TRUSTED_USER_ID_HEADER, verifiedUserId);
+  }
+  return NextResponse.next({ request: { headers } });
+}
+
 function isPublicApiPath(pathname: string): boolean {
   if (PUBLIC_API_ROUTES.has(pathname)) return true;
   return PUBLIC_API_PREFIXES.some(
@@ -72,11 +87,12 @@ export async function middleware(request: NextRequest) {
 
   // Never run redirect logic on auth pages themselves (hard stop for loops)
   if (AUTH_PAGES.has(pathname)) {
-    return NextResponse.next();
+    return forward(request);
   }
 
   const token = request.cookies.get(SESSION_COOKIE)?.value;
   const session = token ? await verifySession(token) : null;
+  const verifiedUserId = session?.userId ?? null;
 
   const isProtectedPage =
     pathname === "/dashboard" ||
@@ -89,7 +105,7 @@ export async function middleware(request: NextRequest) {
   if (isProtectedPage && !session) {
     // Guard: never redirect to the same path
     if (pathname === "/login") {
-      return NextResponse.next();
+      return forward(request);
     }
 
     const loginUrl = new URL("/login", request.url);
@@ -99,19 +115,19 @@ export async function middleware(request: NextRequest) {
 
   if (pathname.startsWith("/api/")) {
     if (isPublicApiPath(pathname)) {
-      return NextResponse.next();
+      return forward(request, verifiedUserId);
     }
     // FastMCP / cron M2M: valid Bearer HIVE_MONITOR_SECRET bypasses cookie auth.
     // Route handlers still re-verify via requireAuthOrMonitor.
     if (isHiveMonitorBearer(request)) {
-      return NextResponse.next();
+      return forward(request, verifiedUserId);
     }
     if (!session) {
       return NextResponse.json({ error: "נדרשת התחברות למערכת" }, { status: 401 });
     }
   }
 
-  return NextResponse.next();
+  return forward(request, verifiedUserId);
 }
 
 export const config = {

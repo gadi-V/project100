@@ -32,7 +32,7 @@
 
 ### Teacher funnel
 - `POST /api/teachers/apply` — apply (creates TeacherProfile + 6 step logs).
-- `GET/POST /api/teachers/me/vetting` — status + exam-581 submission (PENDING_REVIEW).
+- `GET/POST /api/teachers/me/vetting` — status + exam-581 submission (PENDING_REVIEW). Session-only identity (Sprint 5).
 - `GET/POST /api/admin/teachers` & `GET/POST /api/admin/teachers/[id]/vetting`.
 
 ### Diagnostics & packages
@@ -59,7 +59,8 @@
 
 ### Cron / Webhooks
 - `GET /api/cron/lesson-reminders` (`*/5`), `GET /api/cron/head-of-desk` (`*/15`).
-- `POST /api/webhooks/daily`, `POST /api/webhooks/stripe`.
+- `POST /api/webhooks/daily` (stores `daily-rec:<recording_id>`), `POST /api/webhooks/stripe`.
+- `GET /api/daily/signed-url` — fresh Daily access link per view (Sprint 5).
 
 ---
 
@@ -156,6 +157,39 @@ Fresh databases apply all migrations normally with `npx prisma migrate deploy`.
 | 2 | Teacher-welcome WhatsApp normalization, Prisma migration sync, `.env.example` (`2ce50ad`) | ✅ Completed |
 | 3 | GitHub Actions CI + distributed rate limiting on Upstash Redis (`f50e01d`, `93139be`) | ✅ Completed |
 | 4 | Production 503 prevention, classroom-sized auth limit, serverless-safe curriculum agent & storage | ✅ Completed |
+| 5 | `x-user-id` header-spoofing neutralized (middleware + teacher vetting), Daily recordings stored by `recording_id` with fresh signed URLs | ✅ Completed |
+
+### Identity header hardening (Sprint 5)
+
+- `middleware.ts` routes every forwarded request through one helper that **deletes** the client-supplied
+  `x-user-id` header and re-sets it **only** from a verified session JWT (`verifySession` on
+  `project8_session`). Public routes, auth pages, the Hive M2M bearer path and forged/expired cookies all
+  forward without `x-user-id`. It uses `NextResponse.next({ request: { headers } })`, so Next replaces the
+  downstream request headers instead of passing the originals through.
+- `GET/POST /api/teachers/me/vetting` no longer reads `x-user-id`. Identity comes from `requireAuth()`
+  (`getCurrentUser()` → session cookie + DB). No session → `401`. The profile is looked up by the session
+  user (`teacherProfile.findUnique({ userId })`). Before this, a missing header meant an unfiltered
+  `findFirst`, which returned, and accepted exam-581 submissions for, the newest teacher profile of any user.
+- The same route's multipart exam-581 upload no longer calls `request.json()` before `formData()`, which
+  had consumed the body.
+- Tests: `tests/vetting-security.test.ts`.
+
+### Daily.co recordings (Sprint 5)
+
+- `POST /api/webhooks/daily` (`recording.ready-to-download`) stores `Lesson.videoRecordingUrl =
+  "daily-rec:<recording_id>"` (from `payload.recording_id`, falling back to `payload.id`). Any expiring
+  `download_link` in the payload is ignored. Missing or malformed ids (only `[A-Za-z0-9-]` is allowed) are
+  recorded on `WebhookEvent.error` and nothing is persisted.
+- `GET /api/daily/signed-url?lessonId=` (participant or ADMIN/MANAGER only) parses the reference with
+  `parseDailyRecordingRef` (`daily-rec:<id>` or a bare id). On **every** request it calls
+  `GET https://api.daily.co/v1/recordings/:id/access-link?valid_for_secs=3600` with `DAILY_API_KEY` and
+  returns `{ url, expiresAt }` with `Cache-Control: no-store`. The link lasts 1 h, inside the 2 h
+  presigned-URL cap. A Daily API failure → `502`.
+- Legacy rows that still hold a raw download URL return `410` (those links have already expired and carry
+  no usable id). The stored URL is never served.
+- Helpers in `lib/daily.ts`: `toDailyRecordingRef`, `parseDailyRecordingRef`, `getRecordingAccessLink`
+  (replaces `getRecordingDownloadUrl`), `DAILY_RECORDING_LINK_TTL_SECONDS`.
+- Tests: `tests/daily-recording.test.ts`.
 
 ### Rate limiting (Sprints 3–4)
 

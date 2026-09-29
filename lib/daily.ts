@@ -239,14 +239,56 @@ export async function generateDailyToken(
   return result.token;
 }
 
-/** Temporary signed download URL for a finished cloud recording. */
-export async function getRecordingDownloadUrl(
-  recordingId: string
-): Promise<string> {
+/**
+ * Lessons persist a stable recording reference (`daily-rec:<recording_id>`),
+ * never a download link: Daily access links expire, the recording id does not.
+ */
+export const DAILY_RECORDING_REF_PREFIX = "daily-rec:";
+
+/** Recording access links must stay within the 2-hour presigned-URL cap. */
+export const DAILY_RECORDING_LINK_TTL_SECONDS = 60 * 60;
+
+const DAILY_RECORDING_ID_PATTERN = /^[A-Za-z0-9-]{1,128}$/;
+
+export function isValidDailyRecordingId(value: string): boolean {
+  return DAILY_RECORDING_ID_PATTERN.test(value);
+}
+
+export function toDailyRecordingRef(recordingId: string): string {
+  if (!isValidDailyRecordingId(recordingId)) {
+    throw new Error(`Invalid Daily recording id: ${recordingId}`);
+  }
+  return `${DAILY_RECORDING_REF_PREFIX}${recordingId}`;
+}
+
+/**
+ * Resolve a stored `videoRecordingUrl` to a Daily recording id.
+ * Accepts `daily-rec:<id>` or a bare id; legacy stored URLs return null.
+ */
+export function parseDailyRecordingRef(stored: string): string | null {
+  const value = stored.trim();
+  const id = value.startsWith(DAILY_RECORDING_REF_PREFIX)
+    ? value.slice(DAILY_RECORDING_REF_PREFIX.length)
+    : value;
+  return isValidDailyRecordingId(id) ? id : null;
+}
+
+/** Fresh signed access link for a finished cloud recording. */
+export async function getRecordingAccessLink(
+  recordingId: string,
+  validForSeconds: number = DAILY_RECORDING_LINK_TTL_SECONDS
+): Promise<DailyAccessLink> {
+  if (!isValidDailyRecordingId(recordingId)) {
+    throw new Error(`Invalid Daily recording id: ${recordingId}`);
+  }
+  const query = new URLSearchParams({ valid_for_secs: String(validForSeconds) });
   const result = await dailyFetch<DailyAccessLink>(
-    `/recordings/${encodeURIComponent(recordingId)}/access-link`
+    `/recordings/${encodeURIComponent(recordingId)}/access-link?${query}`
   );
-  return result.download_link;
+  if (typeof result.download_link !== "string" || !result.download_link) {
+    throw new Error(`Daily returned no download_link for recording ${recordingId}`);
+  }
+  return result;
 }
 
 /**

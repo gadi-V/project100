@@ -1,12 +1,21 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "../../../../lib/session";
 import { prisma } from "../../../../lib/prisma";
-import { getRecordingDownloadUrl } from "../../../../lib/daily";
+import {
+  DAILY_RECORDING_LINK_TTL_SECONDS,
+  getRecordingAccessLink,
+  parseDailyRecordingRef,
+} from "../../../../lib/daily";
+
+const NO_STORE = { "Cache-Control": "no-store" };
 
 /**
- * Generate a short-lived signed URL for a Daily.co recording.
- * The user must be the teacher, student, or a manager of the lesson
- * associated with this recording.
+ * Mint a fresh, short-lived signed URL for a lesson's Daily.co recording.
+ * The user must be the teacher, student, or a manager of the lesson.
+ *
+ * The lesson stores only the recording id (`daily-rec:<id>`); every request
+ * calls Daily's `GET /recordings/:id/access-link` for a new link, so the
+ * stored value never goes stale and no raw link is ever persisted or reused.
  */
 export async function GET(request: Request) {
   const user = await getCurrentUser();
@@ -24,7 +33,6 @@ export async function GET(request: Request) {
     );
   }
 
-  // Verify the user is authorized to access this lesson's recording
   const lesson = await prisma.lesson.findUnique({
     where: { id: lessonId },
     select: {
@@ -55,46 +63,35 @@ export async function GET(request: Request) {
     );
   }
 
-  try {
-    // The videoRecordingUrl stored in the lesson is already a short-lived
-    // Daily access link. We re-generate a fresh one for each request to
-    // enforce the 2-hour TTL required by the security rules.
-    // Daily.co access links expire per their `expires` field; we mint a
-    // new one to ensure the client always has a valid URL.
-    const recordingId = extractRecordingId(lesson.videoRecordingUrl);
-    let signedUrl = lesson.videoRecordingUrl;
-
-    if (recordingId) {
-      try {
-        signedUrl = await getRecordingDownloadUrl(recordingId);
-      } catch {
-        // Fall back to the stored URL if re-generation fails
-        console.warn(
-          `Failed to refresh signed URL for recording ${recordingId}, using stored URL`
-        );
-      }
-    }
-
-    return NextResponse.json({ url: signedUrl });
-  } catch (error) {
-    console.error("Signed URL generation error:", error);
+  const recordingId = parseDailyRecordingRef(lesson.videoRecordingUrl);
+  if (!recordingId) {
+    // Pre-Sprint-5 rows hold an already-expired download link with no id.
     return NextResponse.json(
-      { error: "Failed to generate signed URL" },
-      { status: 500 }
+      { error: "Recording link can no longer be refreshed" },
+      { status: 410 }
     );
   }
-}
 
-/**
- * Extract the Daily recording ID from a stored URL.
- * Daily URLs look like: https://api.daily.co/v1/recordings/<id>/access-link
- * or https://<domain>.daily.co/recordings/<id>
- */
-function extractRecordingId(url: string): string | null {
   try {
-    const match = url.match(/recordings\/([a-f0-9-]+)/i);
-    return match ? match[1] : null;
-  } catch {
-    return null;
+    const link = await getRecordingAccessLink(recordingId);
+    const expiresAtMs = Number.isFinite(link.expires)
+      ? link.expires * 1000
+      : Date.now() + DAILY_RECORDING_LINK_TTL_SECONDS * 1000;
+    return NextResponse.json(
+      {
+        url: link.download_link,
+        expiresAt: new Date(expiresAtMs).toISOString(),
+      },
+      { headers: NO_STORE }
+    );
+  } catch (error) {
+    console.error(
+      `Signed URL generation failed for recording ${recordingId}:`,
+      error
+    );
+    return NextResponse.json(
+      { error: "Failed to generate signed URL" },
+      { status: 502 }
+    );
   }
 }
