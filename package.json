@@ -8,6 +8,8 @@
     "build": "next build",
     "start": "next start",
     "promote-admin": "tsx scripts/promote-admin.ts",
+    "qstash:schedules": "tsx scripts/setup-qstash-schedules.ts",
+    "test": "vitest run",
     "test:diagnostic": "vitest run tests/academic-diagnostic-integrity.test.ts"
   },
   "keywords": [],

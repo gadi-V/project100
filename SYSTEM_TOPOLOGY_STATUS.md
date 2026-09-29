@@ -95,7 +95,7 @@ Verified by `test_hive_mcp_tools.py`:
 | `TWILIO_*` / `SMS_API_*` | OTP delivery |
 | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_STORAGE_*` | Board PDF storage |
 | `WHATSAPP_API_URL`, `WHATSAPP_API_KEY` | WhatsApp transactional alerts |
-| `CRON_API_KEY` | Cron job auth |
+| `CRON_SECRET` | Cron auth (Vercel Cron + QStash forwarded header) |
 | `OPENROUTER_API_KEY`, `OPENROUTER_BASE_URL`, `MODEL_*` | Agent Hive reasoning/generation |
 | `HIVE_MONITOR_SECRET` | Head-of-Desk server-to-server auth |
 | `DAILY_ENABLE_CLOUD_RECORDING` | Daily cloud-recording opt-in |

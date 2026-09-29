@@ -3,10 +3,6 @@
     {
       "path": "/api/cron/head-of-desk",
       "schedule": "0 3 * * *"
-    },
-    {
-      "path": "/api/cron/lesson-reminders",
-      "schedule": "0 3 * * *"
     }
   ]
 }
