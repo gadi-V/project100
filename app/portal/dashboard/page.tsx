@@ -128,9 +128,18 @@ export default async function StaffDashboardPage() {
                   {recent.map((intake) => (
                     <li key={intake.id} className={`${dataRow} flex items-center justify-between gap-3`}>
                       <span className="min-w-0">
-                        <span className="block text-sm font-medium text-neutral-900 truncate">
-                          {intake.personName}
-                        </span>
+                        {intake.studentId ? (
+                          <Link
+                            href={`/portal/students/${encodeURIComponent(intake.studentId)}`}
+                            className="block text-sm font-medium text-neutral-900 truncate hover:underline underline-offset-4"
+                          >
+                            {intake.personName}
+                          </Link>
+                        ) : (
+                          <span className="block text-sm font-medium text-neutral-900 truncate">
+                            {intake.personName}
+                          </span>
+                        )}
                         <span className="block text-xs text-neutral-500 truncate">
                           כיתה {intake.grade} · נושא חלש: {intake.weakTopic}
                         </span>

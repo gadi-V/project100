@@ -10,7 +10,7 @@
 
 | Layer | Files (responsibility) | Status |
 |---|---|---|
-| **L1 — Data / Prisma** | `prisma/schema.prisma` — 20 models, 9 enums; Postgres/Neon | ✅ Live (additive-only; migrations synced — see §6) |
+| **L1 — Data / Prisma** | `prisma/schema.prisma` — 22 models, 9 enums; Postgres/Neon | ✅ Live (additive-only; migrations synced — see §6) |
 | **L2 — Services (`lib/`)** | `matching.ts`, `teacher-vetting.ts`, `lesson-summary.ts`, `package-chat.ts`, `diagnostic-quiz.ts`, `ledger/PayoutService`, `whatsapp.ts`, `daily.ts`, `stream.ts`, `scheduling.ts`, `storage.ts`, `curriculum-agent.ts`, `curriculum-rubric.ts` + more | ✅ Live |
 | **L3 — API (`app/api/`)** | teachers / diagnostic / lessons / packages / admin + whatsapp/closer + cron | ✅ Live (new endpoints verified) |
 | **L4 — Agent Hive & Desks** | `agents_hive/hive_mcp.py` (FastMCP, 10 tools) + `scanner_desk.py`, `creative_factory.py`, `head_of_desk.py`, `hive_orchestrator.py` | ✅ Live |
@@ -41,6 +41,10 @@
 - `POST /api/login` with `portal: "staff"` — staff gate used by `/portal/login`; non-staff roles get `403` and no cookie (Sprint 9).
 - `GET/POST /api/admin/intake` — mapping-call questionnaire (`IntakeAssessment`), REPRESENTATIVE / ADMIN / MANAGER only (Sprint 9).
 - Pages `/portal/dashboard` (staff dashboard) and `/portal/intake` (mapping-call workspace) — server-side role gate (Sprint 10).
+- Page `/portal/students/[id]` — student CRM screen with 5 tabs (Sprint 10b).
+- `GET/POST /api/portal/students/[id]/communication` — communication history (newest first) + save summary (AuditLog `STUDENT_COMMUNICATION_LOGGED`) (Sprint 10b).
+- `PATCH /api/portal/students/[id]/profile` — status checkboxes + profile fields, REPRESENTATIVE / ADMIN / MANAGER (AuditLog `STUDENT_PROFILE_UPDATED`) (Sprint 10b).
+- `POST /api/portal/students/[id]/attendance` — present / absent on a started lesson (AuditLog `LESSON_ATTENDANCE_MARKED`) (Sprint 10b).
 
 ### Diagnostics & packages
 - `POST /api/diagnostic/teaser` — 5-step funnel (also triggers WhatsApp Closer).
@@ -144,8 +148,9 @@ Verified by `test_hive_mcp_tools.py`:
 
 | `20260929190000_user_whatsapp_group_id` | `User.whatsappGroupId` (nullable) for the live quad WhatsApp group (Sprint 8) |
 | `20260929194238_add_intake_assessment` | `Role.REPRESENTATIVE` enum value + `IntakeAssessment` table (FKs to `User` ×2 and `FallbackLead`, 3 indexes) (Sprint 9) |
+| `20260929200238_add_student_tabs_and_communication` | `StudentProfile` (1:1 `User`, cascade) + `StudentCommunicationLog` (FK `User`, cascade, index `studentId, createdAt`) + nullable `Lesson.attendanceStatus / attendanceMarkedAt / attendanceMarkedById` (Sprint 10b) |
 
-Replaying all six migrations reproduces `prisma/schema.prisma` exactly.
+Replaying all seven migrations reproduces `prisma/schema.prisma` exactly.
 
 **Existing databases that were synced with `db push`** already contain these objects. Mark the sync
 migration as applied instead of executing it (running it would fail with "already exists"):
@@ -174,7 +179,48 @@ Fresh databases apply all migrations normally with `npx prisma migrate deploy`.
 | 7 | Lead dispatch loop closed: live WhatsApp send, AuditLog-based 14-day anti-spam cooldown, QStash schedule (`49d99da`) | ✅ Completed |
 | 8 | Live quad WhatsApp group (student + teacher + parent + admin) with structured welcome message and role split | ✅ Completed |
 | 9 | Public/staff UI split, isolated `/portal/login`, `/careers` + candidate API, unlock placeholder link removed, `IntakeAssessment` model + intake API (`d2702e8`) | ✅ Completed |
-| 10 | Public teacher registration sealed (UI + API), representative dashboard `/portal/dashboard`, mapping-call workspace `/portal/intake` | ✅ Completed |
+| 10 | Public teacher registration sealed (UI + API), representative dashboard `/portal/dashboard`, mapping-call workspace `/portal/intake` (`f210ab5`) | ✅ Completed |
+| 10b | Student screen `/portal/students/[id]` with 5 tabs (profile, courses, meetings, communication, standing orders) and standard summary templates for teacher, representative and pedagogic manager | ✅ Completed |
+
+### Student CRM screen and summary templates (Sprint 10b)
+
+- **Schema (additive):** `StudentProfile` (first/last name, grade, study group, ID, city, birth date, invoice name + ID,
+  `studentStatus String[]`, `statusUpdatedAt/ById`), `StudentCommunicationLog` (`authorId/authorName/authorRole` from the
+  session, `type`, `courseContext`, `content @db.Text`, `structuredData Json?`), and nullable attendance columns on
+  `Lesson`. Name, phone, email, school and parent contact stay on `User`. Migration
+  `20260929200238_add_student_tabs_and_communication` was generated with `prisma migrate diff` from the committed schema
+  (`--from-migrations` needs a shadow DB). **Run `npx prisma migrate deploy` before deploying.**
+- **Access** (`lib/student-portal.ts` → `resolveStudentAccess`): REPRESENTATIVE / ADMIN / MANAGER see every student; a
+  TEACHER only students with a shared `Lesson` or `TeacherReferral`. The page answers `notFound()` otherwise (no
+  enumeration); anonymous / STUDENT → `/portal/login`. The target must have role STUDENT (else 404).
+- **`/portal/students/[id]`** (server gate + `components/portal/student/StudentPortalTabs.tsx`): header with name, id and
+  join date; `?tab=` selects the initial tab. All panels stay mounted, so local edits survive tab switches.
+  - **Profile** (`ProfileTab.tsx`): personal + parent details with WhatsApp buttons (`https://wa.me/<E.164>`), age from
+    birth date. Missing profile values fall back to `User.name` split and the latest `IntakeAssessment` grade / units.
+    Staff managers edit fields inline and toggle 10 status checkboxes (`STUDENT_STATUS_OPTIONS`: תלמיד, לחזור להורה,
+    לחזור לתלמיד, לא רלוונטי, לא עונה בכלל, ביטול מנוי, תקוע/זורם/רותח 160, מיפוי נכשל), saved immediately with rollback on
+    failure. Teachers see statuses read-only and no invoice fields.
+  - **Courses** (`CoursesTab.tsx`): lessons grouped by package (or title + teacher), recurring weekday/hours in Israel
+    time, one-time vs subscription (package credits > 1, or several active lessons without a package), teacher, next
+    meeting + count. Intake assessments appear as mapping rows.
+  - **Meetings** (`MeetingsTab.tsx`): last 100 lessons, "נוכח" (green) / "לא נוכח" (grey) on started, non-cancelled
+    lessons. Only the lesson's teacher or a staff manager may mark; `Lesson.status`, payouts and credits are untouched.
+  - **Communication** (`CommunicationTab.tsx`): history table (date, type, context, author + role, content with
+    expand) and "הוסף סיכום / הודעה". The modal's dropdown loads a template into the editor at once; choice fields get
+    quick-pick buttons that rewrite their line. Save validates in the browser, POSTs, then reloads via GET.
+  - **Standing orders** (`StandingOrdersTab.tsx`, staff managers only): status (cancelled flag → בוטל, credits > 0 →
+    פעיל, paid but 0 credits → החבילה נוצלה, else אין מנוי), credit balance, card brand + last 4 read from Stripe for the
+    latest completed `pi_…` payment (4 s timeout, never throws, not stored), and charge history from `Payment`. Checkout is
+    one-time (`mode: "payment"`), so the tab states there is no automatic recurring charge.
+- **Templates** (`lib/communication-templates.ts`): סיכום שיחה לאחר מיפוי (REPRESENTATIVE / MANAGER / ADMIN),
+  סיכום שיעור and סיכום מיפוי (TEACHER / MANAGER / ADMIN), plus כללי for every staff role. The text is the source of truth:
+  `parseTemplateContent` reads labelled lines back into `structuredData` (multi-line values, ״/" tolerant), checks choices
+  against the spec lists, scores 0–100 and required lines, and parses topic ranking lines into `{ rank, topic, score }`.
+  MANAGER is stored as `authorRole: "PEDAGOGIC_MANAGER"`.
+- **Entry point:** recent intakes on `/portal/dashboard` link to the student screen (`RecentIntake.studentId`).
+- **Known gaps:** no staff-wide student search/list page yet (reach the screen from the dashboard or by URL); teachers
+  have no link from `/dashboard` yet; `User` name / phone / parent contact are read-only on this screen.
+- Tests: `tests/student-tabs-and-templates.test.ts` (20 tests).
 
 ### Teacher sign-up sealed, staff intake portal (Sprint 10)
 

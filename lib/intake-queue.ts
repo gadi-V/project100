@@ -26,6 +26,8 @@ export type IntakeCandidate = {
 export type RecentIntake = {
   id: string;
   kind: IntakeCandidateKind;
+  /** Set for registered students; links to `/portal/students/[id]`. */
+  studentId: string | null;
   personName: string;
   grade: string;
   weakTopic: string;
@@ -131,6 +133,7 @@ export async function getRecentIntakes(limit = 10): Promise<RecentIntake[]> {
       grade: true,
       weakTopic: true,
       createdAt: true,
+      studentId: true,
       student: { select: { name: true } },
       fallbackLead: { select: { name: true } },
       representative: { select: { name: true } },
@@ -140,6 +143,7 @@ export async function getRecentIntakes(limit = 10): Promise<RecentIntake[]> {
   return rows.map((row) => ({
     id: row.id,
     kind: row.student ? "STUDENT" : "LEAD",
+    studentId: row.student ? row.studentId : null,
     personName: row.student?.name ?? row.fallbackLead?.name ?? "ללא שם",
     grade: row.grade,
     weakTopic: row.weakTopic,

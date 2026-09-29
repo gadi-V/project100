@@ -60,22 +60,73 @@ model User {
   /// Opt-in flag so the funnel only notifies via WhatsApp when a parent phone was supplied.
   notifyParentViaWhatsApp Boolean @default(false)
 
-  givenLessons               Lesson[]              @relation("TeacherLessons")
-  takenLessons               Lesson[]              @relation("StudentLessons")
+  givenLessons               Lesson[]                  @relation("TeacherLessons")
+  takenLessons               Lesson[]                  @relation("StudentLessons")
   availabilities             TeacherAvailability[]
   diagnosticQuizzes          DiagnosticQuiz[]
   payments                   Payment[]
   teacherProfile             TeacherProfile?
   auditLogs                  AuditLog[]
-  referralsAsTeacher         TeacherReferral[]     @relation("TeacherReferrals")
-  referralsAsStudent         TeacherReferral[]     @relation("StudentReferrals")
+  referralsAsTeacher         TeacherReferral[]         @relation("TeacherReferrals")
+  referralsAsStudent         TeacherReferral[]         @relation("StudentReferrals")
   payouts                    TeacherPayout[]
   ledgerEntries              BillingLedger[]
   uploadedAssets             PreLessonAsset[]
-  intakeAssessments          IntakeAssessment[]    @relation("StudentIntakeAssessments")
-  conductedIntakeAssessments IntakeAssessment[]    @relation("RepresentativeIntakeAssessments")
+  intakeAssessments          IntakeAssessment[]        @relation("StudentIntakeAssessments")
+  conductedIntakeAssessments IntakeAssessment[]        @relation("RepresentativeIntakeAssessments")
+  studentProfile             StudentProfile?
+  communicationLogs          StudentCommunicationLog[]
 
   createdAt DateTime @default(now())
+}
+
+/// CRM card of a student in the staff portal (`/portal/students/[id]`). Name, phone, email, school and
+/// parent contact stay on `User`; this table holds the extra personal / invoice fields and the status flags.
+model StudentProfile {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  firstName    String?
+  lastName     String?
+  grade        String?
+  /// הקבצה / יח״ל
+  studyGroup   String?
+  nationalId   String?
+  city         String?
+  birthDate    DateTime?
+  /// Full name and ID / company number printed on the parent's invoice.
+  invoiceName  String?
+  invoiceTaxId String?
+
+  /// Customer status flags (codes from `lib/student-portal-shared.ts`, e.g. STUDENT, CALL_BACK_PARENT, BOILING_160).
+  studentStatus     String[]  @default([])
+  statusUpdatedAt   DateTime?
+  statusUpdatedById String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// Summary / message recorded on a student's communication tab (lesson, mapping, post-mapping call, general).
+model StudentCommunicationLog {
+  id             String   @id @default(cuid())
+  studentId      String
+  student        User     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  authorId       String
+  authorName     String
+  /// TEACHER | REPRESENTATIVE | ADMIN | PEDAGOGIC_MANAGER
+  authorRole     String
+  /// LESSON_SUMMARY | MAPPING_SUMMARY | POST_MAPPING_CALL | GENERAL
+  type           String
+  /// e.g. "שיעור מיפוי ראשוני - גדי" or the subject name.
+  courseContext  String?
+  content        String   @db.Text
+  /// Template fields parsed from `content` (see `lib/communication-templates.ts`).
+  structuredData Json?
+  createdAt      DateTime @default(now())
+
+  @@index([studentId, createdAt])
 }
 
 model TeacherProfile {
@@ -201,6 +252,11 @@ model Lesson {
 
   /// Post-lesson pedagogical summary (teacher entered after the lesson).
   pedagogicalBrief String? @db.Text
+
+  /// Attendance marked from the staff portal: PRESENT | ABSENT (null = not marked). Independent of `status`.
+  attendanceStatus     String?
+  attendanceMarkedAt   DateTime?
+  attendanceMarkedById String?
 
   chatChannel ChatChannel?
   payouts     TeacherPayout[]
