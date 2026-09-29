@@ -358,9 +358,12 @@ export type CreateQuadGroupInput = {
   parent?: { name?: string; phone?: string };
   lesson: { scheduledAt: Date; durationMinutes: number; subject?: string };
   questionnaireUrl?: string;
+  /** Group already stored for the student (`User.whatsappGroupId`); a second group is never opened. */
+  existingGroupId?: string | null;
 };
 
 export type QuadGroupErrorCode =
+  | "ALREADY_EXISTS"
   | "NOT_CONFIGURED"
   | "MISSING_REQUIRED_PARTICIPANT"
   | "TIMEOUT"
@@ -555,6 +558,13 @@ export async function createWhatsAppQuadGroup(
     ...roster,
   });
 
+  if (input.existingGroupId?.trim()) {
+    return fail({
+      code: "ALREADY_EXISTS",
+      message: "The student already has a quad group; send updates to it instead",
+    });
+  }
+
   const roles = new Set(roster.participants.map((p) => p.role));
   if (!roles.has("STUDENT") || !roles.has("TEACHER")) {
     return fail({
@@ -628,7 +638,7 @@ export async function createWhatsAppQuadGroup(
     teacherName: input.teacher.name,
     scheduledAt: input.lesson.scheduledAt,
     durationMinutes: input.lesson.durationMinutes,
-    questionnaireUrl: input.questionnaireUrl?.trim() || `${getAppUrl()}/onboarding/diagnostic`,
+    questionnaireUrl: input.questionnaireUrl?.trim() || buildDiagnosticQuestionnaireUrl(),
   });
 
   let welcome: QuadWelcomeStatus;
@@ -644,6 +654,56 @@ export async function createWhatsAppQuadGroup(
   }
 
   return { ok: true, chatId, inviteUrl, welcome, groupName, ...roster };
+}
+
+/** Diagnostic questionnaire linked from the quad welcome message. */
+export function buildDiagnosticQuestionnaireUrl(): string {
+  return `${getAppUrl()}/onboarding/diagnostic`;
+}
+
+export type QuadLessonUpdateInput = {
+  studentName: string;
+  teacherName: string;
+  subject: string;
+  scheduledAt: Date;
+  durationMinutes: number;
+  lessonType: "MAPPING" | "REGULAR";
+};
+
+/** Posted to an already-open quad group when another lesson is scheduled. */
+export function buildQuadLessonUpdateMessage(input: QuadLessonUpdateInput): string {
+  const { dayName, date, timeRange } = formatQuadLessonWindow(
+    input.scheduledAt,
+    input.durationMinutes
+  );
+  const lessonLabel = input.lessonType === "MAPPING" ? "שיעור מיפוי" : `שיעור ${input.subject.trim()}`;
+  return (
+    `היי ${input.studentName.trim()}, נקבע ${lessonLabel} חדש.\n` +
+    `ביום ${dayName} ${date} בשעה ${timeRange} עם ${input.teacherName.trim()}.\n` +
+    (input.lessonType === "MAPPING" ? `מקצוע: ${input.subject.trim()}\n` : "") +
+    `אם צריך לשנות את המועד, כתבו לנו כאן.\n\n` +
+    `${BRAND_SIGNATURE}`
+  );
+}
+
+/** Sends the lesson update into an existing group (`…@g.us`). Never throws. */
+export async function sendQuadGroupLessonUpdate(
+  groupChatId: string,
+  input: QuadLessonUpdateInput
+): Promise<QuadWelcomeStatus> {
+  if (!groupChatId.trim().endsWith("@g.us")) {
+    return { sent: false, error: "Not a WhatsApp group chat id (…@g.us)" };
+  }
+  try {
+    const sent = await sendWhatsAppMessage(groupChatId.trim(), buildQuadLessonUpdateMessage(input), {
+      timeoutMs: QUAD_GATEWAY_TIMEOUT_MS,
+    });
+    return sent.mocked
+      ? { sent: false, error: "WhatsApp gateway is not configured" }
+      : { sent: true, messageId: sent.messageId };
+  } catch (error) {
+    return { sent: false, error: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 export type QuadLessonSummaryInput = {

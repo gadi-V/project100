@@ -14,6 +14,7 @@ import {
   type StandingOrderStatus,
   type StudentPortalData,
   type StudentPortalViewer,
+  type TeacherOption,
 } from "./student-portal-shared";
 
 /**
@@ -91,9 +92,28 @@ type LessonForTabs = {
   teacherId: string;
   packageId: string | null;
   attendanceStatus: string | null;
+  lessonType: string;
+  whatsappGroupId: string | null;
   teacher: { name: string } | null;
   package: { name: string; credits: number } | null;
 };
+
+const LESSON_TAB_SELECT = {
+  id: true,
+  title: true,
+  scheduledAt: true,
+  startTime: true,
+  endTime: true,
+  durationMinutes: true,
+  status: true,
+  teacherId: true,
+  packageId: true,
+  attendanceStatus: true,
+  lessonType: true,
+  whatsappGroupId: true,
+  teacher: { select: { name: true } },
+  package: { select: { name: true, credits: true } },
+} as const;
 
 function lessonStart(lesson: LessonForTabs): Date {
   return lesson.startTime ?? lesson.scheduledAt;
@@ -192,9 +212,30 @@ export function buildMeetingRows(lessons: LessonForTabs[], viewer: Viewer, now: 
       title: lesson.package?.name ?? (lesson.title?.trim() || "שיעור פרטי"),
       teacherName: lesson.teacher?.name ?? null,
       status: lesson.status,
+      lessonType: lesson.lessonType === "MAPPING" ? "MAPPING" : "REGULAR",
+      whatsappLinked: Boolean(lesson.whatsappGroupId),
       attendanceStatus: toAttendance(lesson.attendanceStatus),
       canMarkAttendance: started && !CANCELLED_STATUSES.has(lesson.status) && (canMarkAny || ownLesson),
     };
+  });
+}
+
+export async function listMeetingRows(studentId: string, viewer: Viewer, now: Date = new Date()): Promise<MeetingRow[]> {
+  const lessons = await prisma.lesson.findMany({
+    where: { studentId },
+    orderBy: { scheduledAt: "desc" },
+    take: MEETINGS_LIMIT,
+    select: LESSON_TAB_SELECT,
+  });
+  return buildMeetingRows(lessons, viewer, now);
+}
+
+/** Approved teachers for the schedule-meeting dropdown, by name. */
+export async function listTeacherOptions(): Promise<TeacherOption[]> {
+  return prisma.user.findMany({
+    where: { role: "TEACHER", isApproved: true },
+    orderBy: { name: "asc" },
+    select: { id: true, name: true },
   });
 }
 
@@ -338,20 +379,7 @@ export async function loadStudentPortal(
       where: { studentId },
       orderBy: { scheduledAt: "desc" },
       take: MEETINGS_LIMIT,
-      select: {
-        id: true,
-        title: true,
-        scheduledAt: true,
-        startTime: true,
-        endTime: true,
-        durationMinutes: true,
-        status: true,
-        teacherId: true,
-        packageId: true,
-        attendanceStatus: true,
-        teacher: { select: { name: true } },
-        package: { select: { name: true, credits: true } },
-      },
+      select: LESSON_TAB_SELECT,
     }),
     prisma.intakeAssessment.findMany({
       where: { studentId },

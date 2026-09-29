@@ -48,6 +48,7 @@
 - `GET/POST /api/portal/students/[id]/communication` — communication history (newest first) + save summary (AuditLog `STUDENT_COMMUNICATION_LOGGED`) (Sprint 10b).
 - `PATCH /api/portal/students/[id]/profile` — status checkboxes + profile fields, REPRESENTATIVE / ADMIN / MANAGER (AuditLog `STUDENT_PROFILE_UPDATED`) (Sprint 10b).
 - `POST /api/portal/students/[id]/attendance` — present / absent on a started lesson (AuditLog `LESSON_ATTENDANCE_MARKED`) (Sprint 10b).
+- `GET/POST /api/portal/students/[id]/meetings` — meetings + approved teachers; schedule a mapping / regular lesson with an assigned teacher and open (or update) the quad WhatsApp group. REPRESENTATIVE / ADMIN / MANAGER only (AuditLog `MAPPING_LESSON_SCHEDULED`) (Sprint 12).
 
 ### Diagnostics & packages
 - `POST /api/diagnostic/teaser` — 5-step funnel (also triggers WhatsApp Closer).
@@ -153,8 +154,9 @@ Verified by `test_hive_mcp_tools.py`:
 | `20260929190000_user_whatsapp_group_id` | `User.whatsappGroupId` (nullable) for the live quad WhatsApp group (Sprint 8) |
 | `20260929194238_add_intake_assessment` | `Role.REPRESENTATIVE` enum value + `IntakeAssessment` table (FKs to `User` ×2 and `FallbackLead`, 3 indexes) (Sprint 9) |
 | `20260929200238_add_student_tabs_and_communication` | `StudentProfile` (1:1 `User`, cascade) + `StudentCommunicationLog` (FK `User`, cascade, index `studentId, createdAt`) + nullable `Lesson.attendanceStatus / attendanceMarkedAt / attendanceMarkedById` (Sprint 10b) |
+| `20260929220000_lesson_type_and_whatsapp_group` | `Lesson.lessonType TEXT NOT NULL DEFAULT 'REGULAR'` + nullable `Lesson.whatsappGroupId` (`ADD COLUMN IF NOT EXISTS`) (Sprint 12) |
 
-Replaying all seven migrations reproduces `prisma/schema.prisma` exactly.
+Replaying all eight migrations reproduces `prisma/schema.prisma` exactly.
 
 **Existing databases that were synced with `db push`** already contain these objects. Mark the sync
 migration as applied instead of executing it (running it would fail with "already exists"):
@@ -189,6 +191,53 @@ Fresh databases apply all migrations normally with `npx prisma migrate deploy`.
 | 11b | Vercel build fix: `prisma generate` runs before `next build` and on `postinstall`; `force-dynamic` confirmed on all session/DB portal pages | ✅ Completed |
 | 11c | Neon migration P3018 fixed: `sync_missing_models` made idempotent, failed record resolved, all pending migrations deployed; `package.json#prisma` moved to `prisma.config.ts` | ✅ Completed |
 | 11d | All-green hardening: zero build warnings (`middleware.ts` → `proxy.ts`), E2E scripts synced with the post-mapping-lesson WhatsApp group, `GET /api/health` live DB probe, Neon fully stable | ✅ Completed |
+| 12 | Operational loop closed: mapping-lesson scheduler in the student meetings tab (teacher assignment + date), `POST /api/portal/students/[id]/meetings`, automatic quad WhatsApp group trigger (student + teacher + parent + admin) with welcome message, no duplicate groups | ✅ Completed |
+
+### Mapping lesson scheduler and quad group trigger (Sprint 12)
+
+- **Schema (additive):** `Lesson.lessonType` (`MAPPING` | `REGULAR`, default `REGULAR`) and `Lesson.whatsappGroupId`
+  (group opened or notified for that lesson). Migration `20260929220000_lesson_type_and_whatsapp_group`, deployed to
+  Neon ("Database schema is up to date!").
+- **`POST /api/portal/students/[id]/meetings`** (`requireAuth(INTAKE_RECORDER_ROLES)`): anonymous → `401`,
+  TEACHER / STUDENT → `403`, identity from the session only. Body `{ teacherId, subject, scheduledAt (ISO, future),
+  durationMinutes?, lessonType? }` parsed by `parseScheduleMeetingInput` (MAPPING by default, 45 min; REGULAR 50 min;
+  15–180). The target must be a STUDENT (`resolveStudentAccess`, else 404) and `teacherId` a TEACHER (else 404).
+  - Lesson: in a `$transaction`, the ±60-minute anti-collision window (`lessonAntiCollisionWindow`) is checked for both
+    the student and the teacher (`409` on overlap), then `Lesson { status: SCHEDULED, title: subject, lessonType,
+    durationMinutes }` is created. No credits, availability slots or ledger rows are touched; the Daily room is created
+    lazily by `ensureDailyRoom` when the classroom opens.
+  - WhatsApp: student with `User.whatsappGroupId` → `sendQuadGroupLessonUpdate` posts the new date into that group
+    (`EXISTING`, no second group). No group + MAPPING → `createWhatsAppQuadGroup` with student / teacher / parent from
+    the DB, admin from `WHATSAPP_ADMIN_PHONE`, the lesson window and `buildDiagnosticQuestionnaireUrl()`; the chat id is
+    claimed with `user.updateMany({ where: { id, whatsappGroupId: null } })` so a parallel request cannot store a second
+    group (the loser links the lesson to the stored group and audits `duplicate: true`). The chat id is also written to
+    `Lesson.whatsappGroupId`. REGULAR without a group → `NOT_OPENED` (the welcome copy is mapping-specific).
+  - Gateway failures (`GATEWAY_ERROR` / 503, `NETWORK`, `TIMEOUT`, `NOT_CONFIGURED`, unexpected throw) are logged and
+    never roll back the lesson: `201 { whatsappGroupCreated: false, groupStatus: "FAILED", whatsappErrorCode }`.
+  - Audit: `MAPPING_LESSON_SCHEDULED` (REGULAR: `LESSON_SCHEDULED`), `entityType: "Lesson"`, `entityId: lessonId`, with
+    group status / error code; plus `WHATSAPP_QUAD_GROUP_CREATED` on the student when a group opens.
+  - Response `{ success, data: { lessonId, lessonType, scheduledAt, durationMinutes, teacherName, groupStatus:
+    OPENED | EXISTING | FAILED | NOT_OPENED, whatsappGroupCreated, whatsappGroupLinked, groupUpdateSent, whatsappErrorCode } }`.
+- **`GET /api/portal/students/[id]/meetings`**: same roles; `{ meetings: MeetingRow[], teachers }` (approved
+  `role = TEACHER` users by name), `Cache-Control: no-store`.
+- **`lib/whatsapp.ts`:** `createWhatsAppQuadGroup` accepts `existingGroupId` and returns `ALREADY_EXISTS` without any
+  gateway call when set; new `buildDiagnosticQuestionnaireUrl`, `buildQuadLessonUpdateMessage`,
+  `sendQuadGroupLessonUpdate` (never throws, `{ sent, messageId | error }`).
+- **Meetings tab** (`MeetingsTab.tsx` + `ScheduleMeetingModal.tsx`): "+ הוסף מפגש" for REPRESENTATIVE / ADMIN / MANAGER
+  (`viewer.canEditProfile`), also on the empty state. Modal: lesson type (שיעור מיפוי ראשוני default / שיעור שוטף),
+  teacher dropdown from the GET route, subject (default מתמטיקה), Israel date (default tomorrow) + time (08:00–22:00,
+  15-minute steps, default 17:00, converted DST-aware by `israelLocalToIso`), duration 45 min fixed for mapping.
+  Submit shows a spinner with "מתאם שיעור ופותח קבוצת וואטסאפ..."; on success the modal closes, the table reloads from
+  the GET route and a banner reports only what the backend confirmed: green "שיעור המיפוי תואם בהצלחה וקבוצת הוואטסאפ
+  הוקמה" (OPENED) / update sent to the existing group, amber when the group could not be opened or notified. Rows show a
+  "שיעור מיפוי ראשוני" tag and a green WhatsApp icon when `Lesson.whatsappGroupId` is set.
+- **Tests:** `tests/schedule-mapping-whatsapp.test.ts` (34 tests) — real `requireAuth` over a mocked session (401 / 403 /
+  allowed roles), validation + anti-collision `409`, exact `lesson.create` payload, `createWhatsAppQuadGroup` call args
+  and the gateway `createGroup` roster (4 JIDs), welcome text, conditional claim + lesson link + both audits, existing
+  group → update only, parallel-claim race, lib `ALREADY_EXISTS` guard, 503 / network / not-configured / thrown errors
+  keep the lesson (`201`), GET route, Israel time helpers.
+- **Verified:** `npm run build` exit `0` with no warnings (route listed as `ƒ /api/portal/students/[id]/meetings`);
+  `npm test` 19 files / 379 tests; `tsc --noEmit` 0.
 
 ### All-green hardening (Sprint 11d)
 

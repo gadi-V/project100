@@ -258,6 +258,11 @@ model Lesson {
   attendanceMarkedAt   DateTime?
   attendanceMarkedById String?
 
+  /// MAPPING (initial mapping lesson scheduled from the staff portal) | REGULAR.
+  lessonType      String  @default("REGULAR")
+  /// Quad WhatsApp group (`…@g.us`) that was opened or notified when this lesson was scheduled.
+  whatsappGroupId String?
+
   chatChannel ChatChannel?
   payouts     TeacherPayout[]
 

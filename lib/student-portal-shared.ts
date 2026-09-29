@@ -103,6 +103,13 @@ export type CourseRow = {
   completedCount: number;
 };
 
+export type LessonType = "MAPPING" | "REGULAR";
+
+export const LESSON_TYPE_LABELS: Record<LessonType, string> = {
+  MAPPING: "שיעור מיפוי ראשוני",
+  REGULAR: "שיעור שוטף",
+};
+
 export type MeetingRow = {
   id: string;
   scheduledAt: string;
@@ -110,9 +117,48 @@ export type MeetingRow = {
   title: string;
   teacherName: string | null;
   status: string;
+  lessonType: LessonType;
+  /** A quad WhatsApp group was opened or notified for this lesson. */
+  whatsappLinked: boolean;
   attendanceStatus: AttendanceStatus | null;
   canMarkAttendance: boolean;
 };
+
+export type TeacherOption = { id: string; name: string };
+
+export type ScheduleMeetingInput = {
+  teacherId: string;
+  subject: string;
+  scheduledAt: Date;
+  durationMinutes: number;
+  lessonType: LessonType;
+};
+
+/** How the quad WhatsApp group reacted to a newly scheduled lesson. */
+export type MeetingGroupStatus = "OPENED" | "EXISTING" | "FAILED" | "NOT_OPENED";
+
+export type ScheduleMeetingResult = {
+  lessonId: string;
+  lessonType: LessonType;
+  scheduledAt: string;
+  durationMinutes: number;
+  teacherName: string;
+  groupStatus: MeetingGroupStatus;
+  whatsappGroupCreated: boolean;
+  /** The lesson is tied to a live group (new or existing). */
+  whatsappGroupLinked: boolean;
+  /** Update message posted into an existing group. */
+  groupUpdateSent: boolean;
+  whatsappErrorCode: string | null;
+};
+
+export const MAPPING_LESSON_MINUTES = 45;
+export const REGULAR_LESSON_MINUTES = 50;
+export const REGULAR_DURATION_OPTIONS = [45, 50, 60, 90] as const;
+export const DEFAULT_MEETING_SUBJECT = "מתמטיקה";
+const SUBJECT_MAX = 80;
+const MIN_DURATION = 15;
+const MAX_DURATION = 180;
 
 export type CommunicationEntry = {
   id: string;
@@ -290,4 +336,92 @@ export function parseAttendanceInput(value: unknown): ParseResult<{ lessonId: st
   if (status !== "PRESENT" && status !== "ABSENT") errors.push("סטטוס נוכחות לא תקין");
   if (errors.length > 0) return { ok: false, errors };
   return { ok: true, data: { lessonId, status: status as AttendanceStatus } };
+}
+
+/** Body of `POST /api/portal/students/[id]/meetings`. The date must be in the future. */
+export function parseScheduleMeetingInput(value: unknown, now: Date = new Date()): ParseResult<ScheduleMeetingInput> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { ok: false, errors: ["גוף הבקשה חסר"] };
+  }
+  const record = value as Record<string, unknown>;
+  const errors: string[] = [];
+
+  const lessonType = record.lessonType ?? "MAPPING";
+  if (lessonType !== "MAPPING" && lessonType !== "REGULAR") errors.push("סוג שיעור לא תקין");
+
+  const teacherId = typeof record.teacherId === "string" ? record.teacherId.trim() : "";
+  if (!teacherId) errors.push("יש לבחור מורה");
+
+  const subject = typeof record.subject === "string" ? record.subject.trim().replace(/\s+/g, " ") : "";
+  if (!subject) errors.push("יש לציין מקצוע");
+  else if (subject.length > SUBJECT_MAX) errors.push(`מקצוע: עד ${SUBJECT_MAX} תווים`);
+
+  const scheduledAt = typeof record.scheduledAt === "string" ? new Date(record.scheduledAt) : null;
+  if (!scheduledAt || Number.isNaN(scheduledAt.getTime())) errors.push("תאריך ושעה לא תקינים");
+  else if (scheduledAt <= now) errors.push("המועד צריך להיות בעתיד");
+
+  const defaultDuration = lessonType === "REGULAR" ? REGULAR_LESSON_MINUTES : MAPPING_LESSON_MINUTES;
+  const durationMinutes = record.durationMinutes ?? defaultDuration;
+  if (
+    typeof durationMinutes !== "number" ||
+    !Number.isInteger(durationMinutes) ||
+    durationMinutes < MIN_DURATION ||
+    durationMinutes > MAX_DURATION
+  ) {
+    errors.push(`משך: ${MIN_DURATION} עד ${MAX_DURATION} דקות`);
+  }
+
+  if (errors.length > 0 || !scheduledAt) return { ok: false, errors };
+  return {
+    ok: true,
+    data: {
+      teacherId,
+      subject,
+      scheduledAt,
+      durationMinutes: durationMinutes as number,
+      lessonType: lessonType as LessonType,
+    },
+  };
+}
+
+const israelParts = new Intl.DateTimeFormat("en-US", {
+  timeZone: "Asia/Jerusalem",
+  hourCycle: "h23",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
+function israelWallClock(at: Date): { year: number; month: number; day: number; hour: number; minute: number } {
+  const parts = israelParts.formatToParts(at);
+  const get = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((p) => p.type === type)?.value ?? 0);
+  return { year: get("year"), month: get("month"), day: get("day"), hour: get("hour"), minute: get("minute") };
+}
+
+function israelOffsetMs(at: Date): number {
+  const wall = israelWallClock(at);
+  const wallAsUtc = Date.UTC(wall.year, wall.month - 1, wall.day, wall.hour, wall.minute);
+  return wallAsUtc - Math.floor(at.getTime() / 60_000) * 60_000;
+}
+
+/** YYYY-MM-DD of `at` in Israel, shifted by `addDays`. */
+export function israelDateKey(at: Date, addDays = 0): string {
+  const wall = israelWallClock(at);
+  return new Date(Date.UTC(wall.year, wall.month - 1, wall.day + addDays)).toISOString().slice(0, 10);
+}
+
+/** Israel wall-clock date (YYYY-MM-DD) + time (HH:MM) → UTC ISO string, DST-aware. */
+export function israelLocalToIso(date: string, time: string): string | null {
+  const d = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  const t = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(time);
+  if (!d || !t) return null;
+  const naive = Date.UTC(Number(d[1]), Number(d[2]) - 1, Number(d[3]), Number(t[1]), Number(t[2]));
+  if (new Date(naive).toISOString().slice(0, 10) !== date) return null;
+  let instant = naive - israelOffsetMs(new Date(naive));
+  const corrected = naive - israelOffsetMs(new Date(instant));
+  if (corrected !== instant) instant = corrected;
+  const result = new Date(instant);
+  return Number.isNaN(result.getTime()) ? null : result.toISOString();
 }
