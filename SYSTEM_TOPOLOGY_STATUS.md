@@ -48,7 +48,7 @@
 - `POST /api/lessons/[id]/cancel` / `reschedule` / `rate` / `appeal`.
 
 ### WhatsApp
-- `POST /api/whatsapp/dispatch-channel` — 1-vs-4 channel routing.
+- `POST /api/whatsapp/dispatch-channel` — 1-vs-4 channel routing; opens the live quad group + welcome (Sprint 8).
 - `POST /api/whatsapp/closer` — full closer engine (analysis + dispatch).
 
 ### Admin
@@ -105,7 +105,8 @@ Verified by `test_hive_mcp_tools.py`:
 | `DAILY_ENABLE_CLOUD_RECORDING` | Daily cloud-recording opt-in |
 | `NEXT_PUBLIC_APP_URL` | Public origin fallback for client + WhatsApp links |
 | `INTERNAL_SERVICE_KEY` | Agent Hive → app service-to-service auth |
-| `WHATSAPP_ADMIN_PHONE`, `WHATSAPP_TEACHER_PLACEHOLDER_PHONE` | Quad-group admin / teacher members (omitted when empty — no fake fallbacks) |
+| `WHATSAPP_ADMIN_PHONE` | Admin member of every quad WhatsApp group (omitted when empty or invalid) |
+| `WHATSAPP_TEACHER_PLACEHOLDER_PHONE` | No longer read (since Sprint 8 the quad group uses the real lesson teacher); kept in `.env.example` only |
 | `DAILY_DOMAIN` | Teacher permanent room links (`lib/teacher-welcome.ts`; warns + falls back to `project100.daily.co`) |
 | `NEXT_PUBLIC_EXAM_581_PDF_URL` | Teacher onboarding exam-581 PDF |
 | `TELEGRAM_BOT_TOKEN`, `MANAGER_ALERT_PHONE`, `MANAGER_ALERT_TELEGRAM_CHAT_ID` | Head-of-Desk manager alerts |
@@ -134,7 +135,9 @@ Verified by `test_hive_mcp_tools.py`:
 | `20260827160000_payment_status` | Payment status |
 | `20260929152923_sync_missing_models` | Catches up everything previously applied via `db push`: `Package`, `CurriculumTopic` (+ `_CurriculumTopicToDiagnosticQuiz`), `VettingStepLog`, `UnifiedPackageChat`, `PreLessonAsset`, 6 enums, new nullable/defaulted columns on `User` / `TeacherProfile` / `Lesson` / `DiagnosticQuiz`, and `Lesson.ratedAt` aligned to `TIMESTAMP(3)`. Additive only — no drops or renames. |
 
-Replaying all four migrations reproduces `prisma/schema.prisma` exactly.
+| `20260929190000_user_whatsapp_group_id` | `User.whatsappGroupId` (nullable) for the live quad WhatsApp group (Sprint 8) |
+
+Replaying all five migrations reproduces `prisma/schema.prisma` exactly.
 
 **Existing databases that were synced with `db push`** already contain these objects. Mark the sync
 migration as applied instead of executing it (running it would fail with "already exists"):
@@ -160,7 +163,47 @@ Fresh databases apply all migrations normally with `npx prisma migrate deploy`.
 | 4 | Production 503 prevention, classroom-sized auth limit, serverless-safe curriculum agent & storage | ✅ Completed |
 | 5 | `x-user-id` header-spoofing neutralized (middleware + teacher vetting), Daily recordings stored by `recording_id` with fresh signed URLs (`88f1c43`) | ✅ Completed |
 | 6 | `teachers/apply` IDOR closed; serverless agent swarm: `lib/agents/core/llm.ts`, lead agent, cron-secured `/api/agents/dispatch` (`1c52282`) | ✅ Completed |
-| 7 | Lead dispatch loop closed: live WhatsApp send, AuditLog-based 14-day anti-spam cooldown, QStash schedule | ✅ Completed |
+| 7 | Lead dispatch loop closed: live WhatsApp send, AuditLog-based 14-day anti-spam cooldown, QStash schedule (`49d99da`) | ✅ Completed |
+| 8 | Live quad WhatsApp group (student + teacher + parent + admin) with structured welcome message and role split | ✅ Completed |
+
+### Live quad WhatsApp group (Sprint 8)
+
+- **`createWhatsAppQuadGroup({ student, teacher, parent?, lesson, questionnaireUrl? })`** in `lib/whatsapp.ts`
+  replaces the old scaffold, which posted to `/groups` and fell back to invented `mock-quad-…` invite links.
+  - **Members:** student, teacher, parent (optional) and `WHATSAPP_ADMIN_PHONE`, each normalized with
+    `normalizeToWhatsAppJid`. Missing, invalid or duplicate numbers are dropped and listed in `droppedRoles`.
+    A valid, distinct student **and** teacher are required.
+  - **Group name:** `"<student> <subject> | PROJECT100"`, max 25 characters. The brand suffix is kept; the
+    prefix steps down from full name + subject to first name + subject, then full name, then first name,
+    then a hard cut (e.g. `מתן מתמטיקה | PROJECT100`).
+  - **Gateway call:** `POST {WHATSAPP_API_URL}/createGroup` with `{ groupName, chatIds }`, Bearer
+    `WHATSAPP_API_KEY`, 10 s timeout. The group id is read from `chatId`, `groupId`, `gid(._serialized)` or `id`
+    and must end in `@g.us`. The invite link is read from `groupInviteLink` / `inviteLink` / `inviteUrl`.
+  - **Welcome message:** built by `buildQuadWelcomeMessage`, with the day, `DD.MM.YYYY` and `HH:MM-HH:MM`
+    shown in Israel time. It is posted into the group with `sendWhatsAppMessage`. The questionnaire link
+    defaults to `/onboarding/diagnostic`.
+  - **Never throws.** Failures return `{ ok: false, error: { code } }` with code `NOT_CONFIGURED |
+    MISSING_REQUIRED_PARTICIPANT | TIMEOUT | NETWORK | GATEWAY_ERROR | INVALID_RESPONSE`. A group that was
+    created but whose welcome message failed returns `ok: true` with `welcome.sent = false`.
+- **`POST /api/whatsapp/dispatch-channel`** (TRIO/MULTI/TEN):
+  - The group opens only when the student has a future `SCHEDULED` lesson with a teacher; until then the
+    status is `PENDING_TEACHER_ASSIGNMENT` (tone rule: "ייפתח לאחר שיבוץ"). An existing
+    `User.whatsappGroupId` → `EXISTING`, and the group is never opened twice.
+  - Members come from the DB (student, parent, lesson teacher). A `studentPhone` in the request body never
+    joins a group. The subject comes from the latest `DiagnosticQuiz`, falling back to `Lesson.title`.
+  - On success it stores `User.whatsappGroupId = <chatId>` and `quadGroupUrl = <invite link | null>`
+    (clearing old placeholder links), then writes AuditLog `WHATSAPP_QUAD_GROUP_CREATED` with chat id, lesson,
+    teacher, roles, dropped roles and welcome status.
+  - On failure the response is `{ success: false, data: { groupStatus: "FAILED", errorCode } }` with status
+    `503` (not configured), `422` (missing member) or `502` (gateway). Nothing is persisted.
+  - Response `data` now includes `groupStatus`, and `modeLabel` only says the group opened when it did.
+    The separate invite-link message is gone because members are added directly.
+- **WhatsApp Closer** (`dispatchWhatsAppCloser`, diagnostic teaser + `/api/whatsapp/closer`): it no longer
+  creates groups (no teacher or lesson exists yet at that stage). It only shares an existing group link.
+  `isGroupOpened` is always `false` there.
+- **Schema:** `User.whatsappGroupId String?` (additive), migration `20260929190000_user_whatsapp_group_id`.
+  **Run `npx prisma migrate deploy` before deploying this code** — the route selects the column.
+- Tests: `tests/whatsapp-quad-group.test.ts`.
 
 ### Teacher apply IDOR (Sprint 6)
 

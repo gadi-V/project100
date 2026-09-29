@@ -5,9 +5,9 @@ import {
   buildConversionMessage,
   createWhatsAppQuadGroup,
   determinePackageForGapDepth,
-  sendQuadGroupInvite,
   sendWhatsAppText,
   type PackageSize,
+  type QuadGroupErrorCode,
 } from "../../../../lib/whatsapp";
 import { writeAuditLog } from "../../../../lib/audit";
 
@@ -16,8 +16,11 @@ import { writeAuditLog } from "../../../../lib/audit";
  *
  * ・ SINGLE (שיעור בודד): only transactional SMS/WhatsApp (reminder, link, PDF
  *    summary). No group is opened.
- * ・ TRIO / MULTI (3+ שיעורים): auto-open a dedicated Quad WhatsApp group
- *    (מנהל פדגוגי + מורה מומחה + תלמיד + הורה) and invite the parent.
+ * ・ TRIO / MULTI (3+ שיעורים): open a live Quad WhatsApp group (student +
+ *    teacher + parent when known + WHATSAPP_ADMIN_PHONE) once the student has a
+ *    scheduled lesson with an assigned teacher, post the welcome message, and
+ *    store the group chat id on `User.whatsappGroupId`. Until then the group
+ *    is reported as pending; an existing group is never opened twice.
  *
  * Also generates the automatic conversion message from the diagnosis depth:
  * ・ פער קל (1–2 נושאים)  → TRIO.
@@ -28,6 +31,22 @@ import { writeAuditLog } from "../../../../lib/audit";
  *
  * Reaction-surface only: never returns student/teacher phone numbers.
  */
+type GroupStatus = "NOT_APPLICABLE" | "EXISTING" | "OPENED" | "PENDING_TEACHER_ASSIGNMENT" | "FAILED";
+
+const GROUP_MODE_LABELS: Record<GroupStatus, string> = {
+  NOT_APPLICABLE: "הודעות טרנזקציוניות בלבד — ללא פתיחת קבוצה",
+  EXISTING: "קבוצת הוואטסאפ כבר פתוחה",
+  OPENED: "קבוצת הוואטסאפ נפתחה",
+  PENDING_TEACHER_ASSIGNMENT: "קבוצת הוואטסאפ תיפתח לאחר שיבוץ מורה ושיעור ראשון",
+  FAILED: "פתיחת קבוצת הוואטסאפ נכשלה",
+};
+
+function statusForGroupError(code: QuadGroupErrorCode): number {
+  if (code === "NOT_CONFIGURED") return 503;
+  if (code === "MISSING_REQUIRED_PARTICIPANT") return 422;
+  return 502;
+}
+
 export async function POST(request: NextRequest) {
   try {
     const auth = await requireAuthOrMonitor(request, ["ADMIN", "MANAGER", "STUDENT"]);
@@ -75,6 +94,7 @@ export async function POST(request: NextRequest) {
       parentName: string | null;
       parentPhone: string | null;
       quadGroupUrl: string | null;
+      whatsappGroupId: string | null;
       role: string;
     } | null = null;
 
@@ -89,6 +109,7 @@ export async function POST(request: NextRequest) {
             parentName: true,
             parentPhone: true,
             quadGroupUrl: true,
+            whatsappGroupId: true,
             role: true,
           },
         });
@@ -102,6 +123,7 @@ export async function POST(request: NextRequest) {
             parentName: true,
             parentPhone: true,
             quadGroupUrl: true,
+            whatsappGroupId: true,
             role: true,
           },
         });
@@ -129,9 +151,9 @@ export async function POST(request: NextRequest) {
           data: {
             channel: packageType === "SINGLE" ? "TRANSACTIONAL_SINGLE" : "QUAD_GROUP",
             modeLabel:
-              packageType === "SINGLE"
-                ? "הודעות טרנזקציוניות בלבד — ללא פתיחת קבוצה"
-                : "נפתחה קבוצת WhatsApp מרובעת ייעודית (מנהל פדגוגי + מורה + תלמיד + הורה)",
+              GROUP_MODE_LABELS[
+                packageType === "SINGLE" ? "NOT_APPLICABLE" : "PENDING_TEACHER_ASSIGNMENT"
+              ],
             isGroupOpened: false,
             quadGroupUrl: null,
             recommendedPackage: recommendation,
@@ -149,6 +171,7 @@ export async function POST(request: NextRequest) {
           parentName: true,
           parentPhone: true,
           quadGroupUrl: true,
+          whatsappGroupId: true,
           role: true,
         },
       });
@@ -180,65 +203,86 @@ export async function POST(request: NextRequest) {
     // 2) Single ⇄ Quad routing decision.
     let quadGroupUrl = student.quadGroupUrl ?? null;
     let isGroupOpened = false;
+    let groupStatus: GroupStatus = "NOT_APPLICABLE";
+    let groupErrorCode: QuadGroupErrorCode | null = null;
 
     if (packageType === "SINGLE") {
       // Single: transactional 1-on-1 only — never open a group.
       await sendWhatsAppText(studentPhone, conversionMessage);
+    } else if (student.whatsappGroupId) {
+      groupStatus = "EXISTING";
     } else {
-      // TRIO/MULTI (3+ lessons): auto-open dedicated Quad WhatsApp group
-      // (Admin + Teacher + Student + Parent).
-      if (!quadGroupUrl) {
-        const manager = await prisma.user.findFirst({
-          where: { role: { in: ["MANAGER", "ADMIN"] } },
-          select: { name: true, phone: true },
-          orderBy: { role: "desc" },
-        });
-
-        const created = await createWhatsAppQuadGroup({
-          studentId: student.id,
-          studentName,
-          subject: "המקצוע שזוהה באבחון",
-          teacherName: "מורה מומחה (ישובץ בהמשך)",
-          members: [
-            {
-              role: "ADMIN",
-              phone: manager?.phone || process.env.WHATSAPP_ADMIN_PHONE?.trim() || "",
-              name: manager?.name || "מנהל פדגוגי",
-            },
-            {
-              role: "TEACHER",
-              phone: process.env.WHATSAPP_TEACHER_PLACEHOLDER_PHONE?.trim() || "",
-              name: "מורה מומחה (ישובץ בהמשך)",
-            },
-            {
-              role: "STUDENT",
-              phone: studentPhone,
-              name: studentName,
-            },
-            {
-              role: "PARENT",
-              phone: student.parentPhone || studentPhone,
-              name: student.parentName || studentName,
-            },
-          ],
-        });
-
-        quadGroupUrl = created.inviteUrl;
-        await prisma.user.update({
-          where: { id: student.id },
-          data: { quadGroupUrl },
-        });
-        isGroupOpened = true;
-      }
-
-      const recipientPhone = student.parentPhone || studentPhone;
-      await sendQuadGroupInvite({
-        recipientPhone,
-        recipientName: student.parentName || studentName,
-        studentName,
-        teacherName: "מורה מומחה (ישובץ בהמשך)",
-        groupUrl: quadGroupUrl,
+      const lesson = await prisma.lesson.findFirst({
+        where: { studentId: student.id, status: "SCHEDULED", scheduledAt: { gte: new Date() } },
+        orderBy: { scheduledAt: "asc" },
+        select: {
+          id: true,
+          title: true,
+          scheduledAt: true,
+          durationMinutes: true,
+          teacher: { select: { id: true, name: true, phone: true } },
+        },
       });
+
+      if (!lesson) {
+        groupStatus = "PENDING_TEACHER_ASSIGNMENT";
+      } else {
+        const latestDiagnostic = await prisma.diagnosticQuiz.findFirst({
+          where: { studentId: student.id },
+          orderBy: { createdAt: "desc" },
+          select: { subject: true },
+        });
+
+        // Members come from the DB only — body-supplied phones never join a group.
+        const created = await createWhatsAppQuadGroup({
+          student: { name: student.name, phone: student.phone },
+          teacher: { name: lesson.teacher.name, phone: lesson.teacher.phone },
+          parent: student.parentPhone
+            ? { name: student.parentName ?? undefined, phone: student.parentPhone }
+            : undefined,
+          lesson: {
+            scheduledAt: lesson.scheduledAt,
+            durationMinutes: lesson.durationMinutes ?? 60,
+            subject: latestDiagnostic?.subject || lesson.title || undefined,
+          },
+        });
+
+        if (created.ok) {
+          // A gateway without invite links yields null, which also clears stale placeholder links.
+          quadGroupUrl = created.inviteUrl;
+          await prisma.user.update({
+            where: { id: student.id },
+            data: { whatsappGroupId: created.chatId, quadGroupUrl },
+          });
+          isGroupOpened = true;
+          groupStatus = "OPENED";
+
+          await writeAuditLog({
+            actorId: auth.actorId,
+            action: "WHATSAPP_QUAD_GROUP_CREATED",
+            entityType: "User",
+            entityId: student.id,
+            metadata: {
+              chatId: created.chatId,
+              groupName: created.groupName,
+              lessonId: lesson.id,
+              teacherId: lesson.teacher.id,
+              roles: created.participants.map((p) => p.role),
+              droppedRoles: created.droppedRoles,
+              welcomeSent: created.welcome.sent,
+              welcomeMessageId: created.welcome.sent ? created.welcome.messageId : null,
+              welcomeError: created.welcome.sent ? null : created.welcome.error,
+              via: auth.via,
+            },
+          });
+        } else {
+          groupStatus = "FAILED";
+          groupErrorCode = created.error.code;
+          console.error(
+            `[dispatch-channel] quad group for ${student.id} failed (${created.error.code}): ${created.error.message}`
+          );
+        }
+      }
     }
 
     await writeAuditLog({
@@ -251,25 +295,31 @@ export async function POST(request: NextRequest) {
         gapTopicsCount: gapCount,
         mode: packageType === "SINGLE" ? "TRANSACTIONAL_SINGLE" : "QUAD_GROUP",
         isGroupOpened,
+        groupStatus,
+        groupErrorCode,
         recommendedPackage: recommendation.packageType,
         via: auth.via,
       },
     });
 
-    return NextResponse.json({
-      success: true,
-      data: {
-        channel: packageType === "SINGLE" ? "TRANSACTIONAL_SINGLE" : "QUAD_GROUP",
-        modeLabel:
-          packageType === "SINGLE"
-            ? "הודעות טרנזקציוניות בלבד — ללא פתיחת קבוצה"
-            : "נפתחה קבוצת WhatsApp מרובעת ייעודית (מנהל פדגוגי + מורה + תלמיד + הורה)",
-        isGroupOpened,
-        quadGroupUrl,
-        recommendedPackage: recommendation,
-        messagePreview: conversionMessage.split("\n")[0],
-      },
-    });
+    const data = {
+      channel: packageType === "SINGLE" ? "TRANSACTIONAL_SINGLE" : "QUAD_GROUP",
+      modeLabel: GROUP_MODE_LABELS[groupStatus],
+      isGroupOpened,
+      groupStatus,
+      quadGroupUrl,
+      recommendedPackage: recommendation,
+      messagePreview: conversionMessage.split("\n")[0],
+    };
+
+    if (groupErrorCode) {
+      return NextResponse.json(
+        { success: false, error: GROUP_MODE_LABELS.FAILED, data: { ...data, errorCode: groupErrorCode } },
+        { status: statusForGroupError(groupErrorCode) }
+      );
+    }
+
+    return NextResponse.json({ success: true, data });
   } catch (error: unknown) {
     console.error("[dispatch-channel] error:", error);
     return NextResponse.json(

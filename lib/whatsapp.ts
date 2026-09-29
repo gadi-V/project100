@@ -343,105 +343,307 @@ export async function sendQuadGroupInvite({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Quad-group creation (WhatsApp Cloud API scaffold)
-// Members: Admin (pedagogical manager) + Teacher + Student + Parent
-// SINGLE lessons never call this — transactional 1-on-1 only.
+// Quad group (live gateway): Student + Teacher + optional Parent + Admin
+// (WHATSAPP_ADMIN_PHONE). Opened only once a teacher and a first lesson exist,
+// then greeted with the structured welcome message. SINGLE never opens a group.
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type QuadGroupMemberRole = "ADMIN" | "TEACHER" | "STUDENT" | "PARENT";
+export type QuadGroupRole = "STUDENT" | "TEACHER" | "PARENT" | "ADMIN";
 
-export type QuadGroupMember = {
-  role: QuadGroupMemberRole;
-  phone: string;
-  name?: string | null;
-};
+export type QuadGroupParticipant = { role: QuadGroupRole; chatId: string };
 
 export type CreateQuadGroupInput = {
-  /** Stable id used for mock/deterministic invite tokens. */
-  studentId: string;
-  studentName: string;
-  members: QuadGroupMember[];
-  subject?: string | null;
-  teacherName?: string | null;
+  student: { name: string; phone: string };
+  teacher: { name: string; phone: string };
+  parent?: { name?: string; phone?: string };
+  lesson: { scheduledAt: Date; durationMinutes: number; subject?: string };
+  questionnaireUrl?: string;
 };
 
-export type CreateQuadGroupResult = {
-  inviteUrl: string;
-  groupId: string | null;
-  mocked: boolean;
+export type QuadGroupErrorCode =
+  | "NOT_CONFIGURED"
+  | "MISSING_REQUIRED_PARTICIPANT"
+  | "TIMEOUT"
+  | "NETWORK"
+  | "GATEWAY_ERROR"
+  | "INVALID_RESPONSE";
+
+export type QuadGroupError = { code: QuadGroupErrorCode; message: string; status?: number };
+
+export type QuadWelcomeStatus =
+  | { sent: true; messageId: string | null }
+  | { sent: false; error: string };
+
+type QuadGroupRoster = {
+  groupName: string;
+  participants: QuadGroupParticipant[];
+  /** Roles left out because their phone was missing, invalid, or a duplicate. */
+  droppedRoles: QuadGroupRole[];
 };
+
+export type CreateQuadGroupResult =
+  | (QuadGroupRoster & {
+      ok: true;
+      chatId: string;
+      inviteUrl: string | null;
+      welcome: QuadWelcomeStatus;
+    })
+  | (QuadGroupRoster & { ok: false; error: QuadGroupError });
+
+export const QUAD_GROUP_NAME_MAX_CHARS = 25;
+export const QUAD_GATEWAY_TIMEOUT_MS = 10_000;
+const QUAD_GROUP_NAME_SUFFIX = ` | ${BRAND_NAME}`;
+const DEFAULT_MAPPING_LESSON_MINUTES = 60;
+const HEBREW_WEEKDAYS: Record<string, string> = {
+  Sun: "ראשון",
+  Mon: "שני",
+  Tue: "שלישי",
+  Wed: "רביעי",
+  Thu: "חמישי",
+  Fri: "שישי",
+  Sat: "שבת",
+};
+
+function charLength(text: string): number {
+  return Array.from(text).length;
+}
 
 /**
- * Scaffolds WhatsApp Cloud API quad-group creation.
- * Guards all external HTTP behind WHATSAPP_API_KEY — without it, returns a
- * deterministic mock invite URL (dev-safe, no network).
+ * `"<student> <subject> | PROJECT100"`, at most 25 characters. The brand suffix
+ * is kept; the prefix degrades from full name + subject → first name + subject
+ * → full name → first name → hard cut, instead of slicing through words.
+ */
+export function buildQuadGroupName(studentName: string, subject?: string | null): string {
+  const name = studentName.trim().replace(/\s+/g, " ") || "תלמיד";
+  const firstName = name.split(" ")[0];
+  const subjectLabel = subject?.trim().replace(/\s+/g, " ") || "";
+  const budget = QUAD_GROUP_NAME_MAX_CHARS - charLength(QUAD_GROUP_NAME_SUFFIX);
+
+  const candidates = subjectLabel
+    ? [`${name} ${subjectLabel}`, `${firstName} ${subjectLabel}`, name, firstName]
+    : [name, firstName];
+  const prefix =
+    candidates.find((candidate) => charLength(candidate) <= budget) ??
+    Array.from(name).slice(0, budget).join("").trim();
+  return `${prefix}${QUAD_GROUP_NAME_SUFFIX}`;
+}
+
+/** Normalizes every member to a JID and drops missing, invalid or duplicate numbers. */
+export function collectQuadGroupParticipants(
+  input: Pick<CreateQuadGroupInput, "student" | "teacher" | "parent">
+): Omit<QuadGroupRoster, "groupName"> {
+  const wanted: { role: QuadGroupRole; phone: string | undefined }[] = [
+    { role: "STUDENT", phone: input.student.phone },
+    { role: "TEACHER", phone: input.teacher.phone },
+    { role: "PARENT", phone: input.parent?.phone },
+    { role: "ADMIN", phone: process.env.WHATSAPP_ADMIN_PHONE },
+  ];
+
+  const participants: QuadGroupParticipant[] = [];
+  const droppedRoles: QuadGroupRole[] = [];
+  for (const { role, phone } of wanted) {
+    let chatId: string;
+    try {
+      chatId = normalizeToWhatsAppJid(phone?.trim() ?? "");
+    } catch {
+      droppedRoles.push(role);
+      continue;
+    }
+    if (participants.some((p) => p.chatId === chatId)) {
+      droppedRoles.push(role);
+      continue;
+    }
+    participants.push({ role, chatId });
+  }
+  return { participants, droppedRoles };
+}
+
+/** Day name, `DD.MM.YYYY` and `HH:MM-HH:MM` in Israel time. */
+export function formatQuadLessonWindow(
+  scheduledAt: Date,
+  durationMinutes: number
+): { dayName: string; date: string; timeRange: string } {
+  const minutes =
+    Number.isFinite(durationMinutes) && durationMinutes > 0
+      ? durationMinutes
+      : DEFAULT_MAPPING_LESSON_MINUTES;
+  const format = (date: Date) => {
+    const parts = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Asia/Jerusalem",
+      weekday: "short",
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(date);
+    const get = (type: Intl.DateTimeFormatPartTypes) =>
+      parts.find((part) => part.type === type)?.value ?? "";
+    return {
+      weekday: get("weekday"),
+      date: `${get("day")}.${get("month")}.${get("year")}`,
+      time: `${get("hour")}:${get("minute")}`,
+    };
+  };
+
+  const start = format(scheduledAt);
+  const end = format(new Date(scheduledAt.getTime() + minutes * 60 * 1000));
+  return {
+    dayName: HEBREW_WEEKDAYS[start.weekday] ?? start.weekday,
+    date: start.date,
+    timeRange: `${start.time}-${end.time}`,
+  };
+}
+
+export function buildQuadWelcomeMessage(input: {
+  studentName: string;
+  teacherName: string;
+  scheduledAt: Date;
+  durationMinutes: number;
+  questionnaireUrl: string;
+}): string {
+  const { dayName, date, timeRange } = formatQuadLessonWindow(
+    input.scheduledAt,
+    input.durationMinutes
+  );
+  return (
+    `היי ${input.studentName.trim()}, ברוך הבא ל-${BRAND_NAME} ובהצלחה! 🎉\n` +
+    `ביום ${dayName} ${date} יתקיים שיעור המיפוי שלך בשעה ${timeRange}\n` +
+    `עד אז מוזמן לענות על השאלון המצורף:\n` +
+    `${input.questionnaireUrl}\n\n` +
+    `נשמח לקבל כאן את הלו״ז השבועי שלך - חוגים, אימונים וזמנים פנויים, ובנוסף צילום של המבחן האחרון על מנת שנוכל לעבור עליו לפני המיפוי.\n\n` +
+    `📌 חלוקת פעילות בקבוצה:\n` +
+    `- ${input.teacherName.trim()} ילווה אותך במעטפת הלימודית ובכל הקשור לחומר המקצועי (המורה ישלח כאן בהמשך סרטון היכרות אישי).\n` +
+    `- צוות המערכת זמין כאן לכל נושאי לו״ז, שינויים, תשלומים ובירוקרטיה.`
+  );
+}
+
+function stringField(record: Record<string, unknown>, keys: string[]): string | null {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value === "object" && value !== null) {
+      const serialized = (value as Record<string, unknown>)._serialized;
+      if (typeof serialized === "string" && serialized.trim()) return serialized.trim();
+    }
+  }
+  return null;
+}
+
+function isAbortLike(error: unknown): boolean {
+  return (
+    error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")
+  );
+}
+
+/**
+ * Opens the quad group on the gateway (`POST {WHATSAPP_API_URL}/createGroup`
+ * with `{ groupName, chatIds }`) and posts the welcome message into it.
+ * Never throws: every failure comes back as a structured `{ ok: false, error }`,
+ * and a failed welcome send is reported on an otherwise successful result.
  */
 export async function createWhatsAppQuadGroup(
   input: CreateQuadGroupInput
 ): Promise<CreateQuadGroupResult> {
-  const members = input.members
-    .filter((m) => m.phone?.trim())
-    .map((m) => ({
-      role: m.role,
-      phone: normalizeToE164(m.phone).slice(1),
-      name: m.name?.trim() || null,
-    }));
+  const groupName = buildQuadGroupName(input.student.name, input.lesson.subject);
+  const roster = collectQuadGroupParticipants(input);
+  const fail = (error: QuadGroupError): CreateQuadGroupResult => ({
+    ok: false,
+    error,
+    groupName,
+    ...roster,
+  });
 
-  const mockInviteUrl = `https://chat.whatsapp.com/mock-quad-${input.studentId.slice(0, 8)}`;
-
-  if (!process.env.WHATSAPP_API_KEY) {
-    console.log("[MOCK] Quad Group created with members:", members);
-    return { inviteUrl: mockInviteUrl, groupId: null, mocked: true };
+  const roles = new Set(roster.participants.map((p) => p.role));
+  if (!roles.has("STUDENT") || !roles.has("TEACHER")) {
+    return fail({
+      code: "MISSING_REQUIRED_PARTICIPANT",
+      message: "A quad group needs a valid, distinct student and teacher phone",
+    });
   }
 
   const config = getWhatsAppConfig();
   if (!config) {
-    console.log("[MOCK] Quad Group created with members:", members);
-    return { inviteUrl: mockInviteUrl, groupId: null, mocked: true };
+    return fail({
+      code: "NOT_CONFIGURED",
+      message: "WHATSAPP_API_URL / WHATSAPP_API_KEY are not set",
+    });
   }
 
-  // WhatsApp Cloud / BSP group-create scaffold (provider-specific path).
-  const subjectLabel = input.subject?.trim() || "ליווי פדגוגי";
-  const groupSubject = `${BRAND_NAME} · ${input.studentName} · ${subjectLabel}`;
-
-  const response = await fetch(`${config.apiUrl}/groups`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${config.apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      subject: groupSubject,
-      description:
-        `קבוצת ליווי מרובעת (מנהל פדגוגי + מורה + תלמיד + הורה) עבור ${input.studentName}` +
-        (input.teacherName ? ` · מורה: ${input.teacherName}` : ""),
-      participants: members.map((m) => ({
-        phone: m.phone,
-        role: m.role,
-        name: m.name,
-      })),
-    }),
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${config.apiUrl}/createGroup`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${config.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        groupName,
+        chatIds: roster.participants.map((p) => p.chatId),
+      }),
+      signal: AbortSignal.timeout(QUAD_GATEWAY_TIMEOUT_MS),
+    });
+  } catch (error) {
+    if (isAbortLike(error)) {
+      return fail({
+        code: "TIMEOUT",
+        message: `WhatsApp createGroup did not respond within ${QUAD_GATEWAY_TIMEOUT_MS} ms`,
+      });
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    return fail({ code: "NETWORK", message: `WhatsApp createGroup request failed: ${message}` });
+  }
 
   if (!response.ok) {
-    const detail = await response.text().catch(() => response.statusText);
-    throw new Error(`WhatsApp create group failed (${response.status}): ${detail}`);
+    const detail = (await response.text().catch(() => "")).slice(0, 300);
+    return fail({
+      code: "GATEWAY_ERROR",
+      status: response.status,
+      message: `WhatsApp createGroup failed (${response.status}): ${detail || response.statusText}`,
+    });
   }
 
-  const payload = (await response.json().catch(() => ({}))) as {
-    inviteUrl?: string;
-    invite_link?: string;
-    groupId?: string;
-    id?: string;
-  };
+  const body: unknown = await response.json().catch(() => null);
+  const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+  if (record.created === false) {
+    return fail({
+      code: "GATEWAY_ERROR",
+      status: response.status,
+      message: "WhatsApp gateway reported the group was not created",
+    });
+  }
+  const chatId = stringField(record, ["chatId", "groupId", "gid", "id"]);
+  if (!chatId?.endsWith("@g.us")) {
+    return fail({
+      code: "INVALID_RESPONSE",
+      message: "WhatsApp createGroup response has no group chat id (…@g.us)",
+    });
+  }
+  const inviteUrl = stringField(record, ["groupInviteLink", "inviteLink", "inviteUrl", "invite_link"]);
 
-  const inviteUrl =
-    payload.inviteUrl ||
-    payload.invite_link ||
-    mockInviteUrl;
-  const groupId = payload.groupId || payload.id || null;
+  const welcomeText = buildQuadWelcomeMessage({
+    studentName: input.student.name,
+    teacherName: input.teacher.name,
+    scheduledAt: input.lesson.scheduledAt,
+    durationMinutes: input.lesson.durationMinutes,
+    questionnaireUrl: input.questionnaireUrl?.trim() || `${getAppUrl()}/onboarding/diagnostic`,
+  });
 
-  return { inviteUrl, groupId, mocked: false };
+  let welcome: QuadWelcomeStatus;
+  try {
+    const sent = await sendWhatsAppMessage(chatId, welcomeText, {
+      timeoutMs: QUAD_GATEWAY_TIMEOUT_MS,
+    });
+    welcome = sent.mocked
+      ? { sent: false, error: "WhatsApp gateway is not configured" }
+      : { sent: true, messageId: sent.messageId };
+  } catch (error) {
+    welcome = { sent: false, error: error instanceof Error ? error.message : String(error) };
+  }
+
+  return { ok: true, chatId, inviteUrl, welcome, groupName, ...roster };
 }
 
 export type QuadLessonSummaryInput = {
@@ -681,9 +883,9 @@ export function analyzeGapsAndGenerateOutreach(params: {
 // ─────────────────────────────────────────────────────────────────────────────
 // WhatsApp Closer — full close-loop engagement for a diagnosed student.
 // ・ Runs the gap analysis (spec 1.9) and derives the package + credits.
-// ・ For TRIO/MULTI it opens the dedicated Quad WhatsApp group (manager +
-//    expert teacher + parent + student) and invites the parent; for SINGLE it
-//    stays transactional-only (no group is ever opened).
+// ・ For TRIO/MULTI it shares an already-open Quad WhatsApp group with the
+//    parent; the group itself is opened by dispatch-channel once a teacher and
+//    a first lesson exist. SINGLE stays transactional-only.
 // ・ Uses ONLY the existing primitives above — never raw network calls.
 // ・ Returns a structured result so callers can render/audit the action.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -766,54 +968,26 @@ export async function dispatchWhatsAppCloser(
       : analysis.recommendedPackage);
   const channel = "QUAD_GROUP" as const;
 
-  let isGroupOpened = false;
-  let quadGroupUrl: string | null = whatsappGroupUrl ?? null;
+  // The live quad group needs a real teacher and a scheduled first lesson, which
+  // the diagnostic funnel does not have yet: it is opened later by
+  // /api/whatsapp/dispatch-channel. Here only an existing group is shared.
+  const isGroupOpened = false;
+  const quadGroupUrl: string | null = whatsappGroupUrl ?? null;
   let dispatchError: string | undefined;
 
   try {
-    if (!quadGroupUrl) {
-      const created = await createWhatsAppQuadGroup({
-        studentId: input.studentId || recipientPhone.replace(/\D/g, "").slice(-8) || "unknown",
+    if (quadGroupUrl) {
+      // Prefer the parent (Quad ecosystem), then the student, then the generic recipient.
+      const targetPhone = parentPhone || studentPhone || recipientPhone;
+      const inviteName = recipientName || studentName;
+      await sendQuadGroupInvite({
+        recipientPhone: targetPhone,
+        recipientName: inviteName,
         studentName,
-        subject: trackName,
-        teacherName: teacherName || "מורה מומחה (ישובץ בהמשך)",
-        members: [
-          {
-            role: "ADMIN",
-            phone: process.env.WHATSAPP_ADMIN_PHONE?.trim() ?? "",
-            name: "מנהל פדגוגי",
-          },
-          {
-            role: "TEACHER",
-            phone: process.env.WHATSAPP_TEACHER_PLACEHOLDER_PHONE?.trim() ?? "",
-            name: teacherName || "מורה מומחה (ישובץ בהמשך)",
-          },
-          {
-            role: "STUDENT",
-            phone: studentPhone || recipientPhone,
-            name: studentName,
-          },
-          {
-            role: "PARENT",
-            phone: parentPhone || recipientPhone,
-            name: recipientName || studentName,
-          },
-        ],
+        teacherName: teacherName || "המורה שלך",
+        groupUrl: quadGroupUrl,
       });
-      quadGroupUrl = created.inviteUrl;
-      isGroupOpened = true;
     }
-
-    // Prefer the parent (Quad ecosystem), then the student, then the generic recipient.
-    const targetPhone = parentPhone || studentPhone || recipientPhone;
-    const inviteName = recipientName || studentName;
-    await sendQuadGroupInvite({
-      recipientPhone: targetPhone,
-      recipientName: inviteName,
-      studentName,
-      teacherName: teacherName || "מורה מומחה (ישובץ בהמשך)",
-      groupUrl: quadGroupUrl,
-    });
   } catch (error: unknown) {
     // Fail-open: the analysis is still valuable even if delivery fails.
     dispatchError = error instanceof Error ? error.message : String(error);

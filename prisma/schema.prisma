@@ -53,6 +53,8 @@ model User {
   academicYear       String?
   targetOrganization String?
   quadGroupUrl       String?
+  /// Live quad WhatsApp group chat id (`…@g.us`), set when the group is opened; future group messages target it.
+  whatsappGroupId    String?
   /// Opt-in flag so the funnel only notifies via WhatsApp when a parent phone was supplied.
   notifyParentViaWhatsApp Boolean @default(false)
 
