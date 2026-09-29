@@ -38,7 +38,7 @@ async function loadRateLimit() {
 }
 
 async function loadMiddleware() {
-  return (await import("../middleware")).middleware;
+  return (await import("../proxy")).proxy;
 }
 
 beforeEach(() => {

@@ -6,7 +6,9 @@
  *            message recommends TRIO (1-2 topics) or MULTI (3+ topics).
  * Station 3: TRIO package purchase — BillingLedger CHARGE (Decimal 19,4) + idempotencyKey + credits=3.
  * Station 4: POST /api/whatsapp/dispatch-channel — 1-vs-4 policy:
- *            TRIO/MULTI ⇒ Quad group opened; SINGLE ⇒ transactional only.
+ *            TRIO/MULTI before a mapping lesson ⇒ PENDING_TEACHER_ASSIGNMENT (no group, no link);
+ *            after a mapping lesson with a teacher is scheduled ⇒ the route attempts the Quad group;
+ *            SINGLE ⇒ transactional only.
  * Station 5: Mandatory pre-lesson context — PreLessonAsset bound to packageId feeds the brief.
  * Station 6: POST /api/lessons/[id]/summary — lesson close, resolvedGaps update, balanced COMPENSATION.
  * Station 7: POST /api/admin/override/compensation — PLATFORM_COMPENSATION ledger + credit, no double charge.
@@ -115,6 +117,11 @@ async function api<T = unknown>(
 }
 
 const SESSION_COOKIE_NAME = "project8_session";
+
+/** Must match PACKAGES.TRIO.price in app/api/payments/route.ts. */
+const TRIO_PRICE_ILS = 540;
+/** Must match LESSON_VALUE_ILS in app/api/admin/override/compensation/route.ts. */
+const OVERRIDE_LESSON_VALUE_ILS = 200;
 
 async function cleanup(): Promise<void> {
   const studentScope = scope.studentId ? { studentId: scope.studentId } : undefined;
@@ -236,7 +243,7 @@ async function station1_diagnostic(): Promise<{ studentId: string; token: string
   ctx.topics.push(topicA.id, topicB.id, topicC.id);
 
   const pkg = await prisma.package.create({
-    data: { code: `E2E-TRIO-${suffix}`, name: "E2E Trio Package", credits: 3, priceIls: 510 },
+    data: { code: `E2E-TRIO-${suffix}`, name: "E2E Trio Package", credits: 3, priceIls: TRIO_PRICE_ILS },
   });
   ctx.packages.push(pkg.id);
 
@@ -396,7 +403,7 @@ async function station3_purchase(ctx2: Awaited<ReturnType<typeof station1_diagno
   const dbOk =
     student?.lessonCredits === 3 &&
     charges.length >= 1 &&
-    Number(charges[0]?.amount) === 510; // Decimal(19,4) → 510.0000
+    Number(charges[0]?.amount) === TRIO_PRICE_ILS; // Decimal(19,4) → 540.0000
   const hasIdempotency = charges[0]?.transactionId?.startsWith("mock_") === true || charges[0]?.transactionId != null;
 
   record(
@@ -409,42 +416,84 @@ async function station3_purchase(ctx2: Awaited<ReturnType<typeof station1_diagno
   );
 }
 
+type DispatchResponse = {
+  success?: boolean;
+  data?: {
+    channel?: string;
+    isGroupOpened?: boolean;
+    groupStatus?: string;
+    quadGroupUrl?: string | null;
+    modeLabel?: string;
+    errorCode?: string;
+  };
+  error?: string;
+};
+
 async function station4_dispatch(ctx2: Awaited<ReturnType<typeof station1_diagnostic>>) {
-  // TRIO ⇒ Quad group opened (1-vs-4 policy).
-  const trio = await api<{
-    success?: boolean;
-    data?: { channel?: string; isGroupOpened?: boolean; quadGroupUrl?: string | null; modeLabel?: string };
-    error?: string;
-  }>("POST", "/api/whatsapp/dispatch-channel", {
+  const trioBody = {
     packageType: "TRIO",
     studentName: ctx2.studentName,
     studentPhone: "0500000000",
     gapTopicsCount: 3,
     gapTopicsNames: ["כלל השרשרת", "אינטגרלים", "וקטורים"],
-  }, undefined, ctx2.cookie);
+  };
 
-  const user = await prisma.user.findUnique({ where: { id: ctx2.studentId } });
-  const quadUrl = trio.json?.data?.quadGroupUrl ?? user?.quadGroupUrl;
-  const okTrio =
-    trio.json?.success === true &&
-    trio.json?.data?.channel === "QUAD_GROUP" &&
-    (trio.json?.data?.isGroupOpened === true || Boolean(quadUrl));
+  // 4a. After diagnosis + purchase, before any mapping lesson: the group stays pending.
+  const pending = await api<DispatchResponse>("POST", "/api/whatsapp/dispatch-channel", trioBody, undefined, ctx2.cookie);
+  const userBefore = await prisma.user.findUnique({ where: { id: ctx2.studentId } });
+  const okPending =
+    pending.json?.success === true &&
+    pending.json?.data?.channel === "QUAD_GROUP" &&
+    pending.json?.data?.isGroupOpened === false &&
+    pending.json?.data?.groupStatus === "PENDING_TEACHER_ASSIGNMENT" &&
+    !pending.json?.data?.quadGroupUrl &&
+    !userBefore?.whatsappGroupId;
 
   record(
     4,
-    "WhatsApp 1-vs-4: TRIO ⇒ Quad group",
-    okTrio,
-    okTrio
-      ? `channel=${trio.json?.data?.channel}, opened=${trio.json?.data?.isGroupOpened}, url=${quadUrl ? "yes" : "—"}`
-      : `trio dispatch failed (status=${trio.status}): ${JSON.stringify(trio.json ?? null)?.slice(0, 200)}`
+    "WhatsApp: TRIO before mapping lesson ⇒ pending",
+    okPending,
+    okPending
+      ? `groupStatus=${pending.json?.data?.groupStatus}, opened=false, inviteUrl=none, whatsappGroupId=none`
+      : `pending check failed (status=${pending.status}): ${JSON.stringify(pending.json ?? null)?.slice(0, 200)}`
+  );
+
+  // 4b. Schedule the mapping lesson with the assigned teacher, then dispatch again.
+  const mappingLesson = await prisma.lesson.create({
+    data: {
+      packageId: ctx2.packageId,
+      studentId: ctx2.studentId,
+      teacherId: ctx2.teacherUserId,
+      title: "שיעור מיפוי",
+      scheduledAt: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000),
+      status: "SCHEDULED",
+      durationMinutes: 60,
+    },
+  });
+  ctx.lessons.push(mappingLesson.id);
+
+  // Fixture phones are not valid numbers, so the route stops at the roster check and never
+  // opens a real WhatsApp group; OPENED is only reachable with real phones + a configured gateway.
+  const scheduled = await api<DispatchResponse>("POST", "/api/whatsapp/dispatch-channel", trioBody, undefined, ctx2.cookie);
+  const groupStatus = scheduled.json?.data?.groupStatus;
+  const userAfter = await prisma.user.findUnique({ where: { id: ctx2.studentId } });
+  const okScheduled =
+    scheduled.json?.data?.channel === "QUAD_GROUP" &&
+    groupStatus !== "PENDING_TEACHER_ASSIGNMENT" &&
+    ((groupStatus === "OPENED" && Boolean(userAfter?.whatsappGroupId)) ||
+      (groupStatus === "FAILED" && Boolean(scheduled.json?.data?.errorCode) && !userAfter?.whatsappGroupId));
+
+  record(
+    4,
+    "WhatsApp: mapping lesson scheduled ⇒ group attempted",
+    okScheduled,
+    okScheduled
+      ? `groupStatus=${groupStatus}${scheduled.json?.data?.errorCode ? ` (${scheduled.json.data.errorCode})` : ""}, http=${scheduled.status}`
+      : `mapping-lesson dispatch mismatch (status=${scheduled.status}): ${JSON.stringify(scheduled.json ?? null)?.slice(0, 200)}`
   );
 
   // SINGLE ⇒ transactional only, never opens a group.
-  const single = await api<{
-    success?: boolean;
-    data?: { channel?: string; isGroupOpened?: boolean; quadGroupUrl?: string | null };
-    error?: string;
-  }>("POST", "/api/whatsapp/dispatch-channel", {
+  const single = await api<DispatchResponse>("POST", "/api/whatsapp/dispatch-channel", {
     packageType: "SINGLE",
     studentName: ctx2.studentName,
     studentPhone: "0500000000",
@@ -553,7 +602,7 @@ async function station7_override(ctx2: Awaited<ReturnType<typeof station1_diagno
   const ok =
     res.json?.success === true &&
     comp != null &&
-    Number(comp.amount) === 180 &&
+    Number(comp.amount) === OVERRIDE_LESSON_VALUE_ILS &&
     (student?.lessonCredits ?? 0) === 4; // 3 (TRIO) + 1 (override)
 
   record(

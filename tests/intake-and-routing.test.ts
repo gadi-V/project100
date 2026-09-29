@@ -504,7 +504,7 @@ describe("public UI separation", () => {
   });
 
   it("exposes the careers API publicly behind the API rate limit", () => {
-    const middleware = readSource("middleware.ts");
+    const middleware = readSource("proxy.ts");
     expect(middleware).toMatch(/API_RATE_LIMITED_ROUTES = new Set\(\[[^\]]*"\/api\/careers\/apply"/);
     expect(middleware).toMatch(/PUBLIC_API_ROUTES = new Set\(\[[\s\S]*?"\/api\/careers\/apply"[\s\S]*?\]\)/);
     expect(middleware).not.toMatch(/"\/api\/admin\/intake"/);

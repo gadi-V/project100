@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { SignJWT, base64url } from "jose";
 import { verifyCronAuth, verifyCronRequest, verifyQStashSignature } from "../lib/auth/cron";
-import { middleware } from "../middleware";
+import { proxy as middleware } from "../proxy";
 
 const ORIGIN = "https://project100.vercel.app";
 const SIGNING_KEY = "sig_current_key";

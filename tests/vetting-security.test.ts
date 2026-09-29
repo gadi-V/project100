@@ -75,7 +75,7 @@ function forwardedHeaderNames(res: Response): string[] {
 }
 
 async function loadMiddleware() {
-  return (await import("../middleware")).middleware;
+  return (await import("../proxy")).proxy;
 }
 
 async function loadVettingRoute() {

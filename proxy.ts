@@ -26,6 +26,7 @@ const PUBLIC_API_ROUTES = new Set([
   "/api/leads",
   "/api/careers/apply",
   "/api/logout",
+  "/api/health",
   "/api/auth/forgot-password",
   "/api/auth/reset-password",
   "/api/webhooks/daily",
@@ -65,7 +66,7 @@ function isPublicApiPath(pathname: string): boolean {
   );
 }
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Rate limit sensitive public endpoints before anything else (/api/cron/* is exempt).

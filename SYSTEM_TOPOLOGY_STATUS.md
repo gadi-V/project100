@@ -2,7 +2,8 @@
 
 > Final wiring map as-built. Status: **FULLY WIRED** — every layer verified by
 > `scripts/test-live-db-pipeline.ts` (Live-DB), `agents_hive/test_hive_mcp_tools.py`
-> (9 FastMCP tools) and `scripts/verify-closed-loop-e2e.ts` (13 static checks).
+> (9 FastMCP tools), `scripts/verify-closed-loop-e2e.ts` (18 dry-run checks) and
+> `scripts/e2e-dry-run-verification.ts` (13 live-server checks). Readiness probe: `GET /api/health`.
 
 ---
 
@@ -131,7 +132,8 @@ Verified by `test_hive_mcp_tools.py`:
 | Script | Purpose | Status |
 |---|---|---|
 | `scripts/test-live-db-pipeline.ts` | 6-station live-DB integration + teardown | ✅ (run) |
-| `scripts/verify-closed-loop-e2e.ts` | 13 static checks (4 layers + 6 desks) | ✅ 13/13 |
+| `scripts/verify-closed-loop-e2e.ts` | 18 dry-run checks (4 layers + 6 desks + WhatsApp group lifecycle), no DB writes | ✅ 18/18 |
+| `scripts/e2e-dry-run-verification.ts` | 8-station funnel against a running server (`APP_URL`), self-cleaning fixtures | ✅ 13/13 |
 | `agents_hive/test_hive_mcp_tools.py` | 9 FastMCP tools | ✅ PASS |
 | `scripts/test-curriculum-e2e.ts` | matching-adjacent curriculum E2E | ✅ |
 
@@ -186,6 +188,30 @@ Fresh databases apply all migrations normally with `npx prisma migrate deploy`.
 | 11 | Customer / student directory `/portal/students` + `GET /api/portal/students` (search, status and grade filters, pagination), shared portal header with היום / קורסים / לקוחות tabs and global student search, teacher dashboard links to student files | ✅ Completed |
 | 11b | Vercel build fix: `prisma generate` runs before `next build` and on `postinstall`; `force-dynamic` confirmed on all session/DB portal pages | ✅ Completed |
 | 11c | Neon migration P3018 fixed: `sync_missing_models` made idempotent, failed record resolved, all pending migrations deployed; `package.json#prisma` moved to `prisma.config.ts` | ✅ Completed |
+| 11d | All-green hardening: zero build warnings (`middleware.ts` → `proxy.ts`), E2E scripts synced with the post-mapping-lesson WhatsApp group, `GET /api/health` live DB probe, Neon fully stable | ✅ Completed |
+
+### All-green hardening (Sprint 11d)
+
+- **Zero build warnings.** `npm run build` (`prisma generate && next build`) exits `0` with no warnings: the Prisma
+  `package.json#prisma` deprecation is gone (Sprint 11c) and the Next 16 "middleware → proxy" deprecation is fixed by
+  renaming `middleware.ts` → `proxy.ts` and its export `middleware` → `proxy`. Logic, matcher and public-route lists are
+  unchanged; the build lists `ƒ Proxy (Middleware)`. Tests import `proxy` from `../proxy`.
+- **WhatsApp group lifecycle in E2E.** The group is never opened at the diagnostic stage; it opens only after a
+  mapping lesson with an assigned teacher is scheduled. No `mock-quad-*` links anywhere in `lib/` or `scripts/`.
+  - `scripts/verify-closed-loop-e2e.ts` (dry-run, no DB writes, no gateway calls when configured): closer returns
+    `isGroupOpened=false` + no invite link; `dispatch-channel` source gates `createWhatsAppQuadGroup` behind the
+    SCHEDULED-future-lesson lookup and `PENDING_TEACHER_ASSIGNMENT`; no teacher → `MISSING_REQUIRED_PARTICIPANT`;
+    teacher + mapping lesson → roster `STUDENT+TEACHER`, welcome names the mapping lesson, gateway → `NOT_CONFIGURED`.
+  - `scripts/e2e-dry-run-verification.ts` station 4: TRIO before a mapping lesson → `PENDING_TEACHER_ASSIGNMENT`,
+    no group, no `whatsappGroupId`; after scheduling the mapping lesson → the route leaves the pending gate
+    (fixture phones are invalid on purpose, so it stops at `MISSING_REQUIRED_PARTICIPANT` and never opens a real group).
+    Expected amounts now match the routes: TRIO `540` ILS, override compensation `200` ILS.
+- **`GET /api/health`** (`app/api/health/route.ts`, public in `proxy.ts`): live `SELECT 1` to Neon with a 5 s timeout →
+  `200 { success, data: { status: "UP", database: "UP", latencyMs, timestamp } }`, else `503 DOWN` with no driver
+  details. `Cache-Control: no-store`, `force-dynamic`. Covered by `tests/health.test.ts`.
+- **Neon:** `prisma migrate status` → "Database schema is up to date!"; `migrate deploy` → "No pending migrations to apply."
+- **Verified:** `npm test` 18 files / 345 tests; `tsc --noEmit` 0; both E2E scripts all-pass against Neon
+  (fixtures cleaned up); live `/api/health` → `200 UP`.
 
 ### Neon migration recovery (Sprint 11c)
 
@@ -504,7 +530,7 @@ Fresh databases apply all migrations normally with `npx prisma migrate deploy`.
 
 ### Identity header hardening (Sprint 5)
 
-- `middleware.ts` routes every forwarded request through one helper that **deletes** the client-supplied
+- `proxy.ts` (formerly `middleware.ts`) routes every forwarded request through one helper that **deletes** the client-supplied
   `x-user-id` header and re-sets it **only** from a verified session JWT (`verifySession` on
   `project8_session`). Public routes, auth pages, the Hive M2M bearer path and forged/expired cookies all
   forward without `x-user-id`. It uses `NextResponse.next({ request: { headers } })`, so Next replaces the
@@ -541,7 +567,7 @@ Fresh databases apply all migrations normally with `npx prisma migrate deploy`.
   - `auth`: 15 requests / 60 s — `/api/login`, `/api/register`, `/api/auth/*` (sized for a classroom behind
     one school NAT IP; raised from 5 in Sprint 4).
   - `api`: 30 requests / 60 s — `/api/leads`.
-- `middleware.ts` returns `429` JSON + `Retry-After` when a limit is exceeded. `/api/cron/*` is fully exempt.
+- `proxy.ts` returns `429` JSON + `Retry-After` when a limit is exceeded. `/api/cron/*` is fully exempt.
   It never returns `503` for rate-limiter problems.
 - The per-instance in-memory `Map` limiter (`lib/rate-limit.ts`) was **removed**; no rate-limit state lives
   in instance memory anymore.

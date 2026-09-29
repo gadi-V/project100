@@ -9,18 +9,29 @@
  *   L3 API surface    — WhatsApp Closer, dispatch-channel, risk-events, override.
  *   L4 Agent Hive     — FastMCP tools + the three desk modules parse & run in-memory.
  *
+ * WhatsApp group lifecycle:
+ *   Diagnostic stage  — results unlock with no group (isGroupOpened=false, no invite link).
+ *   Mapping lesson    — the quad group opens only once a SCHEDULED future lesson with an
+ *                       assigned teacher exists (/api/whatsapp/dispatch-channel).
+ *
  * Desks under test:
  *   1. Scanner Desk       2. Creative Factory       3. Head of Desk
  *   4. Teacher Vetting    5. WhatsApp Closer        6. Fintech/Override
  *
  * Run: npx tsx scripts/verify-closed-loop-e2e.ts
  */
+import fs from "fs";
+import path from "path";
 import { VETTING_STEPS_ORDER } from "../lib/teacher-vetting";
 import { PrismaClient, VettingStatus, VettingStepStatus } from "@prisma/client";
 import {
   analyzeGapsAndGenerateOutreach,
+  buildQuadWelcomeMessage,
+  collectQuadGroupParticipants,
+  createWhatsAppQuadGroup,
   determinePackageForGapDepth,
   dispatchWhatsAppCloser,
+  isWhatsAppConfigured,
 } from "../lib/whatsapp";
 
 const prisma = new PrismaClient();
@@ -100,27 +111,125 @@ function layer3WhatsAppCloser() {
   record("L3.API", "Package Depth", pkg.packageType === "MULTI" && pkg.lessons === 5, "determinePackageForGapDepth(5) → MULTI/5");
 }
 
-async function layer3CloserDispatch() {
-  // Dry-run: WhatsApp config is absent in tests ⇒ default mock path (console log). No DB write.
+const E2E_STUDENT = { name: "דנה כהן", phone: "0501234567" };
+const E2E_TEACHER = { name: "מורה בדיקה", phone: "0527654321" };
+
+async function layer3DiagnosticStage() {
+  // Diagnostic unlock: the closer routes to QUAD_GROUP but never opens a group or invents a link.
   const res = await dispatchWhatsAppCloser({
-    studentName: "דנה",
+    studentName: E2E_STUDENT.name,
     trackName: "מתמטיקה 5 יח״ל",
     identifiedGaps: ["חקירת פונקציות", "אינטגרלים", "וקטורים"],
-    recipientPhone: "0500000000",
+    recipientPhone: E2E_STUDENT.phone,
     recipientName: "הורה",
+  });
+  const noGroupYet =
+    res.channel === "QUAD_GROUP" &&
+    res.isGroupOpened === false &&
+    res.quadGroupUrl === null &&
+    res.dispatch?.isGroupOpened === false &&
+    res.analysis.gapsCount === 3;
+  record(
+    "L3.API",
+    "Diagnostic stage (no group)",
+    noGroupYet,
+    `closer → channel=${res.channel}, opened=${res.isGroupOpened}, inviteUrl=${res.quadGroupUrl ?? "none"}, gaps=${res.analysis.gapsCount}`
+  );
+
+  const whatsappSource = fs.readFileSync(path.join(process.cwd(), "lib", "whatsapp.ts"), "utf8");
+  record(
+    "L3.API",
+    "No placeholder invite links",
+    !whatsappSource.includes("mock-quad"),
+    "lib/whatsapp.ts contains no mock-quad-* fallback links"
+  );
+}
+
+async function layer3MappingLessonStage() {
+  // Route contract: the group is attempted only after a SCHEDULED future lesson with a teacher is found.
+  const routeSource = fs.readFileSync(
+    path.join(process.cwd(), "app", "api", "whatsapp", "dispatch-channel", "route.ts"),
+    "utf8"
+  );
+  const lessonLookup = routeSource.indexOf('status: "SCHEDULED", scheduledAt: { gte: new Date() }');
+  const pendingBranch = routeSource.indexOf('groupStatus = "PENDING_TEACHER_ASSIGNMENT"');
+  const groupCreate = routeSource.indexOf("await createWhatsAppQuadGroup(");
+  const gatedByLesson =
+    lessonLookup !== -1 && pendingBranch > lessonLookup && groupCreate > pendingBranch;
+  record(
+    "L3.API",
+    "dispatch-channel gate",
+    gatedByLesson,
+    gatedByLesson
+      ? "lesson lookup → PENDING_TEACHER_ASSIGNMENT → createWhatsAppQuadGroup (in order)"
+      : "dispatch-channel no longer gates group creation on a scheduled lesson"
+  );
+
+  const mappingLesson = {
+    scheduledAt: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000),
+    durationMinutes: 60,
+    subject: "מתמטיקה",
+  };
+
+  // Before a teacher is assigned: the roster is incomplete, so no gateway call is made.
+  const beforeAssignment = await createWhatsAppQuadGroup({
+    student: E2E_STUDENT,
+    teacher: { name: "", phone: "" },
+    lesson: mappingLesson,
   });
   record(
     "L3.API",
-    "WhatsApp Closer (dispatch)",
-    res.channel === "QUAD_GROUP" && res.isGroupOpened && res.analysis.gapsCount === 3,
-    `dispatch → channel=${res.channel}, opened=${res.isGroupOpened}`
+    "Mapping lesson: before teacher",
+    !beforeAssignment.ok && beforeAssignment.error.code === "MISSING_REQUIRED_PARTICIPANT",
+    beforeAssignment.ok
+      ? "group opened without a teacher"
+      : `refused → ${beforeAssignment.error.code}`
   );
+
+  // After scheduling the mapping lesson with a teacher: roster is valid and the welcome names the lesson.
+  const roster = collectQuadGroupParticipants({ student: E2E_STUDENT, teacher: E2E_TEACHER });
+  const roles = roster.participants.map((p) => p.role);
+  const welcome = buildQuadWelcomeMessage({
+    studentName: E2E_STUDENT.name,
+    teacherName: E2E_TEACHER.name,
+    scheduledAt: mappingLesson.scheduledAt,
+    durationMinutes: mappingLesson.durationMinutes,
+    questionnaireUrl: "https://example.com/onboarding/diagnostic",
+  });
+  const rosterOk =
+    roles.includes("STUDENT") &&
+    roles.includes("TEACHER") &&
+    welcome.includes("שיעור המיפוי") &&
+    welcome.includes(E2E_TEACHER.name);
+  record(
+    "L3.API",
+    "Mapping lesson: after scheduling",
+    rosterOk,
+    `roster=${roles.join("+")}, welcome mentions mapping lesson + teacher: ${rosterOk}`
+  );
+
+  // Dry-run never opens a real group: only probe the gateway step when it is unconfigured.
+  if (isWhatsAppConfigured()) {
+    record("L3.API", "Mapping lesson: gateway", true, "WhatsApp configured — live createGroup skipped (dry-run)");
+  } else {
+    const afterScheduling = await createWhatsAppQuadGroup({
+      student: E2E_STUDENT,
+      teacher: E2E_TEACHER,
+      lesson: mappingLesson,
+    });
+    record(
+      "L3.API",
+      "Mapping lesson: gateway",
+      !afterScheduling.ok && afterScheduling.error.code === "NOT_CONFIGURED",
+      afterScheduling.ok
+        ? "unexpected live group"
+        : `roster accepted, stops at gateway → ${afterScheduling.error.code}`
+    );
+  }
 }
 
 async function layer4Desks() {
   // Desk modules load and are parse-verified (file presence + class/func anchors).
-  const fs = await import("fs");
-  const path = await import("path");
   const hiveDir = path.join(process.cwd(), "agents_hive");
   const deskAnchors: Array<{ file: string; anchor: string; label: string }> = [
     { file: "scanner_desk.py", anchor: "class ScannerDesk", label: "Scanner Desk" },
@@ -184,7 +293,8 @@ async function main() {
     await layer1Schema();
     layer2Services();
     layer3WhatsAppCloser();
-    await layer3CloserDispatch();
+    await layer3DiagnosticStage();
+    await layer3MappingLessonStage();
     await layer4Desks();
     layer3Fintech();
   } catch (err) {

@@ -178,7 +178,7 @@ describe("GET/POST /api/agents/dispatch — auth", () => {
   it("is reachable through the middleware without a session (handler does the auth)", async () => {
     vi.stubEnv("UPSTASH_REDIS_REST_URL", "");
     vi.stubEnv("UPSTASH_REDIS_REST_TOKEN", "");
-    const { middleware } = await import("../middleware");
+    const { proxy: middleware } = await import("../proxy");
 
     const res = await middleware(
       dispatchRequest("?agent=leads", { authorization: "Bearer from-qstash" })
