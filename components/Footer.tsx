@@ -9,6 +9,7 @@ export default function Footer() {
           <a href="/#about" className="hover:text-[#0071e3] transition-colors">אודות</a>
           <a href="#" className="hover:text-[#0071e3] transition-colors">מדיניות פרטיות</a>
           <a href="#" className="hover:text-[#0071e3] transition-colors">הצהרת נגישות</a>
+          <a href="/careers" className="hover:text-[#0071e3] transition-colors">הצטרפות לנבחרת ההוראה</a>
           <span className="font-mono text-slate-500">054-3424244</span>
         </div>
       </div>

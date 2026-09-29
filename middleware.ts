@@ -9,7 +9,7 @@ import {
 } from "./lib/security/rate-limit";
 
 const AUTH_RATE_LIMITED_ROUTES = new Set(["/api/login", "/api/register"]);
-const API_RATE_LIMITED_ROUTES = new Set(["/api/leads"]);
+const API_RATE_LIMITED_ROUTES = new Set(["/api/leads", "/api/careers/apply"]);
 
 function rateLimitTypeForPath(pathname: string): RateLimitType | null {
   if (isRateLimitExempt(pathname)) return null;
@@ -24,6 +24,7 @@ const PUBLIC_API_ROUTES = new Set([
   "/api/login",
   "/api/register",
   "/api/leads",
+  "/api/careers/apply",
   "/api/logout",
   "/api/auth/forgot-password",
   "/api/auth/reset-password",

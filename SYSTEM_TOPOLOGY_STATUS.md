@@ -10,7 +10,7 @@
 
 | Layer | Files (responsibility) | Status |
 |---|---|---|
-| **L1 — Data / Prisma** | `prisma/schema.prisma` — 19 models, 9 enums; Postgres/Neon | ✅ Live (additive-only; migrations synced — see §6) |
+| **L1 — Data / Prisma** | `prisma/schema.prisma` — 20 models, 9 enums; Postgres/Neon | ✅ Live (additive-only; migrations synced — see §6) |
 | **L2 — Services (`lib/`)** | `matching.ts`, `teacher-vetting.ts`, `lesson-summary.ts`, `package-chat.ts`, `diagnostic-quiz.ts`, `ledger/PayoutService`, `whatsapp.ts`, `daily.ts`, `stream.ts`, `scheduling.ts`, `storage.ts`, `curriculum-agent.ts`, `curriculum-rubric.ts` + more | ✅ Live |
 | **L3 — API (`app/api/`)** | teachers / diagnostic / lessons / packages / admin + whatsapp/closer + cron | ✅ Live (new endpoints verified) |
 | **L4 — Agent Hive & Desks** | `agents_hive/hive_mcp.py` (FastMCP, 10 tools) + `scanner_desk.py`, `creative_factory.py`, `head_of_desk.py`, `hive_orchestrator.py` | ✅ Live |
@@ -34,11 +34,16 @@
 - `POST /api/teachers/apply` — apply (creates TeacherProfile + 6 step logs). Session-only identity (Sprint 6).
 - `GET/POST /api/teachers/me/vetting` — status + exam-581 submission (PENDING_REVIEW). Session-only identity (Sprint 5).
 - `GET/POST /api/admin/teachers` & `GET/POST /api/admin/teachers/[id]/vetting`.
+- `POST /api/careers/apply` — public job application from `/careers` (AuditLog `TEACHER_CANDIDATE_APPLIED`, no User created). Rate-limited (`api`) (Sprint 9).
+
+### Staff & intake
+- `POST /api/login` with `portal: "staff"` — staff gate used by `/portal/login`; non-staff roles get `403` and no cookie (Sprint 9).
+- `GET/POST /api/admin/intake` — mapping-call questionnaire (`IntakeAssessment`), REPRESENTATIVE / ADMIN / MANAGER only (Sprint 9).
 
 ### Diagnostics & packages
 - `POST /api/diagnostic/teaser` — 5-step funnel (also triggers WhatsApp Closer).
 - `GET /api/diagnostic/student` — masked/full diagnostic view.
-- `POST /api/diagnostic/unlock` — unlock + teacher match + Quad invite.
+- `POST /api/diagnostic/unlock` — unlock + teacher match + quad group status (never creates a group or link; Sprint 9).
 - `GET /api/diagnostic/evaluate`, `GET/POST /api/packages/[id]/quiz` — quiz + gaps.
 - `GET /api/packages/[id]/report`, `GET/POST /api/packages/[id]/assets`.
 
@@ -136,8 +141,9 @@ Verified by `test_hive_mcp_tools.py`:
 | `20260929152923_sync_missing_models` | Catches up everything previously applied via `db push`: `Package`, `CurriculumTopic` (+ `_CurriculumTopicToDiagnosticQuiz`), `VettingStepLog`, `UnifiedPackageChat`, `PreLessonAsset`, 6 enums, new nullable/defaulted columns on `User` / `TeacherProfile` / `Lesson` / `DiagnosticQuiz`, and `Lesson.ratedAt` aligned to `TIMESTAMP(3)`. Additive only — no drops or renames. |
 
 | `20260929190000_user_whatsapp_group_id` | `User.whatsappGroupId` (nullable) for the live quad WhatsApp group (Sprint 8) |
+| `20260929194238_add_intake_assessment` | `Role.REPRESENTATIVE` enum value + `IntakeAssessment` table (FKs to `User` ×2 and `FallbackLead`, 3 indexes) (Sprint 9) |
 
-Replaying all five migrations reproduces `prisma/schema.prisma` exactly.
+Replaying all six migrations reproduces `prisma/schema.prisma` exactly.
 
 **Existing databases that were synced with `db push`** already contain these objects. Mark the sync
 migration as applied instead of executing it (running it would fail with "already exists"):
@@ -146,8 +152,8 @@ migration as applied instead of executing it (running it would fail with "alread
 npx prisma migrate resolve --applied 20260929152923_sync_missing_models
 ```
 
-If the database has no `_prisma_migrations` history at all, run `migrate resolve --applied` for each of
-the four migrations, in order.
+If the database has no `_prisma_migrations` history at all, run `migrate resolve --applied` for each
+migration that is already reflected in the database, in order.
 
 Fresh databases apply all migrations normally with `npx prisma migrate deploy`.
 
@@ -165,6 +171,49 @@ Fresh databases apply all migrations normally with `npx prisma migrate deploy`.
 | 6 | `teachers/apply` IDOR closed; serverless agent swarm: `lib/agents/core/llm.ts`, lead agent, cron-secured `/api/agents/dispatch` (`1c52282`) | ✅ Completed |
 | 7 | Lead dispatch loop closed: live WhatsApp send, AuditLog-based 14-day anti-spam cooldown, QStash schedule (`49d99da`) | ✅ Completed |
 | 8 | Live quad WhatsApp group (student + teacher + parent + admin) with structured welcome message and role split | ✅ Completed |
+| 9 | Public/staff UI split, isolated `/portal/login`, `/careers` + candidate API, unlock placeholder link removed, `IntakeAssessment` model + intake API | ✅ Completed |
+
+### Public/staff split, careers and intake (Sprint 9)
+
+- **Public UI is for students and parents only.** `components/Navbar.tsx` and the home-page hero contain no staff
+  or teacher-recruitment entry (verified; there were none to remove). `components/Footer.tsx` has one discreet link,
+  "הצטרפות לנבחרת ההוראה" → `/careers`. `/login` copy now reads "כניסה לתלמידים ולהורים."
+- **Staff gate `/portal/login`** (`app/portal/login/page.tsx`): rendered without the marketing Navbar/Footer
+  (`AppShell` treats `/portal/*` like the classroom). It posts to `/api/login` with `portal: "staff"`; the route
+  verifies the password, then returns `403` **before** signing a session if the role is not in
+  `STAFF_PORTAL_ROLES` (`TEACHER`, `REPRESENTATIVE`, `ADMIN`, `MANAGER`; `lib/auth/staff-roles.ts`). ADMIN/MANAGER
+  land on `/admin`, TEACHER/REPRESENTATIVE on `/dashboard`. The regular `/login` still accepts every role.
+- **New role `REPRESENTATIVE`** (additive enum value). `/api/register` can still only create STUDENT/TEACHER, so
+  the role is assigned by an admin only. Representatives are redirected away from `/lessons/[id]`. The dashboard has
+  no representative-specific view yet.
+- **`/careers`** (`app/careers/page.tsx`): full name, phone, email, education/degree, years of experience, teaching
+  frameworks (`SCHOOL` / `INSTITUTE` / `PRIVATE` / `ACADEMIA` / `OTHER`) + previous institutions, subjects, and an
+  https CV link (no anonymous file upload — `/api/upload` requires a session).
+- **`POST /api/careers/apply`**: validated by `parseTeacherCandidateApplication` (`lib/teacher-candidate.ts`), phone
+  normalized with `normalizeToE164` (invalid → `400`). Stored as `AuditLog { action: "TEACHER_CANDIDATE_APPLIED",
+  entityType: "TeacherCandidate", entityId: <E.164 phone>, actorId: null, metadata: { …application, status: "NEW",
+  submittedAt } }`. A repeat from the same phone within 24 h returns the original id (`duplicate: true`). Never
+  creates a User, TeacherProfile or session. Public in middleware and rate-limited as `api` (30/min).
+- **`/api/diagnostic/unlock`**: the invented `https://chat.whatsapp.com/quad-…` link and its `user.update` are
+  gone, as is the `sendQuadGroupInvite` call. The response carries `groupStatus` (`EXISTING` when
+  `User.whatsappGroupId` is set, else `PENDING_TEACHER_ASSIGNMENT`), and `quadGroupUrl` is returned only for a live
+  group, so legacy placeholder links stored before Sprint 8 are hidden. Groups are opened only by
+  `/api/whatsapp/dispatch-channel`.
+- **`IntakeAssessment`** model: `studentId → User` (cascade), `fallbackLeadId → FallbackLead` (cascade),
+  `representativeId → User` (set null), plus the student questionnaire (grade, levelUnits, hobbies, exam dates/score,
+  strong/weak topic, perception, goals, first-month target, …) and the parent questionnaire (yearly goal, target and
+  average score, motivation, success definition, home study time, quiet space, equipment, siblings, learning
+  disabilities, emotional difficulties, past help + 1–5 progress, home language, 1–5 involvement, notes,
+  representative notes).
+- **`/api/admin/intake`**: `requireAuth(["REPRESENTATIVE", "ADMIN", "MANAGER"])`. `POST` validates with
+  `parseIntakeAssessment` (`lib/intake-assessment.ts`: required texts, strict booleans, scores 0–100, ratings 1–5,
+  hobby frequency 0–14, dates 2000–2100; at least one of `studentId` / `fallbackLeadId`; all errors reported in
+  Hebrew), checks the student exists with role STUDENT and/or the lead exists (`404`), stores
+  `representativeId = session user` (a body value is ignored), and writes AuditLog `INTAKE_ASSESSMENT_RECORDED`.
+  `GET ?studentId=` / `?leadId=` returns the latest 20.
+- **Migration** `20260929194238_add_intake_assessment` was generated with `prisma migrate diff` from the committed
+  schema (the `--from-migrations` form needs a shadow database). **Run `npx prisma migrate deploy` before deploying.**
+- Tests: `tests/intake-and-routing.test.ts` (31 tests).
 
 ### Live quad WhatsApp group (Sprint 8)
 

@@ -81,7 +81,7 @@ function LoginForm() {
             כניסה למערכת
           </h2>
           <p className="text-xs text-neutral-500">
-            אזור כניסה מאוחד לתלמידים, הורים וצוות המורים.
+            כניסה לתלמידים ולהורים.
           </p>
           <p className="text-sm text-neutral-500">
             עדיין אין לך חשבון?{" "}

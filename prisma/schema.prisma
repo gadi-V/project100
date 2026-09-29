@@ -12,6 +12,8 @@ enum Role {
   MANAGER
   TEACHER
   STUDENT
+  /// Intake representative: runs the mapping call and records IntakeAssessment. Assigned by an admin only.
+  REPRESENTATIVE
 }
 
 enum TeacherVettingStage {
@@ -44,32 +46,34 @@ model User {
   isApproved    Boolean @default(false)
 
   // Student diagnostic & context fields
-  parentName         String?
-  parentPhone        String?
-  schoolName         String?
-  classTrack         String?
-  trackType          String?
-  degreeField        String?
-  academicYear       String?
-  targetOrganization String?
-  quadGroupUrl       String?
+  parentName              String?
+  parentPhone             String?
+  schoolName              String?
+  classTrack              String?
+  trackType               String?
+  degreeField             String?
+  academicYear            String?
+  targetOrganization      String?
+  quadGroupUrl            String?
   /// Live quad WhatsApp group chat id (`…@g.us`), set when the group is opened; future group messages target it.
-  whatsappGroupId    String?
+  whatsappGroupId         String?
   /// Opt-in flag so the funnel only notifies via WhatsApp when a parent phone was supplied.
   notifyParentViaWhatsApp Boolean @default(false)
 
-  givenLessons       Lesson[]              @relation("TeacherLessons")
-  takenLessons       Lesson[]              @relation("StudentLessons")
-  availabilities     TeacherAvailability[]
-  diagnosticQuizzes  DiagnosticQuiz[]
-  payments           Payment[]
-  teacherProfile     TeacherProfile?
-  auditLogs          AuditLog[]
-  referralsAsTeacher TeacherReferral[]     @relation("TeacherReferrals")
-  referralsAsStudent TeacherReferral[]     @relation("StudentReferrals")
-  payouts            TeacherPayout[]
-  ledgerEntries      BillingLedger[]
-  uploadedAssets     PreLessonAsset[]
+  givenLessons               Lesson[]              @relation("TeacherLessons")
+  takenLessons               Lesson[]              @relation("StudentLessons")
+  availabilities             TeacherAvailability[]
+  diagnosticQuizzes          DiagnosticQuiz[]
+  payments                   Payment[]
+  teacherProfile             TeacherProfile?
+  auditLogs                  AuditLog[]
+  referralsAsTeacher         TeacherReferral[]     @relation("TeacherReferrals")
+  referralsAsStudent         TeacherReferral[]     @relation("StudentReferrals")
+  payouts                    TeacherPayout[]
+  ledgerEntries              BillingLedger[]
+  uploadedAssets             PreLessonAsset[]
+  intakeAssessments          IntakeAssessment[]    @relation("StudentIntakeAssessments")
+  conductedIntakeAssessments IntakeAssessment[]    @relation("RepresentativeIntakeAssessments")
 
   createdAt DateTime @default(now())
 }
@@ -105,7 +109,7 @@ model TeacherProfile {
   /// When the automated welcome pack was dispatched (audit anchor).
   welcomePackSentAt   DateTime?
   /// Whether the teacher joined the 50-hour training track (activated by welcome envelope).
-  trainingTrackJoined Boolean @default(false)
+  trainingTrackJoined Boolean   @default(false)
 
   // מדדי חלוקה שוויונית
   referralCount       Int       @default(0)
@@ -253,7 +257,72 @@ model FallbackLead {
   requestedHours String
   isHandled      Boolean @default(false)
 
+  intakeAssessments IntakeAssessment[]
+
   createdAt DateTime @default(now())
+}
+
+/// Mapping-call questionnaire (student + parent) recorded by a representative.
+/// Linked to a registered student and/or a web lead; `POST /api/admin/intake` requires at least one.
+model IntakeAssessment {
+  id String @id @default(uuid())
+
+  studentId        String?
+  student          User?         @relation("StudentIntakeAssessments", fields: [studentId], references: [id], onDelete: Cascade)
+  fallbackLeadId   String?
+  fallbackLead     FallbackLead? @relation(fields: [fallbackLeadId], references: [id], onDelete: Cascade)
+  /// Staff member who held the call (taken from the session, never from the request body).
+  representativeId String?
+  representative   User?         @relation("RepresentativeIntakeAssessments", fields: [representativeId], references: [id], onDelete: SetNull)
+
+  // --- Student intake ---
+  grade                  String
+  levelUnits             String
+  hobbies                String
+  isProfessionalHobby    Boolean
+  weeklyHobbyFrequency   Int?
+  nextExamDate           DateTime?
+  lastExamDate           DateTime?
+  lastExamScore          Float?
+  strongTopic            String
+  weakTopic              String
+  focusRequest           String?
+  mathPerception         String
+  classListening         String
+  pastAssistance         String
+  pastAssistanceDuration String?
+  mainGoals              String
+  firstMonthTarget       String
+  studentImportantNotes  String?
+
+  // --- Parent intake ---
+  parentMainGoalYear       String
+  parentTargetScore        Float?
+  parentAverageScore       Float?
+  motivationLevel          String
+  successDefinition        String
+  homeStudyTime            String
+  hasQuietSpace            Boolean
+  hasWorkingEquipment      Boolean
+  siblingsDetails          String?
+  learningDisabilities     String?
+  emotionalDifficulties    String?
+  pastAssistanceExperience String?
+  /// 1–5
+  progressFeltRating       Int?
+  whatWorkedOrFailed       String?
+  homeLanguage             String?
+  /// 1–5
+  parentInvolvementLevel   Int?
+  parentImportantNotes     String?
+  representativeNotes      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([studentId, createdAt])
+  @@index([fallbackLeadId, createdAt])
+  @@index([representativeId])
 }
 
 model DiagnosticQuiz {

@@ -22,6 +22,11 @@ export default async function LessonPage(props: {
     redirect("/login?from=/lessons/" + params.id);
   }
 
+  // Intake representatives are never lesson participants.
+  if (user.role === "REPRESENTATIVE") {
+    redirect("/dashboard");
+  }
+
   const lesson = await getAuthorizedLessonById(params.id, user.id, user.role);
 
   // Strict RBAC: only the lesson's teacher, student, MANAGER, or ADMIN may enter.

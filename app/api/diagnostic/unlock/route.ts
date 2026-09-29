@@ -3,14 +3,15 @@ import type { CurriculumTopic } from "@prisma/client";
 import { prisma } from "../../../../lib/prisma";
 import { requireAuth } from "../../../../lib/api-auth";
 import { rankTeachersForDiagnostic, type MatchableTeacher } from "../../../../lib/matching";
-import { sendQuadGroupInvite } from "../../../../lib/whatsapp";
 
 /**
  * Unlock gated diagnostic tree.
  * 1. Verifies authentication and that student has lessonCredits > 0 (or Admin/Manager).
  * 2. Unlocks the diagnostic quiz knowledge tree.
  * 3. Matches and assigns the optimal specialist teacher via lib/matching.ts.
- * 4. Establishes the single Quad WhatsApp group link and dispatches the welcome invite.
+ * 4. Reports the quad WhatsApp group status. This route never creates a group or stores a link:
+ *    the group is opened by POST /api/whatsapp/dispatch-channel once a teacher is assigned and a
+ *    lesson is scheduled.
  */
 export async function POST(request: Request) {
   try {
@@ -148,18 +149,11 @@ export async function POST(request: Request) {
 
     const matchedTeacher = ranked[0] ?? null;
 
-    // 3. Create or establish the Quad WhatsApp Group URL
-    let quadGroupUrl = user.quadGroupUrl;
-    if (!quadGroupUrl) {
-      // In production this connects to WhatsApp Business API group creation; deterministic group token here
-      const groupToken = `quad-${user.id.slice(0, 8)}-${Date.now().toString(36)}`;
-      quadGroupUrl = `https://chat.whatsapp.com/${groupToken}`;
-
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { quadGroupUrl },
-      });
-    }
+    // 3. Quad group status. Only a live group (whatsappGroupId) has a real invite link; any
+    // quadGroupUrl without one is a legacy placeholder and is never returned.
+    const hasLiveGroup = Boolean(user.whatsappGroupId);
+    const groupStatus = hasLiveGroup ? "EXISTING" : "PENDING_TEACHER_ASSIGNMENT";
+    const quadGroupUrl = hasLiveGroup ? user.quadGroupUrl : null;
 
     // 4. Record teacher referral if matched
     if (matchedTeacher) {
@@ -187,22 +181,6 @@ export async function POST(request: Request) {
           },
         });
       }
-
-      // 5. Send single Quad WhatsApp Group Invite to Parent & Student
-      const recipientPhone = user.parentPhone || user.phone;
-      if (recipientPhone) {
-        try {
-          await sendQuadGroupInvite({
-            recipientPhone,
-            recipientName: user.parentName || user.name,
-            studentName: user.name,
-            teacherName: matchedTeacher.teacherName,
-            groupUrl: quadGroupUrl,
-          });
-        } catch (waErr) {
-          console.error("Failed to send Quad WhatsApp invite:", waErr);
-        }
-      }
     }
 
     return NextResponse.json({
@@ -214,6 +192,7 @@ export async function POST(request: Request) {
         estimatedScore: updated.estimatedScore,
         recommendationSummary: updated.recommendationSummary,
         quadGroupUrl,
+        groupStatus,
         matchedTeacher: matchedTeacher
           ? {
               teacherId: matchedTeacher.teacherId,
