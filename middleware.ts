@@ -2,7 +2,23 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { SESSION_COOKIE, verifySession } from "./lib/auth";
 import { isHiveMonitorBearer } from "./lib/hive-m2m-auth";
-import { rateLimitForPath } from "./lib/rate-limit";
+import {
+  checkRateLimit,
+  isRateLimitExempt,
+  type RateLimitType,
+} from "./lib/security/rate-limit";
+
+const AUTH_RATE_LIMITED_ROUTES = new Set(["/api/login", "/api/register"]);
+const API_RATE_LIMITED_ROUTES = new Set(["/api/leads"]);
+
+function rateLimitTypeForPath(pathname: string): RateLimitType | null {
+  if (isRateLimitExempt(pathname)) return null;
+  if (AUTH_RATE_LIMITED_ROUTES.has(pathname) || pathname.startsWith("/api/auth/")) {
+    return "auth";
+  }
+  if (API_RATE_LIMITED_ROUTES.has(pathname)) return "api";
+  return null;
+}
 
 const PUBLIC_API_ROUTES = new Set([
   "/api/login",
@@ -34,20 +50,25 @@ function isPublicApiPath(pathname: string): boolean {
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Rate limit sensitive public endpoints before anything else
-  if (pathname.startsWith("/api/")) {
-    const limited = rateLimitForPath(pathname, request);
-    if (limited && !limited.success) {
-      const retryAfter = Math.max(
-        1,
-        Math.ceil((limited.resetAt - Date.now()) / 1000)
+  // Rate limit sensitive public endpoints before anything else (/api/cron/* is exempt).
+  const rateLimitType = rateLimitTypeForPath(pathname);
+  if (rateLimitType) {
+    const limited = await checkRateLimit(request, rateLimitType);
+    if (limited.unavailable) {
+      return NextResponse.json(
+        { error: "Service Unavailable" },
+        { status: 503, headers: { "Retry-After": "60" } }
       );
+    }
+    if (!limited.success) {
+      const retryAfter = Math.max(1, Math.ceil((limited.reset - Date.now()) / 1000));
       return NextResponse.json(
         { error: "Too Many Requests" },
         {
           status: 429,
           headers: {
             "Retry-After": String(retryAfter),
+            "X-RateLimit-Limit": String(limited.limit),
             "X-RateLimit-Remaining": "0",
           },
         }

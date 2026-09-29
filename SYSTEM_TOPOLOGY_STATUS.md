@@ -96,6 +96,7 @@ Verified by `test_hive_mcp_tools.py`:
 | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_STORAGE_*` | Board PDF storage |
 | `WHATSAPP_API_URL`, `WHATSAPP_API_KEY` | WhatsApp transactional alerts |
 | `CRON_SECRET` | Cron auth (Vercel Cron + QStash forwarded header) |
+| `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | Distributed rate limiting (required in production — auth routes return 503 without them) |
 | `OPENROUTER_API_KEY`, `OPENROUTER_BASE_URL`, `MODEL_*` | Agent Hive reasoning/generation |
 | `HIVE_MONITOR_SECRET` | Head-of-Desk server-to-server auth |
 | `DAILY_ENABLE_CLOUD_RECORDING` | Daily cloud-recording opt-in |
@@ -143,3 +144,29 @@ If the database has no `_prisma_migrations` history at all, run `migrate resolve
 the four migrations, in order.
 
 Fresh databases apply all migrations normally with `npx prisma migrate deploy`.
+
+---
+
+## 7. Hardening Sprints
+
+| Sprint | Scope | Status |
+|---|---|---|
+| 1 | E.164 phone normalization, time-boxed Daily/Stream tokens, chat moderation (`afb23e5`) | ✅ Completed |
+| 2 | Teacher-welcome WhatsApp normalization, Prisma migration sync, `.env.example` (`2ce50ad`) | ✅ Completed |
+| 3 | GitHub Actions CI + distributed rate limiting on Upstash Redis | ✅ Completed |
+
+### Rate limiting (Sprint 3)
+
+- `lib/security/rate-limit.ts` — `checkRateLimit(req, "auth" | "api")`, Upstash sliding window keyed by
+  `path + client IP` (first `x-forwarded-for` hop, then `x-real-ip`).
+  - `auth`: 5 requests / 60 s — `/api/login`, `/api/register`, `/api/auth/*`.
+  - `api`: 30 requests / 60 s — `/api/leads`.
+- `middleware.ts` returns `429` JSON + `Retry-After` when a limit is exceeded. `/api/cron/*` is fully exempt.
+- The per-instance in-memory `Map` limiter (`lib/rate-limit.ts`) was **removed**; no rate-limit state lives
+  in instance memory anymore.
+- Failure policy: Redis unset outside production → bypass + one-time `console.warn`; Redis unset in
+  production → `503` (fail closed); Redis runtime error/timeout → allow + `console.error`.
+
+### CI (`.github/workflows/ci.yml`)
+
+On push / PR to `main` (Node 22): `npm ci` → `prisma generate` + `prisma validate` → `tsc --noEmit` → `npm test`.
