@@ -30,6 +30,8 @@ const PUBLIC_API_ROUTES = new Set([
   "/api/webhooks/daily",
   "/api/webhooks/stripe",
   "/api/admin/audit/risk-events",
+  // Cron/QStash-driven; the handler enforces verifyCronRequest itself.
+  "/api/agents/dispatch",
 ]);
 
 /**

@@ -31,7 +31,7 @@
 ## 2. API Endpoints
 
 ### Teacher funnel
-- `POST /api/teachers/apply` — apply (creates TeacherProfile + 6 step logs).
+- `POST /api/teachers/apply` — apply (creates TeacherProfile + 6 step logs). Session-only identity (Sprint 6).
 - `GET/POST /api/teachers/me/vetting` — status + exam-581 submission (PENDING_REVIEW). Session-only identity (Sprint 5).
 - `GET/POST /api/admin/teachers` & `GET/POST /api/admin/teachers/[id]/vetting`.
 
@@ -61,6 +61,7 @@
 - `GET /api/cron/lesson-reminders` (`*/5`), `GET /api/cron/head-of-desk` (`*/15`).
 - `POST /api/webhooks/daily` (stores `daily-rec:<recording_id>`), `POST /api/webhooks/stripe`.
 - `GET /api/daily/signed-url` — fresh Daily access link per view (Sprint 5).
+- `GET|POST /api/agents/dispatch?agent=leads` — agent swarm dispatcher, `CRON_SECRET` / QStash only (Sprint 6).
 
 ---
 
@@ -99,7 +100,7 @@ Verified by `test_hive_mcp_tools.py`:
 | `CRON_SECRET` | Cron auth (Vercel Cron + QStash forwarded header) |
 | `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | Distributed rate limiting (without them production fails open and logs `[rate-limit] DEGRADED`) |
 | `CURRICULUM_AGENT_TIMEOUT_MS` | Optional syllabus-agent timeout (default 45000 ms, no retries) |
-| `OPENROUTER_API_KEY`, `OPENROUTER_BASE_URL`, `MODEL_*` | Agent Hive reasoning/generation |
+| `OPENROUTER_API_KEY`, `OPENROUTER_BASE_URL`, `MODEL_*` | Agent Hive reasoning/generation; `OPENROUTER_API_KEY` + `MODEL_AUTOMATION` also drive the serverless lead agent |
 | `HIVE_MONITOR_SECRET` | Head-of-Desk server-to-server auth |
 | `DAILY_ENABLE_CLOUD_RECORDING` | Daily cloud-recording opt-in |
 | `NEXT_PUBLIC_APP_URL` | Public origin fallback for client + WhatsApp links |
@@ -157,7 +158,43 @@ Fresh databases apply all migrations normally with `npx prisma migrate deploy`.
 | 2 | Teacher-welcome WhatsApp normalization, Prisma migration sync, `.env.example` (`2ce50ad`) | ✅ Completed |
 | 3 | GitHub Actions CI + distributed rate limiting on Upstash Redis (`f50e01d`, `93139be`) | ✅ Completed |
 | 4 | Production 503 prevention, classroom-sized auth limit, serverless-safe curriculum agent & storage | ✅ Completed |
-| 5 | `x-user-id` header-spoofing neutralized (middleware + teacher vetting), Daily recordings stored by `recording_id` with fresh signed URLs | ✅ Completed |
+| 5 | `x-user-id` header-spoofing neutralized (middleware + teacher vetting), Daily recordings stored by `recording_id` with fresh signed URLs (`88f1c43`) | ✅ Completed |
+| 6 | `teachers/apply` IDOR closed; serverless agent swarm: `lib/agents/core/llm.ts`, lead agent, cron-secured `/api/agents/dispatch` | ✅ Completed |
+
+### Teacher apply IDOR (Sprint 6)
+
+- `POST /api/teachers/apply` previously resolved the applicant as `x-user-id || body.userId`, so any
+  logged-in user could create or overwrite another account's `TeacherProfile`, including bank details.
+- Identity now comes only from `requireAuth()` (session cookie → DB user). `body.userId` and client
+  `x-user-id` are ignored. No session or a forged one → `401` before the body is read.
+- Tests: `tests/teacher-apply-security.test.ts`.
+
+### Serverless agent swarm (Sprint 6)
+
+- **`lib/agents/core/llm.ts`** — `callAgentLLM({ systemPrompt, userPrompt, model, temperature,
+  responseFormat, timeoutMs })`. Uses plain `fetch` to `https://openrouter.ai/api/v1/chat/completions`.
+  `OPENROUTER_API_KEY` and `MODEL_AUTOMATION` (default `deepseek/deepseek-chat`) are read per call. An
+  `AbortController` enforces a hard **25 s** deadline, and callers can only shorten it. The timer is
+  cleared in `finally`. Failures throw a typed `AgentLLMError` with `code` = `CONFIG | TIMEOUT | HTTP |
+  EMPTY_RESPONSE | NETWORK`, so an abort never crashes the function.
+- **`lib/agents/lead-agent.ts`** — `runLeadAgent()` picks leads from the last 48 h (max 20 per run):
+  - `User` with role `STUDENT`, no non-cancelled `Lesson`, no `BillingLedger` `CHARGE` and no `COMPLETED`
+    `Payment`;
+  - unhandled `FallbackLead` rows from the web form.
+  Phones are normalized with `normalizeToWhatsAppJid` (`972…@c.us`). Invalid numbers and duplicate JIDs are
+  skipped. The LLM receives only the first name and requested track, never the phone. It returns
+  `{"message": …}` in plain Hebrew (anti-slop prompt), and the code appends a fixed opt-out line
+  (`"הסר"`). The result is `{ tasks: [{ leadId, source, phoneJid, messageText }], skipped: [{ leadId,
+  reason }] }`. LLM calls run 5 at a time within a 22 s budget: per-call timeouts shrink to the time left,
+  and leads that no longer fit are skipped as `DEADLINE`.
+  **It prepares tasks only — it does not send WhatsApp messages and does not mark leads as contacted.**
+- **`app/api/agents/dispatch/route.ts`** — `GET|POST /api/agents/dispatch?agent=leads`,
+  `maxDuration = 30`. Auth is `verifyCronRequest` only (`CRON_SECRET` bearer or a verified QStash
+  signature), otherwise `401`. An unknown agent → `400`. Response:
+  `{ success: true, agent: "leads", processedCount, skippedCount }`. The path is in the middleware's
+  `PUBLIC_API_ROUTES` (as `/api/cron/*` is) so scheduler calls without a session reach the handler; the
+  handler check is the only gate. No schedule is registered yet (`vercel.json` / QStash).
+- Tests: `tests/lead-agent.test.ts`.
 
 ### Identity header hardening (Sprint 5)
 

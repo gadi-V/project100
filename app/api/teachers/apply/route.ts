@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "../../../../lib/prisma";
+import { requireAuth } from "../../../../lib/api-auth";
 import {
   PayoutType,
   VettingStatus,
@@ -17,13 +18,20 @@ const VETTING_DEFAULT_STEPS: VettingStepName[] = [
   VettingStepName.FINAL_APPROVAL,
 ];
 
+/**
+ * The applicant is always the signed-in user. Any `userId` in the body or a
+ * client-sent `x-user-id` header is ignored, so nobody can apply (or overwrite
+ * bank details) on behalf of another account.
+ */
 export async function POST(request: NextRequest) {
+  const auth = await requireAuth();
+  if (auth.error) return auth.error;
+  const targetUserId = auth.user.id;
+
   try {
-    const authHeader = request.headers.get("x-user-id");
     const body = await request.json();
 
     const {
-      userId: bodyUserId,
       cvUrl,
       payoutType,
       topicProficiencies,
@@ -31,15 +39,6 @@ export async function POST(request: NextRequest) {
       bankName,
       accountNumber,
     } = body;
-
-    const targetUserId = authHeader || bodyUserId;
-
-    if (!targetUserId) {
-      return NextResponse.json(
-        { error: "User ID is required to apply" },
-        { status: 400 }
-      );
-    }
 
     if (!cvUrl) {
       return NextResponse.json(
