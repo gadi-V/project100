@@ -31,12 +31,14 @@ export async function GET(request: Request) {
   }
 
   try {
-    const { tasks, skipped } = await runLeadAgent();
+    const { processedCount, sentCount, failedCount, skippedCount } = await runLeadAgent();
     return NextResponse.json({
       success: true,
       agent,
-      processedCount: tasks.length,
-      skippedCount: skipped.length,
+      processedCount,
+      sentCount,
+      failedCount,
+      skippedCount,
     });
   } catch (error) {
     console.error(`[agents/dispatch] ${agent} agent failed:`, error);

@@ -6,7 +6,8 @@ config();
  * (Vercel Hobby only allows one cron run per day).
  *
  * Each schedule forwards `Authorization: Bearer <CRON_SECRET>`, the same header
- * Vercel Cron sends, so routes validate both callers via lib/auth/cron.ts.
+ * Vercel Cron sends, and QStash also signs every delivery (`Upstash-Signature`),
+ * so routes validate either credential via lib/auth/cron.ts.
  * Re-running is safe: `Upstash-Schedule-Id` overwrites the existing schedule.
  *
  * Required env: QSTASH_TOKEN, CRON_SECRET, APP_URL (public https origin).
@@ -17,13 +18,31 @@ config();
 
 type ScheduleSpec = {
   id: string;
+  /** Path plus optional query string; QStash forwards the query to the destination. */
   path: string;
+  /** QStash cron is UTC unless prefixed with `CRON_TZ=<IANA zone>`. */
   cron: string;
+  method: "GET" | "POST";
   retries: number;
 };
 
 const SCHEDULES: readonly ScheduleSpec[] = [
-  { id: "lesson-reminders", path: "/api/cron/reminders", cron: "*/5 * * * *", retries: 2 },
+  {
+    id: "lesson-reminders",
+    path: "/api/cron/reminders",
+    cron: "*/5 * * * *",
+    method: "GET",
+    retries: 2,
+  },
+  {
+    // 10:00 and 17:00 Israel time. One retry is safe: leads already messaged
+    // are recorded in AuditLog and skipped by the next run.
+    id: "agent-leads",
+    path: "/api/agents/dispatch?agent=leads",
+    cron: "CRON_TZ=Asia/Jerusalem 0 10,17 * * *",
+    method: "POST",
+    retries: 1,
+  },
 ];
 
 function requireEnv(name: string): string {
@@ -49,7 +68,7 @@ async function upsertSchedule(
       Authorization: `Bearer ${qstashToken}`,
       "Upstash-Cron": spec.cron,
       "Upstash-Schedule-Id": spec.id,
-      "Upstash-Method": "GET",
+      "Upstash-Method": spec.method,
       "Upstash-Retries": String(spec.retries),
       "Upstash-Forward-Authorization": `Bearer ${cronSecret}`,
     },

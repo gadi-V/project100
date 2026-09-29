@@ -159,7 +159,8 @@ Fresh databases apply all migrations normally with `npx prisma migrate deploy`.
 | 3 | GitHub Actions CI + distributed rate limiting on Upstash Redis (`f50e01d`, `93139be`) | ✅ Completed |
 | 4 | Production 503 prevention, classroom-sized auth limit, serverless-safe curriculum agent & storage | ✅ Completed |
 | 5 | `x-user-id` header-spoofing neutralized (middleware + teacher vetting), Daily recordings stored by `recording_id` with fresh signed URLs (`88f1c43`) | ✅ Completed |
-| 6 | `teachers/apply` IDOR closed; serverless agent swarm: `lib/agents/core/llm.ts`, lead agent, cron-secured `/api/agents/dispatch` | ✅ Completed |
+| 6 | `teachers/apply` IDOR closed; serverless agent swarm: `lib/agents/core/llm.ts`, lead agent, cron-secured `/api/agents/dispatch` (`1c52282`) | ✅ Completed |
+| 7 | Lead dispatch loop closed: live WhatsApp send, AuditLog-based 14-day anti-spam cooldown, QStash schedule | ✅ Completed |
 
 ### Teacher apply IDOR (Sprint 6)
 
@@ -177,24 +178,53 @@ Fresh databases apply all migrations normally with `npx prisma migrate deploy`.
   `AbortController` enforces a hard **25 s** deadline, and callers can only shorten it. The timer is
   cleared in `finally`. Failures throw a typed `AgentLLMError` with `code` = `CONFIG | TIMEOUT | HTTP |
   EMPTY_RESPONSE | NETWORK`, so an abort never crashes the function.
-- **`lib/agents/lead-agent.ts`** — `runLeadAgent()` picks leads from the last 48 h (max 20 per run):
+- **`lib/agents/lead-agent.ts`** — `runLeadAgent()` picks leads from the last 48 h:
   - `User` with role `STUDENT`, no non-cancelled `Lesson`, no `BillingLedger` `CHARGE` and no `COMPLETED`
     `Payment`;
   - unhandled `FallbackLead` rows from the web form.
   Phones are normalized with `normalizeToWhatsAppJid` (`972…@c.us`). Invalid numbers and duplicate JIDs are
   skipped. The LLM receives only the first name and requested track, never the phone. It returns
   `{"message": …}` in plain Hebrew (anti-slop prompt), and the code appends a fixed opt-out line
-  (`"הסר"`). The result is `{ tasks: [{ leadId, source, phoneJid, messageText }], skipped: [{ leadId,
-  reason }] }`. LLM calls run 5 at a time within a 22 s budget: per-call timeouts shrink to the time left,
-  and leads that no longer fit are skipped as `DEADLINE`.
-  **It prepares tasks only — it does not send WhatsApp messages and does not mark leads as contacted.**
+  (`"הסר"`). Sending, dedup and the per-run cap are described under Sprint 7 below.
 - **`app/api/agents/dispatch/route.ts`** — `GET|POST /api/agents/dispatch?agent=leads`,
   `maxDuration = 30`. Auth is `verifyCronRequest` only (`CRON_SECRET` bearer or a verified QStash
   signature), otherwise `401`. An unknown agent → `400`. Response:
-  `{ success: true, agent: "leads", processedCount, skippedCount }`. The path is in the middleware's
-  `PUBLIC_API_ROUTES` (as `/api/cron/*` is) so scheduler calls without a session reach the handler; the
-  handler check is the only gate. No schedule is registered yet (`vercel.json` / QStash).
+  `{ success: true, agent: "leads", processedCount, sentCount, failedCount, skippedCount }`. The path is in
+  the middleware's `PUBLIC_API_ROUTES` (as `/api/cron/*` is) so scheduler calls without a session reach
+  the handler; the handler check is the only gate.
 - Tests: `tests/lead-agent.test.ts`.
+
+### Lead dispatch loop (Sprint 7)
+
+- **Live send:** after drafting, each lead is sent with `sendWhatsAppMessage(phoneJid, text, { timeoutMs:
+  5000 })` from `lib/whatsapp.ts`. This function was added in Sprint 7: it returns `{ messageId, mocked }`,
+  and `sendWhatsAppText` now wraps it. Every send has its own `try/catch`, so one failure (`failedCount`,
+  reason `WHATSAPP_ERROR`) never stops the rest of the queue.
+- **AuditLog record:** after a successful send the agent writes `AuditLog { action:
+  "LEAD_REENGAGEMENT_SENT", entityType: "User" | "FallbackLead", entityId: <lead id>, actorId: null,
+  metadata: { agent, source, phoneJid, messageId, sentAt } }`. If that write fails, the message still counts
+  as sent and a `console.error` warns that the lead is not protected by the cooldown.
+- **14-day cooldown:** each run first loads `LEAD_REENGAGEMENT_SENT` rows from the last 14 days.
+  - Those lead ids are excluded **inside** the candidate query (`id: { notIn }`), so contacted leads can
+    never fill the cap and block newer ones. They are still reported as `ALREADY_CONTACTED` in
+    `skippedCount`.
+  - Contacted phone JIDs are matched too, so a web lead and a registered user with the same number are
+    messaged once.
+- **Per-run cap:** 12 leads (`MAX_LEADS_PER_RUN`). Draft and send run 4 leads at a time within a 24 s budget
+  (the LLM window is the time left minus the 5 s send reserve). Leads that no longer fit are skipped as
+  `DEADLINE` and picked up by the next run.
+- **Truthful results:** if `WHATSAPP_API_URL` / `WHATSAPP_API_KEY` are unset, no drafts or sends happen
+  (`WHATSAPP_NOT_CONFIGURED`). A gateway that only mocked a send → failed `WHATSAPP_NOT_DELIVERED`, with no
+  AuditLog row. Nothing is marked as sent unless the gateway accepted it.
+- **Result:** `{ processedCount, sentCount, failedCount, skippedCount, sent[], failed[], skipped[] }`.
+  `processedCount` = `sentCount + failedCount`, i.e. leads that reached the send step.
+- **Known gap:** a send that times out after the gateway already accepted it is counted as failed with no
+  AuditLog row, so that lead may be messaged again on the next run.
+- **QStash schedule** (`scripts/setup-qstash-schedules.ts`, id `agent-leads`): `POST
+  /api/agents/dispatch?agent=leads`, cron `CRON_TZ=Asia/Jerusalem 0 10,17 * * *` (10:00 and 17:00 Israel
+  time), 1 retry, forwarded `Authorization: Bearer <CRON_SECRET>`. QStash also signs each delivery with
+  `Upstash-Signature`. Apply it with `npm run qstash:schedules`.
+- Tests: `tests/lead-agent-execution.test.ts`.
 
 ### Identity header hardening (Sprint 5)
 

@@ -4,14 +4,24 @@ import { NextRequest } from "next/server";
 const db = vi.hoisted(() => ({
   userFindMany: vi.fn(),
   fallbackLeadFindMany: vi.fn(),
+  auditLogFindMany: vi.fn(),
+  auditLogCreate: vi.fn(),
+}));
+
+const wa = vi.hoisted(() => ({
+  sendWhatsAppMessage: vi.fn(),
+  isWhatsAppConfigured: vi.fn(),
 }));
 
 vi.mock("../lib/prisma", () => ({
   prisma: {
     user: { findMany: db.userFindMany },
     fallbackLead: { findMany: db.fallbackLeadFindMany },
+    auditLog: { findMany: db.auditLogFindMany, create: db.auditLogCreate },
   },
 }));
+
+vi.mock("../lib/whatsapp", () => wa);
 
 type FetchMock = ReturnType<typeof vi.fn<(input: string, init: RequestInit) => Promise<Response>>>;
 
@@ -91,6 +101,10 @@ beforeEach(() => {
   vi.stubEnv("QSTASH_CURRENT_SIGNING_KEY", "qstash-test-key");
   db.userFindMany.mockResolvedValue([]);
   db.fallbackLeadFindMany.mockResolvedValue([]);
+  db.auditLogFindMany.mockResolvedValue([]);
+  db.auditLogCreate.mockResolvedValue({});
+  wa.isWhatsAppConfigured.mockReturnValue(true);
+  wa.sendWhatsAppMessage.mockResolvedValue({ messageId: "wa-msg", mocked: false });
 });
 
 afterEach(() => {
@@ -146,6 +160,8 @@ describe("GET/POST /api/agents/dispatch — auth", () => {
       success: true,
       agent: "leads",
       processedCount: 2,
+      sentCount: 2,
+      failedCount: 0,
       skippedCount: 0,
     });
   });
@@ -187,9 +203,14 @@ describe("runLeadAgent", () => {
       takenLessons: { none: { status: { notIn: ["CANCELLED", "CANCELLED_LATE"] } } },
       ledgerEntries: { none: { entryType: "CHARGE" } },
       payments: { none: { status: "COMPLETED" } },
+      id: { notIn: [] },
     });
     const [leadQuery] = db.fallbackLeadFindMany.mock.calls[0] as [{ where: Record<string, unknown> }];
-    expect(leadQuery.where).toEqual({ createdAt: { gte: hoursAgo(48) }, isHandled: false });
+    expect(leadQuery.where).toEqual({
+      createdAt: { gte: hoursAgo(48) },
+      isHandled: false,
+      id: { notIn: [] },
+    });
   });
 
   it("normalizes lead phones to WhatsApp JIDs and skips invalid or duplicate numbers", async () => {
@@ -205,16 +226,21 @@ describe("runLeadAgent", () => {
     stubLLM();
     const { runLeadAgent } = await loadLeadAgent();
 
-    const { tasks, skipped } = await runLeadAgent({ now: NOW });
+    const { sent, skipped } = await runLeadAgent({ now: NOW });
 
-    expect(tasks.map(({ leadId, source, phoneJid }) => ({ leadId, source, phoneJid }))).toEqual([
+    expect(sent.map(({ leadId, source, phoneJid }) => ({ leadId, source, phoneJid }))).toEqual([
       { leadId: "u-local", source: "user", phoneJid: "972541234567@c.us" },
       { leadId: "u-intl", source: "user", phoneJid: "972527654321@c.us" },
       { leadId: "f-00", source: "fallback_lead", phoneJid: "972501112233@c.us" },
     ]);
-    for (const task of tasks) {
-      expect(task.phoneJid).toMatch(/^972\d{8,9}@c\.us$/);
+    for (const lead of sent) {
+      expect(lead.phoneJid).toMatch(/^972\d{8,9}@c\.us$/);
     }
+    expect(wa.sendWhatsAppMessage.mock.calls.map(([jid]) => jid)).toEqual([
+      "972541234567@c.us",
+      "972527654321@c.us",
+      "972501112233@c.us",
+    ]);
     expect(skipped).toEqual([
       { leadId: "u-bad", reason: "INVALID_PHONE" },
       { leadId: "f-dup", reason: "DUPLICATE_PHONE" },
@@ -226,9 +252,13 @@ describe("runLeadAgent", () => {
     const fetchMock = stubLLM("היי דנה, נשמח לעזור למצוא מורה למתמטיקה.");
     const { runLeadAgent, OPT_OUT_LINE } = await loadLeadAgent();
 
-    const { tasks } = await runLeadAgent({ now: NOW });
+    await runLeadAgent({ now: NOW });
 
-    expect(tasks[0].messageText).toBe(`היי דנה, נשמח לעזור למצוא מורה למתמטיקה.\n\n${OPT_OUT_LINE}`);
+    expect(wa.sendWhatsAppMessage).toHaveBeenCalledWith(
+      "972541234567@c.us",
+      `היי דנה, נשמח לעזור למצוא מורה למתמטיקה.\n\n${OPT_OUT_LINE}`,
+      expect.objectContaining({ timeoutMs: expect.any(Number) })
+    );
     const body = String(fetchMock.mock.calls[0][1].body);
     expect(body).not.toContain("1234567");
     expect(body).toContain("מתמטיקה");
@@ -241,7 +271,11 @@ describe("runLeadAgent", () => {
 
     const result = await runLeadAgent({ now: NOW });
 
-    expect(result).toEqual({ tasks: [], skipped: [{ leadId: "u1", reason: "INVALID_MESSAGE" }] });
+    expect(result).toMatchObject({
+      sentCount: 0,
+      skipped: [{ leadId: "u1", reason: "INVALID_MESSAGE" }],
+    });
+    expect(wa.sendWhatsAppMessage).not.toHaveBeenCalled();
   });
 
   it("marks leads as LLM_TIMEOUT when OpenRouter hangs, without throwing", async () => {
@@ -257,7 +291,8 @@ describe("runLeadAgent", () => {
     await vi.advanceTimersByTimeAsync(25_000);
     const result = await run;
 
-    expect(result.tasks).toEqual([]);
+    expect(result.sent).toEqual([]);
+    expect(wa.sendWhatsAppMessage).not.toHaveBeenCalled();
     expect(result.skipped).toEqual([
       { leadId: "u1", reason: "LLM_TIMEOUT" },
       { leadId: "u2", reason: "LLM_TIMEOUT" },

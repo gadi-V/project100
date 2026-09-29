@@ -27,9 +27,44 @@ function resolveWhatsAppRecipient(target: string): { phone: string; chatId: stri
   return { phone: chatId.slice(0, chatId.indexOf("@")), chatId };
 }
 
-export async function sendWhatsAppText(phone: string, message: string): Promise<void> {
+export function isWhatsAppConfigured(): boolean {
+  return getWhatsAppConfig() !== null;
+}
+
+export type WhatsAppSendResult = {
+  /** Provider message id when the gateway returns one. */
+  messageId: string | null;
+  /** True when no gateway is configured and the message was only logged. */
+  mocked: boolean;
+};
+
+/** Gateways differ: Green-API `idMessage`, WAHA `id` / `id._serialized`, Baileys `key.id`. */
+function extractMessageId(body: unknown): string | null {
+  if (typeof body !== "object" || body === null) return null;
+  const record = body as Record<string, unknown>;
+  for (const key of ["idMessage", "messageId", "id"]) {
+    const value = record[key];
+    if (typeof value === "string" && value) return value;
+    if (typeof value === "object" && value !== null) {
+      const serialized = (value as Record<string, unknown>)._serialized;
+      if (typeof serialized === "string" && serialized) return serialized;
+    }
+  }
+  const nestedKey = record.key;
+  if (typeof nestedKey === "object" && nestedKey !== null) {
+    const id = (nestedKey as Record<string, unknown>).id;
+    if (typeof id === "string" && id) return id;
+  }
+  return null;
+}
+
+export async function sendWhatsAppMessage(
+  target: string,
+  message: string,
+  options: { timeoutMs?: number } = {}
+): Promise<WhatsAppSendResult> {
   const config = getWhatsAppConfig();
-  const recipient = resolveWhatsAppRecipient(phone);
+  const recipient = resolveWhatsAppRecipient(target);
   const chatId = recipient.chatId;
 
   if (!config) {
@@ -37,7 +72,7 @@ export async function sendWhatsAppText(phone: string, message: string): Promise<
     console.log(`To: ${chatId}`);
     console.log(`Message:\n${message}`);
     console.log("==========================================================");
-    return;
+    return { messageId: null, mocked: true };
   }
 
   const response = await fetch(`${config.apiUrl}/sendMessage`, {
@@ -51,12 +86,20 @@ export async function sendWhatsAppText(phone: string, message: string): Promise<
       chatId,
       message,
     }),
+    ...(options.timeoutMs ? { signal: AbortSignal.timeout(options.timeoutMs) } : {}),
   });
 
   if (!response.ok) {
     const detail = await response.text().catch(() => response.statusText);
     throw new Error(`WhatsApp sendMessage failed (${response.status}): ${detail}`);
   }
+
+  const body: unknown = await response.json().catch(() => null);
+  return { messageId: extractMessageId(body), mocked: false };
+}
+
+export async function sendWhatsAppText(phone: string, message: string): Promise<void> {
+  await sendWhatsAppMessage(phone, message);
 }
 
 async function sendWhatsAppDocument(
