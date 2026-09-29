@@ -184,6 +184,20 @@ Fresh databases apply all migrations normally with `npx prisma migrate deploy`.
 | 10 | Public teacher registration sealed (UI + API), representative dashboard `/portal/dashboard`, mapping-call workspace `/portal/intake` (`f210ab5`) | ✅ Completed |
 | 10b | Student screen `/portal/students/[id]` with 5 tabs (profile, courses, meetings, communication, standing orders) and standard summary templates for teacher, representative and pedagogic manager (`4ae5da2`) | ✅ Completed |
 | 11 | Customer / student directory `/portal/students` + `GET /api/portal/students` (search, status and grade filters, pagination), shared portal header with היום / קורסים / לקוחות tabs and global student search, teacher dashboard links to student files | ✅ Completed |
+| 11b | Vercel build fix: `prisma generate` runs before `next build` and on `postinstall`; `force-dynamic` confirmed on all session/DB portal pages | ✅ Completed |
+
+### Vercel build pipeline fix (Sprint 11b)
+
+- **Symptom:** Vercel build failed in `Running TypeScript` with
+  `Property 'intakeAssessment' does not exist on type 'PrismaClient'`. The `build` script ran only `next build`,
+  so Vercel's cached `node_modules/@prisma/client` was never regenerated from the new schema models.
+- **Fix (`package.json`):** `"build": "prisma generate && next build"` and `"postinstall": "prisma generate"`, so the
+  client matches `prisma/schema.prisma` both after dependency install and right before compilation.
+- **Dynamic rendering:** `export const dynamic = "force-dynamic"` is set on `/portal/dashboard`, `/portal/intake`,
+  `/portal/students` and `/portal/students/[id]` (all read the session / DB), so none are prerendered at build time.
+  `/portal/login` is a client page with no DB access and stays static.
+- **Verified locally:** `npm run build` exits `0` (Prisma Client generated, Turbopack compile + TypeScript pass,
+  the four portal routes are listed as `ƒ` dynamic); `npm test` 17 files / 342 tests passing.
 
 ### Student directory, portal header and teacher links (Sprint 11)
 
@@ -526,3 +540,5 @@ Fresh databases apply all migrations normally with `npx prisma migrate deploy`.
 ### CI (`.github/workflows/ci.yml`)
 
 On push / PR to `main` (Node 22): `npm ci` → `prisma generate` + `prisma validate` → `tsc --noEmit` → `npm test`.
+
+Vercel runs `npm run build`, which itself runs `prisma generate` before `next build` (Sprint 11b).
