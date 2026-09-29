@@ -79,6 +79,7 @@ export default function StudentPortalTabs({ data, initialTab }: StudentPortalTab
               entries={data.communication}
               viewerRole={data.viewer.role}
               courseTitles={courseTitles}
+              whatsappGroupLinked={data.whatsappGroupLinked}
             />
           )}
           {tab.key === "standing-orders" && <StandingOrdersTab standingOrders={data.standingOrders} />}

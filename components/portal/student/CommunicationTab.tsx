@@ -24,22 +24,30 @@ type CommunicationTabProps = {
   entries: CommunicationEntry[];
   viewerRole: string;
   courseTitles: string[];
+  /** The student has a quad WhatsApp group that lesson / mapping summaries can be sent to. */
+  whatsappGroupLinked: boolean;
 };
 
 type ApiResponse<T> = { success: boolean; data?: T; error?: string };
+type SaveResponse = ApiResponse<CommunicationEntry> & { whatsappDispatched?: boolean };
 
 const PREVIEW_LINES = 4;
+
+/** Summary types that can be posted to the quad WhatsApp group. */
+const GROUP_SUMMARY_TYPES: readonly CommunicationType[] = ["LESSON_SUMMARY", "MAPPING_SUMMARY"];
 
 function SummaryModal({
   studentId,
   viewerRole,
   courseTitles,
+  whatsappGroupLinked,
   onClose,
   onSaved,
 }: {
   studentId: string;
   viewerRole: string;
   courseTitles: string[];
+  whatsappGroupLinked: boolean;
   onClose: () => void;
   onSaved: () => Promise<void>;
 }) {
@@ -47,8 +55,10 @@ function SummaryModal({
   const [type, setType] = useState<CommunicationType>(allowed[0] ?? "GENERAL");
   const [content, setContent] = useState(() => renderCommunicationTemplate(allowed[0] ?? "GENERAL"));
   const [courseContext, setCourseContext] = useState("");
+  const [sendToWhatsApp, setSendToWhatsApp] = useState(true);
   const [errors, setErrors] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+  const isGroupSummary = GROUP_SUMMARY_TYPES.includes(type);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -77,17 +87,20 @@ function SummaryModal({
       setErrors(checked.errors);
       return;
     }
+    const wantsGroupPost = isGroupSummary && whatsappGroupLinked && sendToWhatsApp;
     setErrors([]);
     setSaving(true);
     try {
       const res = await fetch(`/api/portal/students/${encodeURIComponent(studentId)}/communication`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ ...payload, sendToWhatsApp: wantsGroupPost }),
       });
-      const json = (await res.json().catch(() => ({ success: false }))) as ApiResponse<CommunicationEntry>;
+      const json = (await res.json().catch(() => ({ success: false }))) as SaveResponse;
       if (!res.ok || !json.success) throw new Error(json.error ?? "שמירת הסיכום נכשלה");
-      toast.success(`${COMMUNICATION_TYPE_LABELS[type]} נשמר`);
+      if (!wantsGroupPost) toast.success(`${COMMUNICATION_TYPE_LABELS[type]} נשמר`);
+      else if (json.whatsappDispatched) toast.success(`${COMMUNICATION_TYPE_LABELS[type]} נשמר ונשלח לקבוצת הוואטסאפ`);
+      else toast(`${COMMUNICATION_TYPE_LABELS[type]} נשמר, אבל לא נשלח לקבוצת הוואטסאפ. כדאי לשלוח אותו ידנית.`);
       await onSaved();
       onClose();
     } catch (error: unknown) {
@@ -177,6 +190,24 @@ function SummaryModal({
           />
         </label>
 
+        {isGroupSummary &&
+          (whatsappGroupLinked ? (
+            <label className="flex items-center gap-2 text-sm text-neutral-800">
+              <input
+                type="checkbox"
+                className="h-4 w-4 accent-emerald-600"
+                checked={sendToWhatsApp}
+                onChange={(e) => setSendToWhatsApp(e.target.checked)}
+                disabled={saving}
+              />
+              שלח סיכום זה ישירות לקבוצת הוואטסאפ
+            </label>
+          ) : (
+            <p className="rounded-xl bg-neutral-50 px-4 py-2.5 text-sm text-neutral-600">
+              טרם הוגדרה קבוצת וואטסאפ לתלמיד
+            </p>
+          ))}
+
         {errors.length > 0 && (
           <ul className="rounded-xl bg-red-50 border border-red-100 px-4 py-3 text-sm text-red-800 space-y-1" role="alert">
             {errors.map((error) => (
@@ -198,7 +229,13 @@ function SummaryModal({
   );
 }
 
-export default function CommunicationTab({ studentId, entries: initialEntries, viewerRole, courseTitles }: CommunicationTabProps) {
+export default function CommunicationTab({
+  studentId,
+  entries: initialEntries,
+  viewerRole,
+  courseTitles,
+  whatsappGroupLinked,
+}: CommunicationTabProps) {
   const [entries, setEntries] = useState(initialEntries);
   const [modalOpen, setModalOpen] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
@@ -296,6 +333,7 @@ export default function CommunicationTab({ studentId, entries: initialEntries, v
           studentId={studentId}
           viewerRole={viewerRole}
           courseTitles={courseTitles}
+          whatsappGroupLinked={whatsappGroupLinked}
           onClose={() => setModalOpen(false)}
           onSaved={reload}
         />

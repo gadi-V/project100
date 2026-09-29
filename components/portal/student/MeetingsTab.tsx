@@ -1,10 +1,13 @@
 "use client";
 
 import { useCallback, useState } from "react";
+import Link from "next/link";
 import { toast } from "react-hot-toast";
-import { MessageCircle } from "lucide-react";
+import { MessageCircle, Video } from "lucide-react";
 import {
   formatIsraelDateTime,
+  isLessonRoomOpen,
+  lessonRoomHref,
   LESSON_STATUS_LABELS,
   LESSON_TYPE_LABELS,
   type AttendanceStatus,
@@ -52,6 +55,35 @@ function attendanceButtonClass(kind: AttendanceStatus, selected: boolean): strin
   return selected
     ? `${base} bg-neutral-500 text-white`
     : `${base} border border-neutral-200 text-neutral-600 hover:bg-neutral-100`;
+}
+
+const joinButtonBase =
+  "inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-4 py-1.5 text-xs font-medium transition-colors";
+
+export function LessonRoomAction({ meeting }: { meeting: MeetingRow }) {
+  if (meeting.canEnterRoom) {
+    return (
+      <Link
+        href={lessonRoomHref(meeting.id)}
+        className={`${joinButtonBase} bg-emerald-600 text-white hover:bg-emerald-700`}
+      >
+        <Video className="h-4 w-4" aria-hidden="true" />
+        היכנס לשיעור
+      </Link>
+    );
+  }
+  const open = isLessonRoomOpen(meeting.status);
+  return (
+    <button
+      type="button"
+      disabled
+      title={open ? "הכניסה פתוחה למורה של השיעור, לתלמיד ולהנהלה" : undefined}
+      className={`${joinButtonBase} border border-neutral-200 text-neutral-400 cursor-not-allowed`}
+    >
+      <Video className="h-4 w-4" aria-hidden="true" />
+      {open ? "היכנס לשיעור" : (LESSON_STATUS_LABELS[meeting.status] ?? meeting.status)}
+    </button>
+  );
 }
 
 function attendanceMap(meetings: MeetingRow[]): Record<string, AttendanceStatus | null> {
@@ -166,6 +198,7 @@ export default function MeetingsTab({ studentId, meetings: initialMeetings, canS
                 <th scope="col" className="px-5 py-3 text-start font-medium">מורה</th>
                 <th scope="col" className="px-5 py-3 text-start font-medium">מצב</th>
                 <th scope="col" className="px-5 py-3 text-start font-medium">נוכחות</th>
+                <th scope="col" className="px-5 py-3 text-start font-medium">חדר שיעור</th>
               </tr>
             </thead>
             <tbody>
@@ -223,6 +256,9 @@ export default function MeetingsTab({ studentId, meetings: initialMeetings, canS
                           {current === "PRESENT" ? "נוכח" : current === "ABSENT" ? "לא נוכח" : "—"}
                         </span>
                       )}
+                    </td>
+                    <td className="px-5 py-4">
+                      <LessonRoomAction meeting={meeting} />
                     </td>
                   </tr>
                 );

@@ -45,7 +45,7 @@
 - Page `/portal/students/[id]` — student CRM screen with 5 tabs (Sprint 10b).
 - `GET /api/portal/students` — student directory: `search`, `status`, `grade`, `page`, `limit` (25 by default); TEACHER sees own students only (Sprint 11).
 - Page `/portal/students` — customer / student directory with quick status + grade filters and pagination (Sprint 11).
-- `GET/POST /api/portal/students/[id]/communication` — communication history (newest first) + save summary (AuditLog `STUDENT_COMMUNICATION_LOGGED`) (Sprint 10b).
+- `GET/POST /api/portal/students/[id]/communication` — communication history (newest first) + save summary (AuditLog `STUDENT_COMMUNICATION_LOGGED`) (Sprint 10b). Lesson / mapping summaries are also posted to the student's quad WhatsApp group (`sendToWhatsApp`, default `true`; response `whatsappDispatched`) (Sprint 13).
 - `PATCH /api/portal/students/[id]/profile` — status checkboxes + profile fields, REPRESENTATIVE / ADMIN / MANAGER (AuditLog `STUDENT_PROFILE_UPDATED`) (Sprint 10b).
 - `POST /api/portal/students/[id]/attendance` — present / absent on a started lesson (AuditLog `LESSON_ATTENDANCE_MARKED`) (Sprint 10b).
 - `GET/POST /api/portal/students/[id]/meetings` — meetings + approved teachers; schedule a mapping / regular lesson with an assigned teacher and open (or update) the quad WhatsApp group. REPRESENTATIVE / ADMIN / MANAGER only (AuditLog `MAPPING_LESSON_SCHEDULED`) (Sprint 12).
@@ -192,6 +192,35 @@ Fresh databases apply all migrations normally with `npx prisma migrate deploy`.
 | 11c | Neon migration P3018 fixed: `sync_missing_models` made idempotent, failed record resolved, all pending migrations deployed; `package.json#prisma` moved to `prisma.config.ts` | ✅ Completed |
 | 11d | All-green hardening: zero build warnings (`middleware.ts` → `proxy.ts`), E2E scripts synced with the post-mapping-lesson WhatsApp group, `GET /api/health` live DB probe, Neon fully stable | ✅ Completed |
 | 12 | Operational loop closed: mapping-lesson scheduler in the student meetings tab (teacher assignment + date), `POST /api/portal/students/[id]/meetings`, automatic quad WhatsApp group trigger (student + teacher + parent + admin) with welcome message, no duplicate groups | ✅ Completed |
+| 13 | Daily lesson room launched from the meetings tab ("היכנס לשיעור" → `/lessons/[lessonId]`), lesson and mapping summaries saved on the communication tab auto-dispatched to the quad WhatsApp group (`whatsappGroupId`) | ✅ Completed |
+
+### Lesson room entry and summary dispatch to the quad group (Sprint 13)
+
+- **Meetings tab** (`MeetingsTab.tsx`): new "חדר שיעור" column. `LessonRoomAction` renders a green "היכנס לשיעור" link
+  (lucide `Video` icon) to `lessonRoomHref(lessonId)` = `/lessons/[lessonId]` when `MeetingRow.canEnterRoom`. A
+  COMPLETED / CANCELLED lesson gets a disabled button that shows the status label; an open lesson the viewer may not
+  enter (e.g. REPRESENTATIVE, another teacher) gets a disabled "היכנס לשיעור" with an explanatory tooltip.
+- **`lib/student-portal-shared.ts`:** `lessonRoomHref`, `isLessonRoomOpen` (SCHEDULED / IN_PROGRESS) and
+  `canEnterLessonRoom(viewer, lesson)`, which mirrors the classroom guard `getAuthorizedLessonById`: assigned TEACHER,
+  the STUDENT, MANAGER (pedagogic manager) or ADMIN. `buildMeetingRows` sets `canEnterRoom` (lesson select now includes
+  `studentId`). `StudentPortalData.whatsappGroupLinked` comes from `User.whatsappGroupId`.
+- **`POST /api/portal/students/[id]/communication`:** optional `sendToWhatsApp` (default `true`; non-boolean → `400`
+  before saving). After the log is created, a `LESSON_SUMMARY` or `MAPPING_SUMMARY` is posted to the student's
+  `whatsappGroupId` through `sendQuadGroupCommunicationSummary` (never throws). No group, flag off, other summary types
+  or any gateway failure (non-2xx, network, not configured, DB lookup error) → logged with `console.error` and
+  `whatsappDispatched: false`; the summary is never rolled back. Response `201 { success: true, data, whatsappDispatched }`;
+  the audit metadata includes `sendToWhatsApp` and `whatsappDispatched`.
+- **`lib/whatsapp.ts`:** `buildQuadCommunicationSummaryMessage` — lesson summary "📚 *סיכום שיעור - Project 100*" with
+  *עבדנו על* / *שיעורי בית* / *בשיעור הבא* (empty optional lines omitted); mapping summary is a short "המיפוי הושלם" note
+  saying the pedagogic manager will follow up with the learning plan (no internal mapping fields are posted).
+- **Communication tab** (`CommunicationTab.tsx`): for lesson / mapping summaries the modal shows a checkbox (checked by
+  default) "שלח סיכום זה ישירות לקבוצת הוואטסאפ", or "טרם הוגדרה קבוצת וואטסאפ לתלמיד" when no group is linked. The
+  toast reports only what the backend confirmed (saved and sent / saved but not sent).
+- **Tests:** `tests/lesson-summary-whatsapp-dispatch.test.ts` (16 tests) — exact lesson-summary text to the right group,
+  mapping message, `sendToWhatsApp: false`, no group, GENERAL not posted, invalid flag `400`, 503 / network /
+  not-configured keep the summary (`201`, `whatsappDispatched: false`), join link → `/lessons/[lessonId]`, disabled
+  states for COMPLETED / CANCELLED, role matrix and `buildMeetingRows.canEnterRoom`.
+- **Verified:** `npm run build` exit `0` with no warnings; `npm test` 20 files / 395 tests; `tsc --noEmit` 0.
 
 ### Mapping lesson scheduler and quad group trigger (Sprint 12)
 

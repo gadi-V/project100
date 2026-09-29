@@ -4,6 +4,7 @@ import { normalizeToE164 } from "./utils/phone";
 import { isCommunicationType, type CommunicationAuthorRole } from "./communication-templates";
 import {
   ageFromBirthDate,
+  canEnterLessonRoom,
   type AttendanceStatus,
   type CardLookup,
   type CommunicationEntry,
@@ -90,6 +91,7 @@ type LessonForTabs = {
   durationMinutes: number | null;
   status: string;
   teacherId: string;
+  studentId?: string;
   packageId: string | null;
   attendanceStatus: string | null;
   lessonType: string;
@@ -107,6 +109,7 @@ const LESSON_TAB_SELECT = {
   durationMinutes: true,
   status: true,
   teacherId: true,
+  studentId: true,
   packageId: true,
   attendanceStatus: true,
   lessonType: true,
@@ -216,6 +219,7 @@ export function buildMeetingRows(lessons: LessonForTabs[], viewer: Viewer, now: 
       whatsappLinked: Boolean(lesson.whatsappGroupId),
       attendanceStatus: toAttendance(lesson.attendanceStatus),
       canMarkAttendance: started && !CANCELLED_STATUSES.has(lesson.status) && (canMarkAny || ownLesson),
+      canEnterRoom: canEnterLessonRoom(viewer, lesson),
     };
   });
 }
@@ -367,6 +371,7 @@ export async function loadStudentPortal(
       parentPhone: true,
       lessonCredits: true,
       createdAt: true,
+      whatsappGroupId: true,
       studentProfile: true,
     },
   });
@@ -435,6 +440,7 @@ export async function loadStudentPortal(
     courses: buildCourseRows(lessons, intakes, now),
     meetings: buildMeetingRows(lessons, viewer, now),
     communication,
+    whatsappGroupLinked: Boolean(student.whatsappGroupId?.trim()),
     standingOrders,
   };
 }

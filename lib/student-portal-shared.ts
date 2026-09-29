@@ -122,7 +122,35 @@ export type MeetingRow = {
   whatsappLinked: boolean;
   attendanceStatus: AttendanceStatus | null;
   canMarkAttendance: boolean;
+  /** The lesson is still open and the viewer may join the video room at `/lessons/[id]`. */
+  canEnterRoom: boolean;
 };
+
+const LESSON_ROOM_OPEN_STATUSES = new Set(["SCHEDULED", "IN_PROGRESS"]);
+
+/** Classroom page (Daily video room + board) of one lesson. */
+export function lessonRoomHref(lessonId: string): string {
+  return `/lessons/${encodeURIComponent(lessonId)}`;
+}
+
+export function isLessonRoomOpen(status: string): boolean {
+  return LESSON_ROOM_OPEN_STATUSES.has(status);
+}
+
+/**
+ * Mirrors the classroom guard (`getAuthorizedLessonById`): the assigned teacher, the student,
+ * MANAGER (pedagogic manager) or ADMIN, and only while the lesson is scheduled or in progress.
+ */
+export function canEnterLessonRoom(
+  viewer: { id: string; role: string },
+  lesson: { status: string; teacherId: string; studentId?: string | null }
+): boolean {
+  if (!isLessonRoomOpen(lesson.status)) return false;
+  if (viewer.role === "ADMIN" || viewer.role === "MANAGER") return true;
+  if (viewer.role === "TEACHER") return lesson.teacherId === viewer.id;
+  if (viewer.role === "STUDENT") return Boolean(lesson.studentId) && lesson.studentId === viewer.id;
+  return false;
+}
 
 export type TeacherOption = { id: string; name: string };
 
@@ -206,6 +234,8 @@ export type StudentPortalData = {
   courses: CourseRow[];
   meetings: MeetingRow[];
   communication: CommunicationEntry[];
+  /** The student has a quad WhatsApp group (`User.whatsappGroupId`) that summaries can be posted to. */
+  whatsappGroupLinked: boolean;
   /** null when the viewer may not see billing. */
   standingOrders: StandingOrderData | null;
 };

@@ -706,6 +706,58 @@ export async function sendQuadGroupLessonUpdate(
   }
 }
 
+export type QuadCommunicationSummaryInput =
+  | {
+      type: "LESSON_SUMMARY";
+      workedOn: string;
+      homework?: string | null;
+      nextLesson?: string | null;
+    }
+  | { type: "MAPPING_SUMMARY"; studentName: string };
+
+const SUMMARY_BRAND = "Project 100";
+
+/** Group post for a summary saved on the student communication tab. Empty optional lines are left out. */
+export function buildQuadCommunicationSummaryMessage(input: QuadCommunicationSummaryInput): string {
+  if (input.type === "MAPPING_SUMMARY") {
+    return (
+      `✅ *המיפוי הושלם - ${SUMMARY_BRAND}*\n` +
+      `שלום לכולם, שיעור המיפוי של ${input.studentName.trim()} הסתיים בהצלחה.\n` +
+      `המנהל/ת הפדגוגי/ת יחזרו אליכם בהקדם להצגת תוכנית הלמידה.\n\n` +
+      `צוות ${SUMMARY_BRAND}`
+    );
+  }
+  const lines = [`*עבדנו על:* ${input.workedOn.trim()}`];
+  if (input.homework?.trim()) lines.push(`*שיעורי בית:* ${input.homework.trim()}`);
+  if (input.nextLesson?.trim()) lines.push(`*בשיעור הבא:* ${input.nextLesson.trim()}`);
+  return (
+    `📚 *סיכום שיעור - ${SUMMARY_BRAND}*\n` +
+    `שלום לכולם, להלן סיכום השיעור שהסתיים כעת:\n\n` +
+    `${lines.join("\n")}\n\n` +
+    `המשך למידה מעולה! צוות ${SUMMARY_BRAND}`
+  );
+}
+
+/** Posts a communication-tab summary into the student's quad group (`…@g.us`). Never throws. */
+export async function sendQuadGroupCommunicationSummary(
+  groupChatId: string,
+  input: QuadCommunicationSummaryInput
+): Promise<QuadWelcomeStatus> {
+  if (!groupChatId.trim().endsWith("@g.us")) {
+    return { sent: false, error: "Not a WhatsApp group chat id (…@g.us)" };
+  }
+  try {
+    const sent = await sendWhatsAppMessage(groupChatId.trim(), buildQuadCommunicationSummaryMessage(input), {
+      timeoutMs: QUAD_GATEWAY_TIMEOUT_MS,
+    });
+    return sent.mocked
+      ? { sent: false, error: "WhatsApp gateway is not configured" }
+      : { sent: true, messageId: sent.messageId };
+  } catch (error) {
+    return { sent: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 export type QuadLessonSummaryInput = {
   groupUrl?: string | null;
   groupChatId?: string | null;
