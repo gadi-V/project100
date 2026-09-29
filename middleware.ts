@@ -13,13 +13,14 @@ const PUBLIC_API_ROUTES = new Set([
   "/api/auth/reset-password",
   "/api/webhooks/daily",
   "/api/webhooks/stripe",
-  "/api/cron/lesson-reminders",
-  "/api/cron/head-of-desk",
   "/api/admin/audit/risk-events",
 ]);
 
-/** Prefixes open to unauthenticated guests (route handlers may still enforce auth). */
-const PUBLIC_API_PREFIXES = ["/api/diagnostic"] as const;
+/**
+ * Prefixes open to unauthenticated guests (route handlers may still enforce auth).
+ * Every /api/cron/* handler MUST call verifyCronRequest (lib/auth/cron.ts) itself.
+ */
+const PUBLIC_API_PREFIXES = ["/api/diagnostic", "/api/cron"] as const;
 
 const AUTH_PAGES = new Set(["/login", "/register", "/forgot-password"]);
 

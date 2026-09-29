@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import crypto from "crypto";
-import { prisma } from "../../../../lib/prisma";
+import { verifyCronRequest } from "../../../../lib/auth/cron";
+import { isHiveMonitorBearer } from "../../../../lib/hive-m2m-auth";
 import { writeAuditLog } from "../../../../lib/audit";
 
 /**
@@ -11,8 +11,9 @@ import { writeAuditLog } from "../../../../lib/audit";
  * `{ quiet: true, critical: 0 }` WITHOUT alerting anyone (the manager only gets
  * a message when an exclusive precondition is violated — see head_of_desk.py).
  *
- * Auth: Authorization: Bearer <HIVE_MONITOR_SECRET> (constant-time compare);
- * falls back to ADMIN/MANAGER session in dev when the secret is unset.
+ * Auth: Authorization: Bearer <CRON_SECRET> (Vercel Cron / QStash), a verified
+ * QStash signature, or Bearer <HIVE_MONITOR_SECRET> (agents_hive, smoke tests).
+ * Fails closed when none is configured.
  */
 export async function GET(request: Request) {
   try {
@@ -20,11 +21,15 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    // risk-events only trusts HIVE_MONITOR_SECRET, so a Vercel Cron call (CRON_SECRET) must not be forwarded as-is.
+    const monitorSecret = process.env.HIVE_MONITOR_SECRET?.trim();
     const resolved = await fetch(
       `${new URL(request.url).origin}/api/admin/audit/risk-events`,
       {
         headers: {
-          authorization: request.headers.get("authorization") ?? "",
+          authorization: monitorSecret
+            ? `Bearer ${monitorSecret}`
+            : request.headers.get("authorization") ?? "",
         },
       }
     ).catch(() => null);
@@ -71,27 +76,8 @@ export async function GET(request: Request) {
   }
 }
 
-/**
- * Constant-time auth identical to the lesson-reminders cron:
- * `HIVE_MONITOR_SECRET` (server-to-server) → else ADMIN/MANAGER session.
- */
+export const POST = GET;
+
 async function isAuthorized(request: Request): Promise<boolean> {
-  const authHeader = request.headers.get("authorization");
-  const input = authHeader?.startsWith("Bearer ")
-    ? authHeader.slice("Bearer ".length).trim()
-    : "";
-
-  const secret = process.env.HIVE_MONITOR_SECRET;
-  if (secret) {
-    if (!input) return false;
-    const valid = Buffer.from(secret);
-    const test = Buffer.from(input);
-    if (valid.length !== test.length) return false;
-    return crypto.timingSafeEqual(valid, test);
-  }
-
-  // Fallback: ADMIN/MANAGER session (dev convenience — matches risk-events).
-  const { requireAuth } = await import("../../../../lib/api-auth");
-  const session = await requireAuth(["ADMIN", "MANAGER"]);
-  return !session.error;
+  return (await verifyCronRequest(request)) || isHiveMonitorBearer(request);
 }

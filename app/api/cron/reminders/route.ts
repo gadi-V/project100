@@ -1,1 +1,1 @@
-export { GET } from "../lesson-reminders/route";
+export { GET, POST } from "../lesson-reminders/route";

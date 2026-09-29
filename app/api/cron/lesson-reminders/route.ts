@@ -1,28 +1,32 @@
 import { NextResponse } from "next/server";
-import crypto from "crypto";
 import { prisma } from "../../../../lib/prisma";
+import { verifyCronRequest } from "../../../../lib/auth/cron";
 import { sendLessonReminderNotification } from "../../../../lib/whatsapp";
 
+const REMINDER_LOOKAHEAD_MS = 20 * 60 * 1000;
+
 /**
- * Cron endpoint: sends WhatsApp reminders for lessons starting in 15–20 minutes.
- * Called by Vercel Cron, external scheduler, or manual trigger.
- * Protected by Authorization: Bearer <CRON_API_KEY> (constant-time compare).
+ * Cron endpoint: sends WhatsApp reminders for lessons starting within the next
+ * 20 minutes that have not been reminded yet. Triggered every 5 minutes by the
+ * QStash schedule on /api/cron/reminders (alias of this route).
+ * Protected by Authorization: Bearer <CRON_SECRET> or a verified QStash
+ * signature (lib/auth/cron.ts).
  */
 export async function GET(request: Request) {
-  if (!validateCronAuthorization(request)) {
+  if (!(await verifyCronRequest(request))) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
     const now = new Date();
-    const fifteenMinutesFromNow = new Date(now.getTime() + 15 * 60 * 1000);
-    const twentyMinutesFromNow = new Date(now.getTime() + 20 * 60 * 1000);
+    const lookaheadEnd = new Date(now.getTime() + REMINDER_LOOKAHEAD_MS);
 
+    // Open lower bound + reminderSent flag: a late or skipped run never leaves a gap between windows.
     const upcomingLessons = await prisma.lesson.findMany({
       where: {
         scheduledAt: {
-          gte: fifteenMinutesFromNow,
-          lte: twentyMinutesFromNow,
+          gt: now,
+          lte: lookaheadEnd,
         },
         reminderSent: false,
         status: "SCHEDULED",
@@ -105,26 +109,4 @@ export async function GET(request: Request) {
   }
 }
 
-/**
- * Constant-time API key validation via Authorization Bearer header.
- */
-function validateCronAuthorization(request: Request): boolean {
-  const authHeader = request.headers.get("authorization");
-  if (!authHeader?.startsWith("Bearer ")) return false;
-
-  const input = authHeader.slice("Bearer ".length).trim();
-  if (!input) return false;
-
-  const secret = process.env.CRON_API_KEY;
-  if (!secret) {
-    console.warn(
-      "[Cron] CRON_API_KEY not set — allowing request in dev mode"
-    );
-    return process.env.NODE_ENV === "development";
-  }
-
-  const validKey = Buffer.from(secret);
-  const testKey = Buffer.from(input);
-  if (validKey.length !== testKey.length) return false;
-  return crypto.timingSafeEqual(validKey, testKey);
-}
+export const POST = GET;
