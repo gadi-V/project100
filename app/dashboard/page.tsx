@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "react-hot-toast";
 import TeacherOnboardingTimeline from "../../components/TeacherOnboardingTimeline";
@@ -60,6 +61,14 @@ function studentFacingReasons(reasons: string[]): string[] {
 function scrollToSection(id: string) {
   document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
+
+/** Staff student screen; the teacher's access there is checked again on the server. */
+function studentFileHref(studentId: string): string {
+  return `/portal/students/${encodeURIComponent(studentId)}`;
+}
+
+const studentFileLinkClass =
+  "inline-flex items-center whitespace-nowrap rounded-full border border-neutral-300/80 bg-white/70 px-3 py-1 text-[11px] font-medium text-neutral-800 hover:bg-white transition-colors";
 
 interface LoggedInUser {
   id: string;
@@ -780,6 +789,12 @@ export default function DashboardPage() {
       .sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime())[0] ??
     null;
   const hasBookedLesson = myLessons.some((l) => !l.status.startsWith("CANCELLED"));
+  const teacherStudents =
+    user.role === "TEACHER"
+      ? [...new Map(myLessons.map((l) => [l.student.id, l.student])).values()].sort((a, b) =>
+          a.name.localeCompare(b.name, "he")
+        )
+      : [];
 
   const packageTiles: {
     type: "SINGLE" | "TRIO" | "MULTI" | "TEN";
@@ -856,6 +871,16 @@ export default function DashboardPage() {
             <h1 className="text-2xl font-semibold text-neutral-900">שלום, {user.name}</h1>
           </div>
           <div className="flex items-center gap-3">
+            {user.role === "TEACHER" && user.isApproved && (
+              <Link href="/portal/students" className={secondaryCta}>
+                התלמידים שלי
+              </Link>
+            )}
+            {(user.role === "ADMIN" || user.role === "MANAGER") && (
+              <Link href="/portal/students" className={secondaryCta}>
+                לקוחות
+              </Link>
+            )}
             {(user.role === "ADMIN" || user.role === "MANAGER") && (
               <a href="/admin" className={primaryCta}>
                 לוח ניהול
@@ -1334,6 +1359,53 @@ export default function DashboardPage() {
         {/* ======================= חלק ב': תצוגת מורה ======================= */}
         {user.role === "TEACHER" && user.isApproved && (
           <div className="space-y-6">
+            {nextLesson && (
+              <div className={`${frostCard} p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-start`}>
+                <div className="space-y-1">
+                  <span className={`${eyebrow} block`}>
+                    {nextLesson.status === "IN_PROGRESS" ? "שיעור מתקיים עכשיו" : "השיעור הקרוב"}
+                  </span>
+                  <h2 className="text-lg font-semibold text-neutral-900">
+                    {nextLesson.student.name} · {nextLesson.title || "שיעור פרטי"}
+                  </h2>
+                  <p className="text-sm text-neutral-500">
+                    {new Date(nextLesson.scheduledAt).toLocaleString("he-IL", {
+                      weekday: "long",
+                      day: "numeric",
+                      month: "long",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      timeZone: "Asia/Jerusalem",
+                    })}
+                  </p>
+                </div>
+                <Link href={studentFileHref(nextLesson.student.id)} className={`${secondaryCta} shrink-0 text-center`}>
+                  תיק תלמיד / סיכומים
+                </Link>
+              </div>
+            )}
+
+            {teacherStudents.length > 0 && (
+              <div className={`${frostCard} p-6 space-y-3 text-start`}>
+                <div className="flex items-center justify-between gap-3">
+                  <h2 className="text-sm font-semibold text-neutral-900">התלמידים שלי</h2>
+                  <Link href="/portal/students" className="text-xs font-medium text-neutral-600 hover:text-neutral-900">
+                    לרשימה המלאה
+                  </Link>
+                </div>
+                <ul className="divide-y divide-neutral-100">
+                  {teacherStudents.map((student) => (
+                    <li key={student.id} className="flex items-center justify-between gap-3 py-2.5">
+                      <span className="text-sm font-medium text-neutral-900 truncate">{student.name}</span>
+                      <Link href={studentFileHref(student.id)} className={studentFileLinkClass}>
+                        תיק תלמיד / סיכומים
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             <div className={`${frostCard} p-6 space-y-4 text-start`}>
               <div>
                 <h2 className="text-lg font-semibold text-neutral-900">פרופיל מורה</h2>
@@ -1514,24 +1586,30 @@ export default function DashboardPage() {
           />
 
           {myLessons.length > 0 ? (
-            <div className={`${frostCard} p-6 space-y-3`}>
+            <div id="teacher-lessons" className={`${frostCard} p-6 space-y-3 scroll-mt-20`}>
               <h2 className="text-sm font-semibold text-neutral-900">רשימת השיעורים המשובצים</h2>
               <div className="space-y-2">
                 {myLessons.map((lesson) => (
-                  <LessonRow
-                    key={lesson.id}
-                    lesson={lesson}
-                    userRole={user.role}
-                    onRefresh={() => {
-                      fetchMyLessons();
-                      fetchTeacherSlots();
-                    }}
-                  />
+                  <div key={lesson.id} className="space-y-1.5">
+                    <LessonRow
+                      lesson={lesson}
+                      userRole={user.role}
+                      onRefresh={() => {
+                        fetchMyLessons();
+                        fetchTeacherSlots();
+                      }}
+                    />
+                    <div className="flex justify-end">
+                      <Link href={studentFileHref(lesson.student.id)} className={studentFileLinkClass}>
+                        תיק תלמיד / סיכומים · {lesson.student.name}
+                      </Link>
+                    </div>
+                  </div>
                 ))}
               </div>
             </div>
           ) : (
-            <div className={emptyState}>
+            <div id="teacher-lessons" className={`${emptyState} scroll-mt-20`}>
               <p className="text-sm font-medium text-neutral-900">אין שיעורים משובצים עדיין</p>
               <p className="text-xs text-neutral-500">פתחו שעות פנויות ביומן כדי לקבל שיבוצים מתלמידים.</p>
             </div>

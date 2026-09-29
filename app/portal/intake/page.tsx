@@ -8,7 +8,7 @@ import {
   type IntakeCandidateKind,
 } from "../../../lib/intake-queue";
 import { pageCanvas } from "../../../lib/ui";
-import PortalHeader from "../PortalHeader";
+import PortalHeader from "../../../components/portal/PortalHeader";
 import IntakeWorkspace from "./IntakeWorkspace";
 
 export const dynamic = "force-dynamic";
@@ -53,7 +53,7 @@ export default async function IntakePage({
 
   return (
     <>
-      <PortalHeader userName={user.name} isAdmin={user.role === "ADMIN" || user.role === "MANAGER"} />
+      <PortalHeader userName={user.name} role={user.role} />
       <main className={`${pageCanvas} relative z-10 py-10 px-6`} dir="rtl">
         <IntakeWorkspace
           candidates={candidates}

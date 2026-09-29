@@ -20,7 +20,7 @@ import {
   primaryCta,
   secondaryCta,
 } from "../../../lib/ui";
-import PortalHeader from "../PortalHeader";
+import PortalHeader from "../../../components/portal/PortalHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -50,7 +50,7 @@ export default async function StaffDashboardPage() {
 
   return (
     <>
-      <PortalHeader userName={user.name} isAdmin={isAdmin} />
+      <PortalHeader userName={user.name} role={user.role} />
       <main className={`${pageCanvas} relative z-10 py-10 px-6`} dir="rtl">
         <div className="max-w-6xl mx-auto space-y-8">
           <section className={`${frostCard} p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4`}>

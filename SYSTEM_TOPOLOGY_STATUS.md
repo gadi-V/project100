@@ -42,6 +42,8 @@
 - `GET/POST /api/admin/intake` — mapping-call questionnaire (`IntakeAssessment`), REPRESENTATIVE / ADMIN / MANAGER only (Sprint 9).
 - Pages `/portal/dashboard` (staff dashboard) and `/portal/intake` (mapping-call workspace) — server-side role gate (Sprint 10).
 - Page `/portal/students/[id]` — student CRM screen with 5 tabs (Sprint 10b).
+- `GET /api/portal/students` — student directory: `search`, `status`, `grade`, `page`, `limit` (25 by default); TEACHER sees own students only (Sprint 11).
+- Page `/portal/students` — customer / student directory with quick status + grade filters and pagination (Sprint 11).
 - `GET/POST /api/portal/students/[id]/communication` — communication history (newest first) + save summary (AuditLog `STUDENT_COMMUNICATION_LOGGED`) (Sprint 10b).
 - `PATCH /api/portal/students/[id]/profile` — status checkboxes + profile fields, REPRESENTATIVE / ADMIN / MANAGER (AuditLog `STUDENT_PROFILE_UPDATED`) (Sprint 10b).
 - `POST /api/portal/students/[id]/attendance` — present / absent on a started lesson (AuditLog `LESSON_ATTENDANCE_MARKED`) (Sprint 10b).
@@ -180,7 +182,63 @@ Fresh databases apply all migrations normally with `npx prisma migrate deploy`.
 | 8 | Live quad WhatsApp group (student + teacher + parent + admin) with structured welcome message and role split | ✅ Completed |
 | 9 | Public/staff UI split, isolated `/portal/login`, `/careers` + candidate API, unlock placeholder link removed, `IntakeAssessment` model + intake API (`d2702e8`) | ✅ Completed |
 | 10 | Public teacher registration sealed (UI + API), representative dashboard `/portal/dashboard`, mapping-call workspace `/portal/intake` (`f210ab5`) | ✅ Completed |
-| 10b | Student screen `/portal/students/[id]` with 5 tabs (profile, courses, meetings, communication, standing orders) and standard summary templates for teacher, representative and pedagogic manager | ✅ Completed |
+| 10b | Student screen `/portal/students/[id]` with 5 tabs (profile, courses, meetings, communication, standing orders) and standard summary templates for teacher, representative and pedagogic manager (`4ae5da2`) | ✅ Completed |
+| 11 | Customer / student directory `/portal/students` + `GET /api/portal/students` (search, status and grade filters, pagination), shared portal header with היום / קורסים / לקוחות tabs and global student search, teacher dashboard links to student files | ✅ Completed |
+
+### Student directory, portal header and teacher links (Sprint 11)
+
+- **`GET /api/portal/students`** (`app/api/portal/students/route.ts`): `requireAuth(STAFF_PORTAL_ROLES)`, so
+  anonymous → `401` and STUDENT → `403` before any DB call. Identity comes from the session only; `teacherId` /
+  `userId` in the query string are ignored. Response `{ success, data: { students, totalCount, page, limit, totalPages } }`,
+  `Cache-Control: no-store`.
+  - **Scope** (`lib/student-directory.ts` → `buildStudentDirectoryWhere`): always `role = STUDENT`. REPRESENTATIVE /
+    ADMIN / MANAGER see everyone. A TEACHER sees only students with at least one `Lesson` where `teacherId = me`
+    (scheduled or past), and the next / last lesson columns use only that teacher's lessons. Stricter than
+    `resolveStudentAccess`: a `TeacherReferral` alone opens the student file but does not list the student.
+  - **Search** (`search`, max 80 chars, up to 5 words): every word must match one of `User.name / phone / email` or
+    `StudentProfile.firstName / lastName / city` (case-insensitive `contains`). Digit words also try phone spellings
+    (`05…` ↔ `9725…` ↔ `5…`), so `0521112233` finds `+972521112233`. Stored phones with dashes only match a term typed
+    with the same dashes.
+  - **Status** (`status`, repeatable or comma-separated, codes or Hebrew labels such as `רותח 160`; `הכל` = none):
+    `StudentProfile.studentStatus hasSome`. Unknown value → `400`.
+  - **Grade** (`grade` ∈ ז׳…יב׳): profile grade in the spelling variants from `gradeVariants` (`י`, `י׳`, `י'`,
+    `10`, `כיתה י׳`, `י״א` …); a student without a profile grade matches when any `IntakeAssessment` has that grade.
+    Unknown value → `400`.
+  - **Pagination** (`paginationMeta`): `page` / `limit` default to 1 / 25, `limit` capped at 100, malformed values
+    fall back to the defaults, and a page past the end is pulled back to the last page. `totalPages ≥ 1`.
+  - **Row**: id, full name (profile first + last, else `User.name`), phone + `wa.me` link, grade / study group (same
+    fallbacks as the student screen: profile → latest intake → `classTrack`), city, status codes, next lesson
+    (`IN_PROGRESS`, or `SCHEDULED` in the future), last non-cancelled past lesson, and the teacher of the next lesson
+    (else of the last one). Order: newest registration first.
+- **`/portal/students`** (server gate + `components/portal/StudentDirectory.tsx`): anonymous / STUDENT →
+  `/portal/login`. Title "לקוחות" (teachers: "התלמידים שלי"), "נמצאו X תוצאות", search with a 300 ms debounce
+  (`components/portal/useDebouncedValue.ts`), status chips הכל / תלמיד / לחזור להורה / רותח 160 / ביטול מנוי, grade
+  chips ז׳–יב׳. Table: name + city, phone + WhatsApp, grade · group, status badges, next / last lesson (Israel time),
+  teacher, "פתח תיק תלמיד" → `/portal/students/[id]`. Skeleton rows on first load, previous rows dimmed while
+  reloading, error with retry, empty state with "איפוס סינונים". Pagination: previous / next + a 5-page window.
+  Filters are mirrored into the URL (`history.replaceState`), and `?search=&status=&grade=&page=` seed the screen.
+- **Portal header** moved from `app/portal/PortalHeader.tsx` to `components/portal/PortalHeader.tsx`; props are now
+  `{ userName, role }`. Used on `/portal/dashboard`, `/portal/intake`, `/portal/students` and `/portal/students/[id]`.
+  - Logo PROJECT100 (→ `/portal/dashboard`, teachers `/dashboard`), user name + Hebrew role label
+    (`STAFF_ROLE_LABELS`), logout → `/portal/login`.
+  - Tabs from `lib/portal-nav.ts` (`portalNavTabs`): **היום** → `/portal/dashboard` (teachers `/dashboard`);
+    **קורסים** → `/admin/lessons` for ADMIN / MANAGER, `/dashboard#teacher-lessons` for teachers; **לקוחות** →
+    `/portal/students`. Extra links: "שיחת מיפוי" (REPRESENTATIVE / ADMIN / MANAGER) and "לוח ניהול" (ADMIN / MANAGER).
+  - Global search: from 2 characters, 300 ms debounce, `GET /api/portal/students?search=…&limit=6`; arrows +
+    Enter open the highlighted student file, Enter on a term with no settled results opens the directory filtered by
+    it, Escape / outside click closes. A footer link opens all results in the directory.
+- **Teacher dashboard** (`app/dashboard/page.tsx`, approved teachers): "התלמידים שלי" button → `/portal/students`;
+  a "השיעור הקרוב" / "שיעור מתקיים עכשיו" card with the student and "תיק תלמיד / סיכומים"; a "התלמידים שלי" card
+  (unique students from the teacher's lessons) with a link per student; and a "תיק תלמיד / סיכומים · <name>" link
+  under every lesson in the lesson list (`#teacher-lessons`). All links go to `/portal/students/[id]`, where
+  `resolveStudentAccess` re-checks the teacher and the teacher view keeps profile / courses / meetings /
+  communication only. ADMIN / MANAGER get a "לקוחות" button.
+- **Known gaps:** representatives have no lessons / course catalog page, so their header has no "קורסים" tab; the
+  weekly board (`WeeklyScheduleBoard`) itself has no student-file link; grade filtering on intakes matches any past
+  intake, not only the latest.
+- Tests: `tests/portal-students-directory.test.ts` (38 tests) — Prisma is replaced by an in-memory store whose
+  `where` evaluator throws on unknown operators, so the real filters run. `tests/staff-intake-portal.test.ts` updated
+  for the moved header and its `role` prop.
 
 ### Student CRM screen and summary templates (Sprint 10b)
 
@@ -218,8 +276,8 @@ Fresh databases apply all migrations normally with `npx prisma migrate deploy`.
   against the spec lists, scores 0–100 and required lines, and parses topic ranking lines into `{ rank, topic, score }`.
   MANAGER is stored as `authorRole: "PEDAGOGIC_MANAGER"`.
 - **Entry point:** recent intakes on `/portal/dashboard` link to the student screen (`RecentIntake.studentId`).
-- **Known gaps:** no staff-wide student search/list page yet (reach the screen from the dashboard or by URL); teachers
-  have no link from `/dashboard` yet; `User` name / phone / parent contact are read-only on this screen.
+- **Known gaps:** `User` name / phone / parent contact are read-only on this screen. (The student directory and the
+  teacher links from `/dashboard` were added in Sprint 11.)
 - Tests: `tests/student-tabs-and-templates.test.ts` (20 tests).
 
 ### Teacher sign-up sealed, staff intake portal (Sprint 10)
@@ -257,7 +315,8 @@ Fresh databases apply all migrations normally with `npx prisma migrate deploy`.
     unparseable numbers are sent as-is so validation reports them). The same `parseIntakeAssessment` runs in the
     browser first, then `POST /api/admin/intake`. Success shows "השאלון של … נשמר", removes the candidate from the
     queue and offers the next call.
-- **Portal chrome:** `app/portal/PortalHeader.tsx` (staff nav, admin link, logout → `/portal/login`); the
+- **Portal chrome:** `app/portal/PortalHeader.tsx` (staff nav, admin link, logout → `/portal/login`; moved to
+  `components/portal/PortalHeader.tsx` in Sprint 11); the
   marketing Navbar/Footer stay hidden on `/portal/*`.
 - Tests: `tests/staff-intake-portal.test.ts` (27 tests): register hub/redirect/API seal, page gates for
   anonymous/STUDENT/TEACHER, queue filters, form ↔ API field and required-flag parity, payload → `POST` round trip.

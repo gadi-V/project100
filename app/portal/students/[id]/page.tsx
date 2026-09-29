@@ -4,7 +4,7 @@ import { isStaffPortalRole } from "../../../../lib/auth/staff-roles";
 import { loadStudentPortal, resolveStudentAccess } from "../../../../lib/student-portal";
 import { formatIsraelDay, isStudentTabKey } from "../../../../lib/student-portal-shared";
 import { eyebrow, frostCard, pageCanvas } from "../../../../lib/ui";
-import PortalHeader from "../../PortalHeader";
+import PortalHeader from "../../../../components/portal/PortalHeader";
 import StudentPortalTabs from "../../../../components/portal/student/StudentPortalTabs";
 
 export const dynamic = "force-dynamic";
@@ -35,7 +35,7 @@ export default async function StudentPortalPage({ params, searchParams }: Studen
 
   return (
     <>
-      <PortalHeader userName={user.name} isAdmin={user.role === "ADMIN" || user.role === "MANAGER"} />
+      <PortalHeader userName={user.name} role={user.role} />
       <main className={`${pageCanvas} relative z-10 py-10 px-6`} dir="rtl">
         <div className="max-w-6xl mx-auto space-y-6">
           <section className={`${frostCard} p-6 flex flex-col sm:flex-row sm:items-end justify-between gap-3`}>

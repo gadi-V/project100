@@ -199,7 +199,9 @@ describe("staff portal access control", () => {
     const tree = asElement(await Dashboard());
     expect(navigation.redirect).not.toHaveBeenCalled();
     const [header] = tree.props.children as ElementLike[];
-    expect(header.props.isAdmin).toBe(role !== "REPRESENTATIVE");
+    expect(header.props.role).toBe(role);
+    const { portalExtraLinks } = await import("../lib/portal-nav");
+    expect(portalExtraLinks(role).some((link) => link.href === "/admin")).toBe(role !== "REPRESENTATIVE");
   });
 
   it("counts only leads and new students that have no intake yet", async () => {
@@ -387,7 +389,7 @@ describe("staff routing", () => {
       "app/portal/intake/page.tsx",
       "app/portal/intake/IntakeWorkspace.tsx",
       "app/portal/dashboard/page.tsx",
-      "app/portal/PortalHeader.tsx",
+      "components/portal/PortalHeader.tsx",
       "lib/intake-form.ts",
       "lib/intake-queue.ts",
     ]) {
