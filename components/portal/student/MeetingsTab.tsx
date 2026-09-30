@@ -3,7 +3,7 @@
 import { useCallback, useState } from "react";
 import Link from "next/link";
 import { toast } from "react-hot-toast";
-import { MessageCircle, Video } from "lucide-react";
+import { Check, MessageCircle, Video } from "lucide-react";
 import {
   formatIsraelDateTime,
   isLessonRoomOpen,
@@ -20,12 +20,17 @@ import {
   type RescheduleResult,
   type SchedulePendingResult,
 } from "../../../lib/lesson-lifecycle";
+import { type CompleteLessonResponse } from "../../../lib/lesson-completion";
 import { PENDING_SCHEDULE_STATUS } from "../../../lib/pedagogic-decision";
 import { emptyState, frostPanel } from "../../../lib/ui";
 import ScheduleMeetingModal from "./ScheduleMeetingModal";
 import SchedulePendingLessonModal from "./SchedulePendingLessonModal";
 import RescheduleLessonModal from "./RescheduleLessonModal";
 import CancelLessonModal from "./CancelLessonModal";
+import CompleteLessonModal from "./CompleteLessonModal";
+
+/** Opens the lesson summary form on the communication tab for a lesson that just ended. */
+export type SummaryRequest = { courseContext: string; lessonType: MeetingRow["lessonType"] };
 
 type MeetingsTabProps = {
   studentId: string;
@@ -34,9 +39,27 @@ type MeetingsTabProps = {
   canSchedule: boolean;
   /** The student is on the direct package track, so a cancelled lesson may return a credit. */
   canRestoreCredit: boolean;
+  onRequestSummary?: (request: SummaryRequest) => void;
 };
 
-type LifecycleModal = { kind: "pending" | "reschedule" | "cancel"; meeting: MeetingRow };
+type LifecycleModal = { kind: "pending" | "reschedule" | "cancel" | "complete"; meeting: MeetingRow };
+
+function completionBanner(result: CompleteLessonResponse): Banner {
+  const pay = result.teacherCompensated ? `, שכר המורה נרשם (${result.compensationAmount} ₪)` : "";
+  const credit = result.creditCharged
+    ? ` ושיעור אחד ירד מיתרת החבילה (נותרו ${result.lessonCredits})`
+    : result.creditRestored
+      ? ` והשיעור הוחזר ליתרת התלמיד (${result.lessonCredits})`
+      : "";
+  switch (result.attendanceStatus) {
+    case "STUDENT_NO_SHOW":
+      return { tone: "success", text: `השיעור נסגר כאי-הופעה של התלמיד${pay}${credit}` };
+    case "TEACHER_CANCELLED":
+      return { tone: "warning", text: `השיעור סומן כבוטל ביוזמת המורה, ללא תגמול למורה${credit}` };
+    default:
+      return { tone: "success", text: `השיעור הסתיים${pay}${credit}` };
+  }
+}
 
 const actionButtonBase = "whitespace-nowrap rounded-full px-3.5 py-1.5 text-xs font-medium transition-colors disabled:opacity-40";
 
@@ -131,6 +154,7 @@ export default function MeetingsTab({
   meetings: initialMeetings,
   canSchedule,
   canRestoreCredit,
+  onRequestSummary,
 }: MeetingsTabProps) {
   const [meetings, setMeetings] = useState<MeetingRow[]>(initialMeetings);
   const [attendance, setAttendance] = useState<Record<string, AttendanceStatus | null>>(() =>
@@ -194,7 +218,38 @@ export default function MeetingsTab({
     finishLifecycle(`השיעור הפרטי שובץ ל-${formatIsraelDateTime(result.scheduledAt)} עם ${result.teacherName}`, whatsappDispatched);
 
   const handleRescheduled = (result: RescheduleResult, whatsappDispatched: boolean) =>
-    finishLifecycle(`המועד עודכן ל-${formatIsraelDateTime(result.scheduledAt)}`, whatsappDispatched);
+    finishLifecycle(
+      `${result.emergencyOverride ? "שינוי חירום: " : ""}המועד עודכן ל-${formatIsraelDateTime(result.scheduledAt)}`,
+      whatsappDispatched
+    );
+
+  const handleCompleted = async (meeting: MeetingRow, result: CompleteLessonResponse) => {
+    setLifecycleModal(null);
+    setBanner(completionBanner(result));
+    const closedAttendance: AttendanceStatus | null =
+      result.attendanceStatus === "ATTENDED" ? "PRESENT" : result.attendanceStatus === "STUDENT_NO_SHOW" ? "ABSENT" : null;
+    setMeetings((prev) =>
+      prev.map((m) =>
+        m.id === meeting.id
+          ? {
+              ...m,
+              status: result.status ?? m.status,
+              canComplete: false,
+              canEnterRoom: false,
+              canCancel: false,
+              canMarkAttendance: m.canMarkAttendance && result.status === "COMPLETED",
+            }
+          : m
+      )
+    );
+    if (closedAttendance) setAttendance((prev) => ({ ...prev, [meeting.id]: closedAttendance }));
+    if (canSchedule) await refreshMeetings();
+    if (result.promptSummary && onRequestSummary) {
+      onRequestSummary({ courseContext: meeting.title, lessonType: meeting.lessonType });
+    }
+  };
+
+  const showActions = canSchedule || meetings.some((m) => m.canComplete);
 
   const handleCancelled = (result: CancelResult, whatsappDispatched: boolean) =>
     finishLifecycle(
@@ -245,7 +300,7 @@ export default function MeetingsTab({
                 <th scope="col" className="px-5 py-3 text-start font-medium">מצב</th>
                 <th scope="col" className="px-5 py-3 text-start font-medium">נוכחות</th>
                 <th scope="col" className="px-5 py-3 text-start font-medium">חדר שיעור</th>
-                {canSchedule && <th scope="col" className="px-5 py-3 text-start font-medium">פעולות</th>}
+                {showActions && <th scope="col" className="px-5 py-3 text-start font-medium">פעולות</th>}
               </tr>
             </thead>
             <tbody>
@@ -315,9 +370,19 @@ export default function MeetingsTab({
                     <td className="px-5 py-4">
                       <LessonRoomAction meeting={meeting} />
                     </td>
-                    {canSchedule && (
+                    {showActions && (
                       <td className="px-5 py-4">
                         <div className="flex flex-wrap gap-2">
+                          {meeting.canComplete && (
+                            <button
+                              type="button"
+                              className={`${actionButtonBase} inline-flex items-center gap-1.5 bg-neutral-900 font-semibold text-white hover:bg-neutral-800`}
+                              onClick={() => setLifecycleModal({ kind: "complete", meeting })}
+                            >
+                              <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                              סיום שיעור ודיווח נוכחות
+                            </button>
+                          )}
                           {meeting.canSchedulePending && (
                             <button
                               type="button"
@@ -330,8 +395,10 @@ export default function MeetingsTab({
                           {(meeting.canReschedule || meeting.rescheduleBlock) && (
                             <button
                               type="button"
-                              className={`${actionButtonBase} border border-neutral-300 text-neutral-800 hover:bg-white/70`}
-                              disabled={!meeting.canReschedule}
+                              className={`${actionButtonBase} border text-neutral-800 hover:bg-white/70 ${
+                                meeting.canEmergencyReschedule ? "border-amber-300" : "border-neutral-300"
+                              }`}
+                              disabled={!meeting.canReschedule && !meeting.canEmergencyReschedule}
                               title={meeting.rescheduleBlock ? RESCHEDULE_BLOCK_LABELS[meeting.rescheduleBlock] : undefined}
                               onClick={() => setLifecycleModal({ kind: "reschedule", meeting })}
                             >
@@ -384,6 +451,14 @@ export default function MeetingsTab({
           canRestoreCredit={canRestoreCredit}
           onClose={closeLifecycleModal}
           onDone={handleCancelled}
+        />
+      )}
+      {lifecycleModal?.kind === "complete" && (
+        <CompleteLessonModal
+          studentId={studentId}
+          meeting={lifecycleModal.meeting}
+          onClose={closeLifecycleModal}
+          onDone={(result) => handleCompleted(lifecycleModal.meeting, result)}
         />
       )}
     </div>

@@ -299,7 +299,9 @@ describe("meetings tab — enter lesson room", () => {
       canSchedulePending: false,
       canReschedule: false,
       rescheduleBlock: null,
+      canEmergencyReschedule: false,
       canCancel: false,
+      canComplete: false,
       ...overrides,
     };
   }

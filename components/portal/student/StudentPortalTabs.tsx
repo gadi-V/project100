@@ -4,7 +4,7 @@ import { useState } from "react";
 import { STUDENT_TABS, type StudentPortalData, type StudentTabKey } from "../../../lib/student-portal-shared";
 import ProfileTab from "./ProfileTab";
 import CoursesTab from "./CoursesTab";
-import MeetingsTab from "./MeetingsTab";
+import MeetingsTab, { type SummaryRequest } from "./MeetingsTab";
 import CommunicationTab from "./CommunicationTab";
 import StandingOrdersTab from "./StandingOrdersTab";
 
@@ -21,12 +21,18 @@ function tabClass(active: boolean): string {
 
 export default function StudentPortalTabs({ data, initialTab }: StudentPortalTabsProps) {
   const [activeTab, setActiveTab] = useState<StudentTabKey>(initialTab);
+  const [summaryRequest, setSummaryRequest] = useState<SummaryRequest | null>(null);
 
   const selectTab = (tab: StudentTabKey) => {
     setActiveTab(tab);
     const url = new URL(window.location.href);
     url.searchParams.set("tab", tab);
     window.history.replaceState(null, "", url.toString());
+  };
+
+  const openLessonSummary = (request: SummaryRequest) => {
+    setSummaryRequest(request);
+    selectTab("communication");
   };
 
   const courseTitles = Array.from(new Set(data.courses.filter((c) => c.kind === "COURSE").map((c) => c.title)));
@@ -79,6 +85,7 @@ export default function StudentPortalTabs({ data, initialTab }: StudentPortalTab
               meetings={data.meetings}
               canSchedule={data.viewer.canEditProfile}
               canRestoreCredit={data.plans.packages.length > 0}
+              onRequestSummary={openLessonSummary}
             />
           )}
           {tab.key === "communication" && (
@@ -88,6 +95,8 @@ export default function StudentPortalTabs({ data, initialTab }: StudentPortalTab
               viewerRole={data.viewer.role}
               courseTitles={courseTitles}
               whatsappGroupLinked={data.whatsappGroupLinked}
+              summaryRequest={summaryRequest}
+              onSummaryRequestClosed={() => setSummaryRequest(null)}
             />
           )}
           {tab.key === "standing-orders" && <StandingOrdersTab standingOrders={data.standingOrders} />}

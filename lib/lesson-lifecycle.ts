@@ -91,7 +91,7 @@ export function parseSchedulePendingInput(value: unknown, now: Date = new Date()
   return { ok: true, data: { lessonId, teacherId, scheduledAt } };
 }
 
-export type RescheduleInput = { newScheduledAt: Date; reason: string | null };
+export type RescheduleInput = { newScheduledAt: Date; reason: string | null; allowEmergencyOverride: boolean };
 
 /** Body of `PATCH /api/portal/students/[id]/meetings/[meetingId]`. */
 export function parseRescheduleInput(value: unknown, now: Date = new Date()): ParseResult<RescheduleInput> {
@@ -100,9 +100,19 @@ export function parseRescheduleInput(value: unknown, now: Date = new Date()): Pa
   const errors: string[] = [];
   const newScheduledAt = futureDate(record.newScheduledAt, now, errors);
   const reason = reasonText(record.reason, "סיבת הדחייה", false, errors);
+  const allowEmergencyOverride = record.allowEmergencyOverride ?? false;
+  if (typeof allowEmergencyOverride !== "boolean") errors.push("אישור שינוי חריג: ערך לא תקין");
   if (errors.length > 0 || !newScheduledAt) return { ok: false, errors };
-  return { ok: true, data: { newScheduledAt, reason } };
+  return { ok: true, data: { newScheduledAt, reason, allowEmergencyOverride: allowEmergencyOverride as boolean } };
 }
+
+/** Amber warning in the reschedule modal when management may override the policy. */
+export const EMERGENCY_OVERRIDE_WARNINGS: Record<RescheduleBlock, string> = {
+  WITHIN_24H: "שיעור זה מתקיים בטווח של פחות מ-24 שעות. כהנהלה, הינך רשאי לבצע שינוי חירום",
+  ALREADY_RESCHEDULED: "המועד של שיעור זה כבר שונה פעם אחת. כהנהלה, הינך רשאי לבצע שינוי חירום",
+};
+
+export const EMERGENCY_OVERRIDE_MANAGEMENT_ONLY = "שינוי מועד חריג מותר רק למנהל/ת פדגוגי/ת או לאדמין";
 
 export type CancelInput = { cancellationReason: string; restoreCredit: boolean };
 
@@ -128,6 +138,8 @@ export type RescheduleResult = {
   lessonId: string;
   scheduledAt: string;
   previousScheduledAt: string;
+  /** Moved inside the 24 h window or a second time, approved by management. */
+  emergencyOverride: boolean;
 };
 
 export type CancelResult = {

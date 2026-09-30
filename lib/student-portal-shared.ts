@@ -144,7 +144,11 @@ export type MeetingRow = {
   canReschedule: boolean;
   /** Why a staff viewer may not reschedule this scheduled lesson (null when allowed or not applicable). */
   rescheduleBlock: RescheduleBlock | null;
+  /** MANAGER / ADMIN may still move a blocked upcoming lesson as an emergency change. */
+  canEmergencyReschedule: boolean;
   canCancel: boolean;
+  /** Close the lesson and record attendance: the lesson's teacher, MANAGER or ADMIN, once it has started. */
+  canComplete: boolean;
 };
 
 const LESSON_ROOM_OPEN_STATUSES = new Set(["SCHEDULED", "IN_PROGRESS"]);

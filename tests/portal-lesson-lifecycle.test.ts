@@ -292,7 +292,12 @@ describe("PATCH …/meetings/[meetingId] — reschedule", () => {
     expect(await res.json()).toEqual({
       success: true,
       whatsappDispatched: true,
-      data: { lessonId: SCHEDULED_LESSON.id, scheduledAt: NEW_AT, previousScheduledAt: LESSON_AT.toISOString() },
+      data: {
+        lessonId: SCHEDULED_LESSON.id,
+        scheduledAt: NEW_AT,
+        previousScheduledAt: LESSON_AT.toISOString(),
+        emergencyOverride: false,
+      },
     });
     expect(lessonUpdate()).toEqual({
       where: { id: SCHEDULED_LESSON.id, status: "SCHEDULED", rescheduledCount: 0 },
@@ -630,7 +635,7 @@ describe("meetings table — lifecycle controls", () => {
   it("parses the request bodies", () => {
     expect(parseRescheduleInput({ newScheduledAt: NEW_AT, reason: "  מבחן   בבית הספר " }, NOW)).toEqual({
       ok: true,
-      data: { newScheduledAt: new Date(NEW_AT), reason: "מבחן בבית הספר" },
+      data: { newScheduledAt: new Date(NEW_AT), reason: "מבחן בבית הספר", allowEmergencyOverride: false },
     });
     expect(parseCancelInput({ cancellationReason: "חג" })).toEqual({
       ok: true,

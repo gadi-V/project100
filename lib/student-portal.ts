@@ -9,6 +9,7 @@ import {
   type RankedTopic,
 } from "./communication-templates";
 import { rescheduleBlock } from "./lesson-lifecycle";
+import { canCompleteLesson, isLessonManagementRole } from "./lesson-completion";
 import { lessonAntiCollisionWindow } from "./scheduling";
 import {
   PENDING_SCHEDULE_STATUS,
@@ -245,16 +246,22 @@ export function buildMeetingRows(lessons: LessonForTabs[], viewer: Viewer, now: 
       canEnterRoom: canEnterLessonRoom(viewer, lesson),
       teacherId: lesson.teacherId,
       durationMinutes: lesson.durationMinutes ?? 60,
-      ...lifecycleFlags(lesson, canMarkAny, now),
+      ...lifecycleFlags(lesson, viewer, canMarkAny, now),
+      canComplete: canCompleteLesson(
+        viewer,
+        { status: lesson.status, teacherId: lesson.teacherId, startsAt: lessonStart(lesson) },
+        now
+      ),
     };
   });
 }
 
 function lifecycleFlags(
   lesson: LessonForTabs,
+  viewer: Viewer,
   staff: boolean,
   now: Date
-): Pick<MeetingRow, "canSchedulePending" | "canReschedule" | "rescheduleBlock" | "canCancel"> {
+): Pick<MeetingRow, "canSchedulePending" | "canReschedule" | "rescheduleBlock" | "canEmergencyReschedule" | "canCancel"> {
   const upcoming = lesson.status === "SCHEDULED" && lessonStart(lesson) > now;
   const block =
     staff && upcoming
@@ -264,6 +271,7 @@ function lifecycleFlags(
     canSchedulePending: staff && lesson.status === PENDING_SCHEDULE_STATUS,
     canReschedule: staff && upcoming && block === null,
     rescheduleBlock: block,
+    canEmergencyReschedule: block !== null && isLessonManagementRole(viewer.role),
     canCancel: staff && upcoming,
   };
 }

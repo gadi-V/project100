@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import {
+  EMERGENCY_OVERRIDE_WARNINGS,
   israelTimeKey,
   QUARTER_HOUR_TIME_OPTIONS,
   REASON_MAX,
@@ -28,8 +29,11 @@ export default function RescheduleLessonModal({ studentId, meeting, onClose, onD
   const [date, setDate] = useState(() => israelDateKey(current));
   const [time, setTime] = useState(() => israelTimeKey(current));
   const [reason, setReason] = useState("");
+  const [overrideConfirmed, setOverrideConfirmed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const emergencyBlock = meeting.canEmergencyReschedule ? meeting.rescheduleBlock : null;
 
   const timeOptions = QUARTER_HOUR_TIME_OPTIONS.includes(time) ? QUARTER_HOUR_TIME_OPTIONS : [time, ...QUARTER_HOUR_TIME_OPTIONS];
 
@@ -53,6 +57,10 @@ export default function RescheduleLessonModal({ studentId, meeting, onClose, onD
       setError("המועד החדש זהה למועד הנוכחי");
       return;
     }
+    if (emergencyBlock && !overrideConfirmed) {
+      setError("יש לסמן אישור שינוי מועד חריג");
+      return;
+    }
     setSubmitting(true);
     try {
       const res = await fetch(
@@ -60,7 +68,11 @@ export default function RescheduleLessonModal({ studentId, meeting, onClose, onD
         {
           method: "PATCH",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ newScheduledAt, reason: reason.trim() || null }),
+          body: JSON.stringify({
+            newScheduledAt,
+            reason: reason.trim() || null,
+            ...(emergencyBlock ? { allowEmergencyOverride: true } : {}),
+          }),
         }
       );
       const json = (await res.json().catch(() => ({ success: false }))) as LifecycleResponse<RescheduleResult>;
@@ -133,6 +145,22 @@ export default function RescheduleLessonModal({ studentId, meeting, onClose, onD
             />
           </label>
 
+          {emergencyBlock && (
+            <div className="space-y-2.5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3" role="note">
+              <p className="text-sm font-medium text-amber-900">{EMERGENCY_OVERRIDE_WARNINGS[emergencyBlock]}</p>
+              <label className="flex items-center gap-2 text-sm text-amber-950">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 accent-amber-600"
+                  checked={overrideConfirmed}
+                  onChange={(e) => setOverrideConfirmed(e.target.checked)}
+                  disabled={submitting}
+                />
+                אישור שינוי מועד חריג
+              </label>
+            </div>
+          )}
+
           {error && (
             <p role="alert" className="rounded-xl bg-red-50 px-4 py-2 text-sm text-red-800">
               {error}
@@ -143,7 +171,11 @@ export default function RescheduleLessonModal({ studentId, meeting, onClose, onD
             <button type="button" className={`${secondaryCta} py-2`} onClick={onClose} disabled={submitting}>
               ביטול
             </button>
-            <button type="submit" className={`${primaryCta} py-2 inline-flex items-center gap-2`} disabled={submitting}>
+            <button
+              type="submit"
+              className={`${primaryCta} py-2 inline-flex items-center gap-2`}
+              disabled={submitting || (emergencyBlock !== null && !overrideConfirmed)}
+            >
               {submitting && (
                 <span className="h-4 w-4 rounded-full border-2 border-white/40 border-t-white animate-spin" aria-hidden="true" />
               )}

@@ -51,7 +51,8 @@
 - `GET/POST /api/portal/students/[id]/meetings` — meetings + approved teachers; schedule a mapping / regular lesson with an assigned teacher and open (or update) the quad WhatsApp group. REPRESENTATIVE / ADMIN / MANAGER only (AuditLog `MAPPING_LESSON_SCHEDULED`) (Sprint 12).
 - `GET/POST /api/portal/students/[id]/pedagogic-decision` — 360° overview (intake call, parent / student questionnaires, mapping summary, active teachers) + the pedagogic manager's post-mapping decision: summary log, monthly recurring-lesson batch, active "תלמיד" status, learning plan posted to the quad WhatsApp group. MANAGER / ADMIN / REPRESENTATIVE only (AuditLog `PEDAGOGIC_DECISION_RECORDED`) (Sprint 14).
 - `POST /api/portal/students/[id]/meetings/pending-schedule` — lock date, time and teacher for a `PENDING_SCHEDULE` private lesson → `SCHEDULED`, anti-collision `409`, quad-group update. REPRESENTATIVE / ADMIN / MANAGER only (AuditLog `PENDING_LESSON_SCHEDULED`) (Sprint 15).
-- `PATCH / DELETE /api/portal/students/[id]/meetings/[meetingId]` — staff reschedule (24 h / once policy `422`, anti-collision `409`) and cancel (reason, optional credit return on the direct package track), each posted to the quad group. REPRESENTATIVE / ADMIN / MANAGER only (AuditLog `LESSON_RESCHEDULED_BY_STAFF` / `LESSON_CANCELLED_BY_STAFF`) (Sprint 15).
+- `PATCH / DELETE /api/portal/students/[id]/meetings/[meetingId]` — staff reschedule (24 h / once policy `422`, anti-collision `409`) and cancel (reason, optional credit return on the direct package track), each posted to the quad group. REPRESENTATIVE / ADMIN / MANAGER only (AuditLog `LESSON_RESCHEDULED_BY_STAFF` / `LESSON_CANCELLED_BY_STAFF`) (Sprint 15). MANAGER / ADMIN may send `allowEmergencyOverride: true` to bypass the 24 h / once policy, audited as an emergency change approved by management (Sprint 16).
+- `POST /api/portal/students/[id]/meetings/[meetingId]/complete` — close a started lesson and record attendance (`ATTENDED` / `STUDENT_NO_SHOW` / `TEACHER_CANCELLED`): teacher payout + ledger, direct-package credit, communication entry. The lesson's teacher, MANAGER or ADMIN only (AuditLog `LESSON_COMPLETED_ATTENDANCE_RECORDED`) (Sprint 16).
 - `POST /api/portal/students/[id]/direct-package` — direct hours package for independent students (no mapping lesson): `lessonCredits` increment + active "תלמיד" status. MANAGER / ADMIN / REPRESENTATIVE only (AuditLog `DIRECT_PACKAGE_ASSIGNED`) (Sprint 14).
 
 ### Diagnostics & packages
@@ -199,6 +200,57 @@ Fresh databases apply all migrations normally with `npx prisma migrate deploy`.
 | 13 | Daily lesson room launched from the meetings tab ("היכנס לשיעור" → `/lessons/[lessonId]`), lesson and mapping summaries saved on the communication tab auto-dispatched to the quad WhatsApp group (`whatsappGroupId`) | ✅ Completed |
 | 14 | 360° pedagogic decision (intake call + parent / student questionnaires + mapping summary), subscription generator (weekly / twice weekly, extra private lessons, fixed days and hours, monthly lesson batch, quad WhatsApp announcement) and direct hours-package track for independent students | ✅ Completed |
 | 15 | Lesson lifecycle on the meetings tab: scheduling pending private lessons (PENDING_SCHEDULE → SCHEDULED), staff reschedule with conflict check and cancellation with reason / credit return, all with quad WhatsApp updates | ✅ Completed |
+| 16 | Lesson completion loop: closing a lesson with attendance (attended / student no-show / teacher cancelled), teacher compensation in TeacherPayout + BillingLedger at the hourly rate, final direct-package credit deduction, and management emergency override for reschedules inside 24 h | ✅ Completed |
+
+### Lesson completion, attendance and teacher compensation (Sprint 16)
+
+- **Meetings tab** (`MeetingsTab.tsx`): a started `SCHEDULED` / `IN_PROGRESS` lesson shows "סיום שיעור ודיווח נוכחות"
+  (Check icon) to the lesson's teacher, MANAGER and ADMIN (`MeetingRow.canComplete`; the "פעולות" column also
+  appears for the teacher). `CompleteLessonModal`: three styled radio cards (התקיים בהצלחה / התלמיד לא הופיע / ביטול
+  ביוזמת המורה), internal notes, and a note that changes with the choice ("עם אישור סיום השיעור, שכר המורה יועבר
+  לרישום והמערכת תפתח את טופס סיכום השיעור לוואטסאפ" for an attended lesson). After an attended lesson the portal
+  switches to the communication tab and opens the summary form (`LESSON_SUMMARY`, or `MAPPING_SUMMARY` for a mapping
+  lesson) with the course prefilled. Staff get a table refresh; a teacher's row is updated in place because `GET
+  /meetings` is staff only.
+- **`POST …/meetings/[meetingId]/complete`** `{ attendanceStatus, internalNotes? }`: 403 for STUDENT / REPRESENTATIVE
+  and for a teacher who is not the lesson's teacher; `409` before the start, for a closed lesson, or when a parallel
+  request closed it first (optimistic `updateMany` on `status in [SCHEDULED, IN_PROGRESS]`). One transaction:
+  - `ATTENDED` → `COMPLETED` + attendance `PRESENT`; `STUDENT_NO_SHOW` → `COMPLETED` + `ABSENT`; both schedule the
+    teacher's pay through `schedulePayoutInTransaction` (`TeacherPayout` `SCHEDULED` + `PAYOUT` ledger row) plus a
+    `PLATFORM_FEE` row via `writeLedgerEntryInTransaction`. Rate (`lib/lesson-completion.ts`): lesson value 200 ₪ per
+    hour, 30% platform fee, so the teacher gets 140 ₪ per hour (the same split as `/api/lessons/complete`),
+    billed per 60-minute block with a minimum of one (50 / 60 min → 140 ₪, 90 min → 210 ₪). Idempotency key
+    `lesson-payout-{lessonId}` is shared with `/api/lessons/complete`, so one lesson is never paid twice.
+  - Credit: portal-scheduled lessons (created with the subject as title) take one lesson from the direct-package
+    balance on completion (`lessonCredits` decremented only when > 0; an empty balance is flagged, never negative).
+    Lessons self-booked via `POST /api/lessons` (no title) already took the credit at booking and are not charged again.
+  - `TEACHER_CANCELLED` → `CANCELLED` (`canceledAt`, `canceledById`), no payout and no ledger row; a credit taken at
+    booking is returned (+1), a portal lesson simply stays off the balance.
+  - `GENERAL` communication entry (`structuredData.source = "LESSON_COMPLETED"`, outcome, pay, credit, notes) and
+    AuditLog `LESSON_COMPLETED_ATTENDANCE_RECORDED` written inside the same transaction.
+  - Response: `{ success, lessonId, status, attendanceStatus, teacherCompensated, compensationAmount, creditCharged,
+    creditRestored, lessonCredits, promptSummary }` (`promptSummary` only for an attended lesson).
+- **Emergency override** (`PATCH …/meetings/[meetingId]`): `allowEmergencyOverride: true` from MANAGER / ADMIN
+  bypasses `WITHIN_24H` and `ALREADY_RESCHEDULED`; the communication entry reads "שינוי חירום באישור הנהלה" and the
+  AuditLog carries `emergencyOverride`, `overriddenPolicy`, `approvedBy`. A REPRESENTATIVE sending the flag still gets
+  `422` (management only); teachers keep `/api/lessons/[id]/reschedule` (unchanged, `422` inside 24 h).
+  `RescheduleLessonModal` shows management an amber warning "שיעור זה מתקיים בטווח של פחות מ-24 שעות. כהנהלה, הינך
+  רשאי לבצע שינוי חירום" and a required "אישור שינוי מועד חריג" checkbox instead of a disabled button
+  (`MeetingRow.canEmergencyReschedule`).
+- **Unchanged:** `LedgerService`, `PayoutService`, `/api/lessons/complete`, `/api/lessons/[id]/cancel` and `/reschedule`.
+  No schema change.
+- **Tests:** `tests/portal-lesson-completion-attendance.test.ts` (34 tests) covers:
+  - an attended lesson → `COMPLETED`, payout 140 ₪ + PAYOUT / PLATFORM_FEE rows, audit and communication entry;
+  - hourly proration, direct-package deduction, no double fee on an already-paid lesson;
+  - a no-show pays the teacher and deducts the credit, with no second deduction for a self-booked lesson and no
+    negative balance;
+  - a teacher cancellation → no pay, and the booking credit is returned;
+  - guards (not started, closed, race, validation, foreign lesson);
+  - STUDENT / REPRESENTATIVE / other teacher `403`, `401`;
+  - emergency override for MANAGER / ADMIN, `422` for a manager without the flag, for a representative and for the
+    teacher route;
+  - `canComplete` / `canEmergencyReschedule` flags.
+- **Verified:** `npm run build` exit `0`; `npm test` 23 files / 502 tests exit `0`; `tsc --noEmit` 0.
 
 ### Lesson lifecycle: pending private lessons, reschedule and cancel (Sprint 15)
 

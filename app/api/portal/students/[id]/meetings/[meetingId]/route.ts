@@ -7,6 +7,7 @@ import { INTAKE_RECORDER_ROLES } from "../../../../../../../lib/auth/staff-roles
 import { toCommunicationAuthorRole, type CommunicationAuthorRole } from "../../../../../../../lib/communication-templates";
 import { dailyRoomNameForLesson, deleteDailyRoom, roomNameFromDailyUrl } from "../../../../../../../lib/daily";
 import {
+  EMERGENCY_OVERRIDE_MANAGEMENT_ONLY,
   parseCancelInput,
   parseRescheduleInput,
   RESCHEDULE_BLOCK_LABELS,
@@ -14,6 +15,7 @@ import {
   type CancelResult,
   type RescheduleResult,
 } from "../../../../../../../lib/lesson-lifecycle";
+import { isLessonManagementRole } from "../../../../../../../lib/lesson-completion";
 import {
   bookTeacherSlot,
   findLessonConflict,
@@ -149,9 +151,10 @@ function subjectOf(lesson: StaffLesson): string {
 
 /**
  * Reschedules a scheduled lesson (REPRESENTATIVE / ADMIN / MANAGER). Same policy as the student/teacher path:
- * more than 24 h before the start and only once (`422`), 60-minute anti-collision for student and teacher
- * (`409`). The reason is kept on the communication tab; the quad group gets the new date. A failed WhatsApp
- * post never rolls back the change (`whatsappDispatched: false`).
+ * more than 24 h before the start and only once (`422`), unless MANAGER / ADMIN send
+ * `allowEmergencyOverride: true` (recorded as an emergency change approved by management). 60-minute
+ * anti-collision for student and teacher (`409`). The reason is kept on the communication tab; the quad group
+ * gets the new date. A failed WhatsApp post never rolls back the change (`whatsappDispatched: false`).
  */
 export async function PATCH(request: Request, { params }: RouteContext) {
   const auth = await requireAuth(INTAKE_RECORDER_ROLES);
@@ -169,7 +172,7 @@ export async function PATCH(request: Request, { params }: RouteContext) {
   if (!parsed.ok) {
     return NextResponse.json({ success: false, error: parsed.errors.join(" · ") }, { status: 400 });
   }
-  const { newScheduledAt, reason } = parsed.data;
+  const { newScheduledAt, reason, allowEmergencyOverride } = parsed.data;
 
   try {
     const lookup = await loadStaffLesson(auth.user, id, meetingId);
@@ -179,9 +182,14 @@ export async function PATCH(request: Request, { params }: RouteContext) {
     if (lesson.status !== "SCHEDULED") return notScheduledResponse(lesson.status);
     const previousAt = lesson.startTime ?? lesson.scheduledAt;
     const block = rescheduleBlock({ scheduledAt: previousAt, rescheduledCount: lesson.rescheduledCount }, now);
-    if (block) {
-      return NextResponse.json({ success: false, error: RESCHEDULE_BLOCK_LABELS[block] }, { status: 422 });
+    const managementOverride = allowEmergencyOverride && isLessonManagementRole(auth.user.role);
+    if (block && !managementOverride) {
+      const error = allowEmergencyOverride
+        ? `${RESCHEDULE_BLOCK_LABELS[block]}. ${EMERGENCY_OVERRIDE_MANAGEMENT_ONLY}`
+        : RESCHEDULE_BLOCK_LABELS[block];
+      return NextResponse.json({ success: false, error }, { status: 422 });
     }
+    const emergencyOverride = block !== null;
     if (newScheduledAt.getTime() === previousAt.getTime()) {
       return NextResponse.json({ success: false, error: "המועד החדש זהה למועד הנוכחי" }, { status: 400 });
     }
@@ -190,6 +198,7 @@ export async function PATCH(request: Request, { params }: RouteContext) {
     const subject = subjectOf(lesson);
     const content = [
       `מועד השיעור ${subject} שונה`,
+      ...(emergencyOverride ? ["שינוי חירום באישור הנהלה"] : []),
       `ממועד: ${formatQuadLessonDate(previousAt, durationMinutes)}`,
       `למועד: ${formatQuadLessonDate(newScheduledAt, durationMinutes)}`,
       ...(reason ? [`סיבה: ${reason}`] : []),
@@ -233,6 +242,7 @@ export async function PATCH(request: Request, { params }: RouteContext) {
               from: previousAt.toISOString(),
               to: newScheduledAt.toISOString(),
               reason,
+              emergencyOverride,
             } satisfies Prisma.InputJsonValue,
           },
         });
@@ -260,6 +270,14 @@ export async function PATCH(request: Request, { params }: RouteContext) {
         to: newScheduledAt.toISOString(),
         reason,
         whatsappDispatched,
+        emergencyOverride,
+        ...(emergencyOverride
+          ? {
+              overriddenPolicy: block,
+              approvedBy: { id: auth.user.id, role: auth.user.role },
+              note: "שינוי חירום באישור הנהלה",
+            }
+          : {}),
       },
     });
 
@@ -267,6 +285,7 @@ export async function PATCH(request: Request, { params }: RouteContext) {
       lessonId: lesson.id,
       scheduledAt: newScheduledAt.toISOString(),
       previousScheduledAt: previousAt.toISOString(),
+      emergencyOverride,
     };
     return NextResponse.json({ success: true, data, whatsappDispatched });
   } catch (error: unknown) {

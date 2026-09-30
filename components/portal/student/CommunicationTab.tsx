@@ -26,6 +26,9 @@ type CommunicationTabProps = {
   courseTitles: string[];
   /** The student has a quad WhatsApp group that lesson / mapping summaries can be sent to. */
   whatsappGroupLinked: boolean;
+  /** A lesson was just closed on the meetings tab: open its summary form. */
+  summaryRequest?: { courseContext: string; lessonType: "MAPPING" | "REGULAR" } | null;
+  onSummaryRequestClosed?: () => void;
 };
 
 type ApiResponse<T> = { success: boolean; data?: T; error?: string };
@@ -41,6 +44,8 @@ function SummaryModal({
   viewerRole,
   courseTitles,
   whatsappGroupLinked,
+  initialType,
+  initialCourseContext,
   onClose,
   onSaved,
 }: {
@@ -48,13 +53,16 @@ function SummaryModal({
   viewerRole: string;
   courseTitles: string[];
   whatsappGroupLinked: boolean;
+  initialType?: CommunicationType;
+  initialCourseContext?: string;
   onClose: () => void;
   onSaved: () => Promise<void>;
 }) {
   const allowed = allowedCommunicationTypes(viewerRole);
-  const [type, setType] = useState<CommunicationType>(allowed[0] ?? "GENERAL");
-  const [content, setContent] = useState(() => renderCommunicationTemplate(allowed[0] ?? "GENERAL"));
-  const [courseContext, setCourseContext] = useState("");
+  const startType = initialType && allowed.includes(initialType) ? initialType : (allowed[0] ?? "GENERAL");
+  const [type, setType] = useState<CommunicationType>(startType);
+  const [content, setContent] = useState(() => renderCommunicationTemplate(startType));
+  const [courseContext, setCourseContext] = useState(initialCourseContext ?? "");
   const [sendToWhatsApp, setSendToWhatsApp] = useState(true);
   const [errors, setErrors] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
@@ -235,6 +243,8 @@ export default function CommunicationTab({
   viewerRole,
   courseTitles,
   whatsappGroupLinked,
+  summaryRequest = null,
+  onSummaryRequestClosed,
 }: CommunicationTabProps) {
   const [entries, setEntries] = useState(initialEntries);
   const [modalOpen, setModalOpen] = useState(false);
@@ -328,13 +338,25 @@ export default function CommunicationTab({
         </div>
       )}
 
-      {modalOpen && (
+      {modalOpen && !summaryRequest && (
         <SummaryModal
           studentId={studentId}
           viewerRole={viewerRole}
           courseTitles={courseTitles}
           whatsappGroupLinked={whatsappGroupLinked}
           onClose={() => setModalOpen(false)}
+          onSaved={reload}
+        />
+      )}
+      {summaryRequest && (
+        <SummaryModal
+          studentId={studentId}
+          viewerRole={viewerRole}
+          courseTitles={courseTitles}
+          whatsappGroupLinked={whatsappGroupLinked}
+          initialType={summaryRequest.lessonType === "MAPPING" ? "MAPPING_SUMMARY" : "LESSON_SUMMARY"}
+          initialCourseContext={summaryRequest.courseContext.slice(0, COURSE_CONTEXT_MAX)}
+          onClose={() => onSummaryRequestClosed?.()}
           onSaved={reload}
         />
       )}
