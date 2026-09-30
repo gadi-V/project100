@@ -34,6 +34,15 @@ export function canCompleteLesson(
   return isLessonManagementRole(viewer.role) || (viewer.role === "TEACHER" && lesson.teacherId === viewer.id);
 }
 
+/** Lesson room header: the assigned teacher, MANAGER or ADMIN while the lesson is still open. */
+export function canCompleteFromRoom(
+  user: { id: string; role: string },
+  lesson: { status: string; teacherId: string }
+): boolean {
+  if (!COMPLETABLE_STATUSES.includes(lesson.status)) return false;
+  return isLessonManagementRole(user.role) || (user.role === "TEACHER" && lesson.teacherId === user.id);
+}
+
 /**
  * Gross value of one lesson hour and the platform share, as in `/api/lessons/complete`
  * (200 ₪, 30% platform fee, so the teacher's hourly rate is 140 ₪).
@@ -141,4 +150,37 @@ export type CompleteLessonResponse = {
   lessonCredits?: number | null;
   /** Open the lesson summary form on the communication tab. */
   promptSummary?: boolean;
+  /** No-show only: "חיסור לא מוצדק" was added to the student's CRM card. */
+  absenceFlagged?: boolean;
+  /** No-show only: the notice reached the quad WhatsApp group. */
+  whatsappDispatched?: boolean;
 };
+
+export function completeLessonEndpoint(studentId: string, lessonId: string): string {
+  return `/api/portal/students/${encodeURIComponent(studentId)}/meetings/${encodeURIComponent(lessonId)}/complete`;
+}
+
+/** Posts the attendance report; resolves with the API answer or throws with the Hebrew error. */
+export async function submitLessonCompletion(
+  params: { studentId: string; lessonId: string; attendanceStatus: AttendanceOutcome; internalNotes: string | null },
+  fetchImpl: typeof fetch = fetch
+): Promise<CompleteLessonResponse> {
+  const res = await fetchImpl(completeLessonEndpoint(params.studentId, params.lessonId), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ attendanceStatus: params.attendanceStatus, internalNotes: params.internalNotes }),
+  });
+  const json = (await res.json().catch(() => ({ success: false }))) as CompleteLessonResponse;
+  if (!res.ok || !json.success) throw new Error(json.error ?? "סיום השיעור נכשל");
+  return json;
+}
+
+/**
+ * Where the lesson room sends the teacher after closing the lesson: the summary form on the communication tab
+ * for an attended lesson, otherwise the meetings tab.
+ */
+export function portalAfterCompletionHref(studentId: string, lessonId: string, result: CompleteLessonResponse): string {
+  const base = `/portal/students/${encodeURIComponent(studentId)}`;
+  if (!result.promptSummary) return `${base}?tab=meetings`;
+  return `${base}?tab=communication&autoPromptSummary=true&lessonId=${encodeURIComponent(lessonId)}`;
+}

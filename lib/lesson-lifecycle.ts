@@ -142,10 +142,28 @@ export type RescheduleResult = {
   emergencyOverride: boolean;
 };
 
+/**
+ * What a cancellation did to the student's balance. A credit is returned only when it was taken at booking;
+ * portal lessons are charged on completion, so cancelling them never adds a free credit.
+ */
+export type CancelCreditOutcome = "RESTORED" | "NOT_DEDUCTED" | "NOT_REQUESTED";
+
+export const CANCEL_CREDIT_NOTES: Record<CancelCreditOutcome, string> = {
+  RESTORED: "שיעור בוטל. זוכה קרדיט 1 (הוחזר ליתרה)",
+  NOT_DEDUCTED: "שיעור בוטל. זיכוי קרדיט: לא נדרש (טרם נגרע)",
+  NOT_REQUESTED: "שיעור בוטל. הקרדיט שנגרע בהזמנה לא הוחזר ליתרה",
+};
+
+export function cancelCreditOutcome(creditTakenAtBooking: boolean, restoreCredit: boolean): CancelCreditOutcome {
+  if (!creditTakenAtBooking) return "NOT_DEDUCTED";
+  return restoreCredit ? "RESTORED" : "NOT_REQUESTED";
+}
+
 export type CancelResult = {
   lessonId: string;
   status: "CANCELLED";
   creditRestored: boolean;
+  creditOutcome: CancelCreditOutcome;
   /** Balance after the restore; null when no credit was restored. */
   lessonCredits: number | null;
 };

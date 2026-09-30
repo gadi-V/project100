@@ -16,6 +16,8 @@ const db = vi.hoisted(() => ({
   ledgerCreate: vi.fn(),
   ledgerFindUnique: vi.fn(),
   auditCreate: vi.fn(),
+  profileFindUnique: vi.fn(),
+  profileUpsert: vi.fn(),
   transaction: vi.fn(),
 }));
 const session = vi.hoisted(() => ({ getCurrentUser: vi.fn() }));
@@ -106,6 +108,7 @@ const tx = {
   teacherPayout: { findUnique: db.payoutFindUnique, create: db.payoutCreate },
   billingLedger: { create: db.ledgerCreate, findUnique: db.ledgerFindUnique },
   auditLog: { create: db.auditCreate },
+  studentProfile: { findUnique: db.profileFindUnique, upsert: db.profileUpsert },
 };
 
 function staff(role: string, id = `user-${role.toLowerCase()}`) {
@@ -219,6 +222,9 @@ beforeEach(() => {
   db.ledgerCreate.mockImplementation(async () => ({ id: `ledger-${db.ledgerCreate.mock.calls.length}` }));
   db.ledgerFindUnique.mockResolvedValue(null);
   db.auditCreate.mockResolvedValue({ id: "audit-1" });
+  db.profileFindUnique.mockResolvedValue(null);
+  db.profileUpsert.mockResolvedValue({});
+  stubGateway();
   daily.deleteDailyRoom.mockResolvedValue(undefined);
   audit.writeAuditLog.mockResolvedValue(undefined);
 });

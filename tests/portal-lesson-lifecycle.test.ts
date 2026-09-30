@@ -69,7 +69,7 @@ const SCHEDULED_LESSON = {
   studentId: STUDENT.id,
   teacherId: TEACHER.id,
   status: "SCHEDULED",
-  title: "מתמטיקה 5 יח״ל",
+  title: "מתמטיקה 5 יח״ל" as string | null,
   scheduledAt: LESSON_AT,
   startTime: null as Date | null,
   durationMinutes: 50,
@@ -398,7 +398,13 @@ describe("DELETE …/meetings/[meetingId] — cancel", () => {
     expect(await res.json()).toEqual({
       success: true,
       whatsappDispatched: true,
-      data: { lessonId: SCHEDULED_LESSON.id, status: "CANCELLED", creditRestored: false, lessonCredits: null },
+      data: {
+        lessonId: SCHEDULED_LESSON.id,
+        status: "CANCELLED",
+        creditRestored: false,
+        creditOutcome: "NOT_DEDUCTED",
+        lessonCredits: null,
+      },
     });
     expect(lessonUpdate()).toEqual({
       where: { id: SCHEDULED_LESSON.id, status: "SCHEDULED" },
@@ -432,8 +438,8 @@ describe("DELETE …/meetings/[meetingId] — cancel", () => {
     });
   });
 
-  it("returns one credit to a direct-package student when restoreCredit is true", async () => {
-    withDirectPackage();
+  it("returns the credit taken at booking when restoreCredit is true", async () => {
+    withData({ lesson: { title: null } });
     stubGateway();
 
     const res = await DELETE(request("DELETE", { cancellationReason: "חג", restoreCredit: true }), meetingContext());
@@ -445,10 +451,10 @@ describe("DELETE …/meetings/[meetingId] — cancel", () => {
       data: { lessonCredits: { increment: 1 } },
       select: { lessonCredits: true },
     });
-    expect(db.logCreate.mock.calls[0][0].data.content).toContain("הוחזר שיעור אחד ליתרה");
+    expect(db.logCreate.mock.calls[0][0].data.content).toContain("שיעור בוטל. זוכה קרדיט 1 (הוחזר ליתרה)");
   });
 
-  it("does not return a credit to a student outside the direct package track", async () => {
+  it("does not return a credit for a portal lesson that was never charged", async () => {
     stubGateway();
 
     const res = await DELETE(request("DELETE", { cancellationReason: "חג", restoreCredit: true }), meetingContext());
@@ -545,7 +551,7 @@ describe("resilience — a WhatsApp failure never undoes the DB change", () => {
   });
 
   it("keeps the cancellation (and the restored credit) on a 503 gateway error", async () => {
-    withDirectPackage();
+    withData({ lesson: { title: null } });
     stubGateway(async () => new Response("service unavailable", { status: 503 }));
 
     const res = await DELETE(request("DELETE", { cancellationReason: "חג", restoreCredit: true }), meetingContext());

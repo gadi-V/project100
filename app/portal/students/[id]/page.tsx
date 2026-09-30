@@ -9,10 +9,16 @@ import StudentPortalTabs from "../../../../components/portal/student/StudentPort
 
 export const dynamic = "force-dynamic";
 
+type SearchValue = string | string[] | undefined;
+
 type StudentPageProps = {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ tab?: string | string[] }>;
+  searchParams: Promise<{ tab?: SearchValue; autoPromptSummary?: SearchValue; lessonId?: SearchValue }>;
 };
+
+function firstValue(value: SearchValue): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
 
 /**
  * Student CRM screen shared by representatives, pedagogic managers and teachers.
@@ -29,9 +35,14 @@ export default async function StudentPortalPage({ params, searchParams }: Studen
   const data = await loadStudentPortal(id, user);
   if (!data) notFound();
 
-  const rawTab = (await searchParams).tab;
-  const requestedTab = Array.isArray(rawTab) ? rawTab[0] : rawTab;
+  const query = await searchParams;
+  const requestedTab = firstValue(query.tab);
   const initialTab = isStudentTabKey(requestedTab) ? requestedTab : "profile";
+  const promptLesson = data.meetings.find((meeting) => meeting.id === firstValue(query.lessonId));
+  const initialSummaryRequest =
+    firstValue(query.autoPromptSummary) === "true"
+      ? { courseContext: promptLesson?.title ?? "", lessonType: promptLesson?.lessonType ?? "REGULAR" }
+      : null;
 
   return (
     <>
@@ -57,7 +68,11 @@ export default async function StudentPortalPage({ params, searchParams }: Studen
             </dl>
           </section>
 
-          <StudentPortalTabs data={data} initialTab={initialTab} />
+          <StudentPortalTabs
+            data={data}
+            initialTab={initialSummaryRequest ? "communication" : initialTab}
+            initialSummaryRequest={initialSummaryRequest}
+          />
         </div>
       </main>
     </>

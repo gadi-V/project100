@@ -8,19 +8,12 @@ import { dangerCta, fieldClass, secondaryCta } from "../../../lib/ui";
 type CancelLessonModalProps = {
   studentId: string;
   meeting: MeetingRow;
-  /** The student is on the direct package track, so a credit may be returned. */
-  canRestoreCredit: boolean;
   onClose: () => void;
   onDone: (result: CancelResult, whatsappDispatched: boolean) => void;
 };
 
-export default function CancelLessonModal({
-  studentId,
-  meeting,
-  canRestoreCredit,
-  onClose,
-  onDone,
-}: CancelLessonModalProps) {
+export default function CancelLessonModal({ studentId, meeting, onClose, onDone }: CancelLessonModalProps) {
+  const canRestoreCredit = meeting.creditTakenAtBooking;
   const [reason, setReason] = useState("");
   const [restoreCredit, setRestoreCredit] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -106,10 +99,10 @@ export default function CancelLessonModal({
                 onChange={(e) => setRestoreCredit(e.target.checked)}
                 disabled={submitting}
               />
-              להחזיר שיעור אחד ליתרת החבילה
+              להחזיר ליתרה את השיעור שירד בהזמנה
             </label>
           ) : (
-            <p className="text-xs text-neutral-500">החזרת שיעור ליתרה זמינה רק לתלמידים עם חבילת שעות ישירה.</p>
+            <p className="text-xs text-neutral-500">השיעור עוד לא ירד מהיתרה (הוא יורד רק כשהשיעור מתקיים), אז אין מה להחזיר.</p>
           )}
 
           {error && (

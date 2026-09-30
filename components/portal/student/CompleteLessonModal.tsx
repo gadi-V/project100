@@ -5,6 +5,7 @@ import {
   ATTENDANCE_OUTCOME_LABELS,
   ATTENDANCE_OUTCOMES,
   INTERNAL_NOTES_MAX,
+  submitLessonCompletion,
   type AttendanceOutcome,
   type CompleteLessonResponse,
 } from "../../../lib/lesson-completion";
@@ -13,7 +14,9 @@ import { fieldClass, primaryCta, secondaryCta } from "../../../lib/ui";
 
 type CompleteLessonModalProps = {
   studentId: string;
-  meeting: MeetingRow;
+  meeting: Pick<MeetingRow, "id" | "title" | "scheduledAt" | "teacherName">;
+  /** "room": opened from the Daily classroom, which closes the call and moves on to the portal. */
+  context?: "portal" | "room";
   onClose: () => void;
   onDone: (result: CompleteLessonResponse) => void;
 };
@@ -30,7 +33,21 @@ const OUTCOME_NOTES: Record<AttendanceOutcome, string> = {
   TEACHER_CANCELLED: "השיעור יסומן כבוטל, המורה לא יתוגמל עליו והשיעור לא ירד מיתרת התלמיד",
 };
 
-export default function CompleteLessonModal({ studentId, meeting, onClose, onDone }: CompleteLessonModalProps) {
+const ROOM_OUTCOME_NOTES: Record<AttendanceOutcome, string> = {
+  ATTENDED: "עם אישור סיום השיעור, שכר המורה יועבר לרישום, השיחה תסתיים ותעברו לטופס סיכום השיעור לוואטסאפ",
+  STUDENT_NO_SHOW:
+    "עם אישור סיום השיעור, שכר המורה יועבר לרישום, החיסור יסומן בתיק התלמיד וקבוצת הוואטסאפ תעודכן. השיחה תסתיים",
+  TEACHER_CANCELLED: "השיעור יסומן כבוטל, המורה לא יתוגמל עליו והשיעור לא ירד מיתרת התלמיד. השיחה תסתיים",
+};
+
+export default function CompleteLessonModal({
+  studentId,
+  meeting,
+  context = "portal",
+  onClose,
+  onDone,
+}: CompleteLessonModalProps) {
+  const notesByOutcome = context === "room" ? ROOM_OUTCOME_NOTES : OUTCOME_NOTES;
   const [outcome, setOutcome] = useState<AttendanceOutcome | null>(null);
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -53,17 +70,13 @@ export default function CompleteLessonModal({ studentId, meeting, onClose, onDon
     }
     setSubmitting(true);
     try {
-      const res = await fetch(
-        `/api/portal/students/${encodeURIComponent(studentId)}/meetings/${encodeURIComponent(meeting.id)}/complete`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ attendanceStatus: outcome, internalNotes: notes.trim() || null }),
-        }
-      );
-      const json = (await res.json().catch(() => ({ success: false }))) as CompleteLessonResponse;
-      if (!res.ok || !json.success) throw new Error(json.error ?? "סיום השיעור נכשל");
-      onDone(json);
+      const result = await submitLessonCompletion({
+        studentId,
+        lessonId: meeting.id,
+        attendanceStatus: outcome,
+        internalNotes: notes.trim() || null,
+      });
+      onDone(result);
     } catch (submitError: unknown) {
       setError(submitError instanceof Error ? submitError.message : "סיום השיעור נכשל");
       setSubmitting(false);
@@ -133,7 +146,7 @@ export default function CompleteLessonModal({ studentId, meeting, onClose, onDon
           </label>
 
           <p className="rounded-xl bg-neutral-50 px-4 py-2.5 text-sm text-neutral-700">
-            {OUTCOME_NOTES[outcome ?? "ATTENDED"]}
+            {notesByOutcome[outcome ?? "ATTENDED"]}
           </p>
 
           {error && (

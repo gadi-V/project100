@@ -7,6 +7,8 @@ import { INTAKE_RECORDER_ROLES } from "../../../../../../../lib/auth/staff-roles
 import { toCommunicationAuthorRole, type CommunicationAuthorRole } from "../../../../../../../lib/communication-templates";
 import { dailyRoomNameForLesson, deleteDailyRoom, roomNameFromDailyUrl } from "../../../../../../../lib/daily";
 import {
+  CANCEL_CREDIT_NOTES,
+  cancelCreditOutcome,
   EMERGENCY_OVERRIDE_MANAGEMENT_ONLY,
   parseCancelInput,
   parseRescheduleInput,
@@ -15,13 +17,12 @@ import {
   type CancelResult,
   type RescheduleResult,
 } from "../../../../../../../lib/lesson-lifecycle";
-import { isLessonManagementRole } from "../../../../../../../lib/lesson-completion";
+import { creditTakenAtBooking, isLessonManagementRole } from "../../../../../../../lib/lesson-completion";
 import {
   bookTeacherSlot,
   findLessonConflict,
   releaseTeacherSlot,
   resolveStudentAccess,
-  studentHasDirectPackage,
   type LessonConflict,
 } from "../../../../../../../lib/student-portal";
 import { formatIsraelDateTime } from "../../../../../../../lib/student-portal-shared";
@@ -297,8 +298,9 @@ export async function PATCH(request: Request, { params }: RouteContext) {
 /**
  * Cancels a scheduled lesson (REPRESENTATIVE / ADMIN / MANAGER): status CANCELLED, the teacher's slot is
  * freed and the reason is kept on the communication tab. `restoreCredit: true` returns one lesson credit only
- * when the student is on the direct package track. The quad group is told about the cancellation (the reason
- * stays internal); a failed post never rolls back the cancellation.
+ * when that credit was taken at booking (self-booked lessons); portal lessons are charged on completion, so
+ * cancelling them never adds a credit. The quad group is told about the cancellation (the reason stays
+ * internal); a failed post never rolls back the cancellation.
  */
 export async function DELETE(request: Request, { params }: RouteContext) {
   const auth = await requireAuth(INTAKE_RECORDER_ROLES);
@@ -323,7 +325,8 @@ export async function DELETE(request: Request, { params }: RouteContext) {
     const { lesson, groupId, authorRole } = lookup;
     if (lesson.status !== "SCHEDULED") return notScheduledResponse(lesson.status);
 
-    const creditEligible = restoreCredit && (await studentHasDirectPackage(id));
+    const creditOutcome = cancelCreditOutcome(creditTakenAtBooking(lesson), restoreCredit);
+    const creditEligible = creditOutcome === "RESTORED";
     const startsAt = lesson.startTime ?? lesson.scheduledAt;
     const durationMinutes = lesson.durationMinutes ?? 60;
     const subject = subjectOf(lesson);
@@ -331,7 +334,7 @@ export async function DELETE(request: Request, { params }: RouteContext) {
       `השיעור ${subject} בוטל`,
       `מועד: ${formatQuadLessonDate(startsAt, durationMinutes)}`,
       `סיבה: ${cancellationReason}`,
-      ...(creditEligible ? ["הוחזר שיעור אחד ליתרה"] : []),
+      CANCEL_CREDIT_NOTES[creditOutcome],
     ].join("\n");
 
     let lessonCredits: number | null = null;
@@ -373,6 +376,7 @@ export async function DELETE(request: Request, { params }: RouteContext) {
               scheduledAt: startsAt.toISOString(),
               reason: cancellationReason,
               creditRestored: creditEligible,
+              creditOutcome,
             } satisfies Prisma.InputJsonValue,
           },
         });
@@ -401,12 +405,20 @@ export async function DELETE(request: Request, { params }: RouteContext) {
         cancellationReason,
         restoreCreditRequested: restoreCredit,
         creditRestored: creditEligible,
+        creditOutcome,
+        creditNote: CANCEL_CREDIT_NOTES[creditOutcome],
         lessonCredits,
         whatsappDispatched,
       },
     });
 
-    const data: CancelResult = { lessonId: lesson.id, status: "CANCELLED", creditRestored: creditEligible, lessonCredits };
+    const data: CancelResult = {
+      lessonId: lesson.id,
+      status: "CANCELLED",
+      creditRestored: creditEligible,
+      creditOutcome,
+      lessonCredits,
+    };
     return NextResponse.json({ success: true, data, whatsappDispatched });
   } catch (error: unknown) {
     console.error("Staff lesson cancel error:", error);

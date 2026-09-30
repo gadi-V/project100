@@ -9,7 +9,7 @@ import {
   type RankedTopic,
 } from "./communication-templates";
 import { rescheduleBlock } from "./lesson-lifecycle";
-import { canCompleteLesson, isLessonManagementRole } from "./lesson-completion";
+import { canCompleteLesson, creditTakenAtBooking, isLessonManagementRole } from "./lesson-completion";
 import { lessonAntiCollisionWindow } from "./scheduling";
 import {
   PENDING_SCHEDULE_STATUS,
@@ -22,6 +22,7 @@ import {
   activateStudentStatuses,
   ageFromBirthDate,
   canEnterLessonRoom,
+  flagUnexcusedAbsence,
   type AttendanceStatus,
   type CardLookup,
   type CommunicationEntry,
@@ -252,6 +253,7 @@ export function buildMeetingRows(lessons: LessonForTabs[], viewer: Viewer, now: 
         { status: lesson.status, teacherId: lesson.teacherId, startsAt: lessonStart(lesson) },
         now
       ),
+      creditTakenAtBooking: creditTakenAtBooking(lesson),
     };
   });
 }
@@ -473,6 +475,20 @@ export async function markStudentActive(
 ): Promise<StudentStatusCode[]> {
   const current = await tx.studentProfile.findUnique({ where: { userId: studentId }, select: { studentStatus: true } });
   const studentStatus = activateStudentStatuses(current?.studentStatus ?? []);
+  const data = { studentStatus, statusUpdatedAt: now, statusUpdatedById: actorId };
+  await tx.studentProfile.upsert({ where: { userId: studentId }, create: { userId: studentId, ...data }, update: data });
+  return studentStatus;
+}
+
+/** Adds the "חיסור לא מוצדק" status to the student's CRM card after a no-show. */
+export async function markUnexcusedAbsence(
+  tx: Prisma.TransactionClient,
+  studentId: string,
+  actorId: string,
+  now: Date = new Date()
+): Promise<StudentStatusCode[]> {
+  const current = await tx.studentProfile.findUnique({ where: { userId: studentId }, select: { studentStatus: true } });
+  const studentStatus = flagUnexcusedAbsence(current?.studentStatus ?? []);
   const data = { studentStatus, statusUpdatedAt: now, statusUpdatedById: actorId };
   await tx.studentProfile.upsert({ where: { userId: studentId }, create: { userId: studentId, ...data }, update: data });
   return studentStatus;

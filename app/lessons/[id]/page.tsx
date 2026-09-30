@@ -138,6 +138,8 @@ export default async function LessonPage(props: {
         id: lesson.id,
         title: lesson.title,
         status: lesson.status,
+        studentId: lesson.studentId,
+        teacherId: lesson.teacherId,
         roomUrl,
         dailyToken,
         streamToken,

@@ -37,8 +37,6 @@ type MeetingsTabProps = {
   meetings: MeetingRow[];
   /** REPRESENTATIVE / ADMIN / MANAGER may schedule, reschedule and cancel meetings. */
   canSchedule: boolean;
-  /** The student is on the direct package track, so a cancelled lesson may return a credit. */
-  canRestoreCredit: boolean;
   onRequestSummary?: (request: SummaryRequest) => void;
 };
 
@@ -53,7 +51,14 @@ function completionBanner(result: CompleteLessonResponse): Banner {
       : "";
   switch (result.attendanceStatus) {
     case "STUDENT_NO_SHOW":
-      return { tone: "success", text: `השיעור נסגר כאי-הופעה של התלמיד${pay}${credit}` };
+      return {
+        tone: result.whatsappDispatched ? "success" : "warning",
+        text:
+          `השיעור נסגר כאי-הופעה של התלמיד${pay}${credit}. בתיק סומן "חיסור לא מוצדק"` +
+          (result.whatsappDispatched
+            ? " וקבוצת הוואטסאפ עודכנה"
+            : ". ההודעה לא נשלחה לקבוצת הוואטסאפ, כדאי לעדכן ידנית"),
+      };
     case "TEACHER_CANCELLED":
       return { tone: "warning", text: `השיעור סומן כבוטל ביוזמת המורה, ללא תגמול למורה${credit}` };
     default:
@@ -153,7 +158,6 @@ export default function MeetingsTab({
   studentId,
   meetings: initialMeetings,
   canSchedule,
-  canRestoreCredit,
   onRequestSummary,
 }: MeetingsTabProps) {
   const [meetings, setMeetings] = useState<MeetingRow[]>(initialMeetings);
@@ -253,7 +257,11 @@ export default function MeetingsTab({
 
   const handleCancelled = (result: CancelResult, whatsappDispatched: boolean) =>
     finishLifecycle(
-      result.creditRestored ? `השיעור בוטל ושיעור אחד הוחזר ליתרה (${result.lessonCredits})` : "השיעור בוטל",
+      result.creditRestored
+        ? `השיעור בוטל ושיעור אחד הוחזר ליתרה (${result.lessonCredits})`
+        : result.creditOutcome === "NOT_DEDUCTED"
+          ? "השיעור בוטל. לא נדרש זיכוי כי השיעור טרם ירד מהיתרה"
+          : "השיעור בוטל",
       whatsappDispatched
     );
 
@@ -448,7 +456,6 @@ export default function MeetingsTab({
         <CancelLessonModal
           studentId={studentId}
           meeting={lifecycleModal.meeting}
-          canRestoreCredit={canRestoreCredit}
           onClose={closeLifecycleModal}
           onDone={handleCancelled}
         />

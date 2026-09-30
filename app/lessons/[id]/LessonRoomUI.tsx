@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "react-hot-toast";
+import { Check } from "lucide-react";
 import type { Channel as StreamChannelType } from "stream-chat";
 import ClassroomWhiteboard, {
   ClassroomWhiteboardRef,
@@ -12,14 +13,21 @@ import VideoRoom from "../../../components/VideoRoom";
 import RatingModal from "../../../components/RatingModal";
 import PreLessonAssetsSection from "../../../components/packages/PreLessonAssetsSection";
 import DiagnosticSummaryCard from "../../../components/packages/DiagnosticSummaryCard";
-import PostLessonSummaryModal from "../../../components/lessons/PostLessonSummaryModal";
-import { frostCard, frostHeader, primaryCta, dangerCta } from "../../../lib/ui";
+import CompleteLessonModal from "../../../components/portal/student/CompleteLessonModal";
+import {
+  canCompleteFromRoom,
+  portalAfterCompletionHref,
+  type CompleteLessonResponse,
+} from "../../../lib/lesson-completion";
+import { frostCard, frostHeader, primaryCta } from "../../../lib/ui";
 
 interface LessonRoomUIProps {
   lesson: {
     id: string;
     title: string | null;
     status: string;
+    studentId: string;
+    teacherId: string;
     roomUrl: string | null;
     dailyToken: string | null;
     streamToken: string | null;
@@ -56,10 +64,9 @@ export default function LessonRoomUI({
 }: LessonRoomUIProps) {
   const router = useRouter();
   const whiteboardRef = useRef<ClassroomWhiteboardRef>(null);
-  const [isEnding, setIsEnding] = useState(false);
   const [showRating, setShowRating] = useState(false);
-  const [showSummaryModal, setShowSummaryModal] = useState(false);
-  const [existingGaps, setExistingGaps] = useState<string[]>([]);
+  const [showCompleteModal, setShowCompleteModal] = useState(false);
+  const [callEnded, setCallEnded] = useState(false);
   const [boardChannel, setBoardChannel] = useState<StreamChannelType | null>(
     null
   );
@@ -89,67 +96,18 @@ export default function LessonRoomUI({
     return `${m}:${s}`;
   };
 
-  const handleEndLesson = async () => {
-    const isTeacherRole =
-      user.role === "TEACHER" || user.role === "MANAGER" || user.role === "ADMIN";
+  const canComplete = canCompleteFromRoom(user, lesson);
 
-    if (isTeacherRole) {
-      if (lesson.packageId) {
-        try {
-          const res = await fetch(`/api/packages/${lesson.packageId}/quiz`);
-          if (res.ok) {
-            const data = await res.json();
-            setExistingGaps(data.identifiedGaps || []);
-          }
-        } catch (error) {
-          console.error("Failed to load gaps for summary modal:", error);
-        }
-      }
-      setShowSummaryModal(true);
-      return;
-    }
+  const closeCompleteModal = useCallback(() => setShowCompleteModal(false), []);
 
-    if (!whiteboardRef.current) return;
-
-    setIsEnding(true);
-    const endToast = toast.loading("מסיים את השיעור ומפיק סיכום PDF...");
-
-    try {
-      // Export all A4 pages → upload to storage → receive URL (or Blob fallback).
-      const exportResult = await whiteboardRef.current.exportBoardToPdf(lesson.id);
-
-      const formData = new FormData();
-      formData.append("lessonId", lesson.id);
-
-      if (typeof exportResult === "string") {
-        // Storage URL returned by the export API — pass it so complete can skip re-upload.
-        formData.append("pdfUrl", exportResult);
-      } else if (exportResult instanceof Blob) {
-        // Blob fallback (no lessonId or storage not configured).
-        formData.append("pdfFile", exportResult, `lesson_${lesson.id}.pdf`);
-      }
-
-      const response = await fetch("/api/lessons/complete", {
-        method: "POST",
-        body: formData,
-      });
-
-      if (!response.ok) {
-        const data = (await response.json()) as { error?: string };
-        throw new Error(data.error ?? "שגיאה בסיום השיעור");
-      }
-
-      toast.success("השיעור הסתיים בהצלחה! סיכום יישלח בוואטסאפ.", {
-        id: endToast,
-      });
-      router.push("/dashboard");
-    } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : "שגיאה בתהליך הסיום";
-      toast.error(message, { id: endToast });
-    } finally {
-      setIsEnding(false);
-    }
+  /** Unmounting VideoRoom leaves and destroys the Daily call before moving on to the portal. */
+  const handleLessonCompleted = (result: CompleteLessonResponse) => {
+    setShowCompleteModal(false);
+    setCallEnded(true);
+    if (result.status === "CANCELLED") toast("השיעור סומן כבוטל ביוזמת המורה");
+    else if (result.promptSummary) toast.success("השיעור הסתיים. עוברים לטופס סיכום השיעור");
+    else toast.success("השיעור נסגר והחיסור נרשם בתיק התלמיד");
+    router.push(portalAfterCompletionHref(lesson.studentId, lesson.id, result));
   };
 
   const handleRatingSubmit = async (rating: number, comment: string) => {
@@ -180,17 +138,18 @@ export default function LessonRoomUI({
       className="h-[100dvh] min-h-0 bg-stone-50 flex flex-col overflow-hidden text-neutral-900"
       dir="rtl"
     >
-      {showSummaryModal && (
-        <PostLessonSummaryModal
-          isOpen={showSummaryModal}
-          onClose={() => setShowSummaryModal(false)}
-          lessonId={lesson.id}
-          teacherId={user.id}
-          existingGaps={existingGaps}
-          onSummarySaved={() => {
-            setShowSummaryModal(false);
-            window.location.reload();
+      {showCompleteModal && (
+        <CompleteLessonModal
+          studentId={lesson.studentId}
+          meeting={{
+            id: lesson.id,
+            title: lesson.title?.trim() || "שיעור פרטי",
+            scheduledAt: lesson.scheduledAt,
+            teacherName: user.role === "TEACHER" ? user.name : null,
           }}
+          context="room"
+          onClose={closeCompleteModal}
+          onDone={handleLessonCompleted}
         />
       )}
 
@@ -229,16 +188,15 @@ export default function LessonRoomUI({
             </button>
           )}
 
-          {(user.role === "TEACHER" ||
-            user.role === "MANAGER" ||
-            user.role === "ADMIN") && (
+          {canComplete && (
             <button
               type="button"
-              onClick={handleEndLesson}
-              disabled={isEnding}
-              className={dangerCta}
+              onClick={() => setShowCompleteModal(true)}
+              disabled={callEnded}
+              className="inline-flex items-center gap-1.5 rounded-full bg-neutral-900 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-neutral-800 disabled:opacity-50"
             >
-              {isEnding ? "מסיים..." : "סיום שיעור"}
+              <Check className="h-4 w-4" aria-hidden="true" />
+              {callEnded ? "סוגרים את השיעור..." : "סיום שיעור ודיווח נוכחות"}
             </button>
           )}
         </div>
@@ -309,7 +267,13 @@ export default function LessonRoomUI({
           )}
 
           <div className="h-64 rounded-2xl overflow-hidden shrink-0">
-            <VideoRoom roomUrl={lesson.roomUrl} token={lesson.dailyToken} />
+            {callEnded ? (
+              <div className="flex h-full items-center justify-center bg-neutral-100 text-sm font-medium text-neutral-500">
+                השיחה הסתיימה
+              </div>
+            ) : (
+              <VideoRoom roomUrl={lesson.roomUrl} token={lesson.dailyToken} />
+            )}
           </div>
 
           <div className="flex-1 rounded-2xl overflow-hidden min-h-[240px]">

@@ -867,6 +867,18 @@ export async function sendQuadGroupLessonCancelled(groupChatId: string, input: Q
   return postToQuadGroup(groupChatId, buildLessonCancelledMessage(input));
 }
 
+export function buildStudentNoShowMessage(): string {
+  return (
+    `⚠️ *עדכון שיעור - ${SUMMARY_BRAND}*\n` +
+    `שלום לכולם, במועד השיעור שנקבע להיום התלמיד/ה לא נכח/ה בחדר הלמידה.\n` +
+    `המנהל הפדגוגי יעודכן לבדיקת המקרה ותיאום מועד חלופי. המשך יום נעים.`
+  );
+}
+
+export async function sendQuadGroupStudentNoShow(groupChatId: string) {
+  return postToQuadGroup(groupChatId, buildStudentNoShowMessage());
+}
+
 export type QuadLessonSummaryInput = {
   groupUrl?: string | null;
   groupChatId?: string | null;

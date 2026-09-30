@@ -29,6 +29,7 @@ export const STUDENT_STATUS_OPTIONS = [
   { code: "FLOWING_160", label: "זורם 160" },
   { code: "BOILING_160", label: "רותח 160" },
   { code: "MAPPING_FAILED", label: "מיפוי נכשל" },
+  { code: "UNEXCUSED_ABSENCE", label: "חיסור לא מוצדק" },
 ] as const;
 
 export type StudentStatusCode = (typeof STUDENT_STATUS_OPTIONS)[number]["code"];
@@ -42,6 +43,13 @@ const WAITING_STATUS_CODES = new Set<string>(["MAPPING_FAILED", "CALL_BACK_PAREN
 export function activateStudentStatuses(current: readonly string[]): StudentStatusCode[] {
   const next = new Set(current.filter((code) => STATUS_CODES.has(code) && !WAITING_STATUS_CODES.has(code)));
   next.add("STUDENT");
+  return STUDENT_STATUS_OPTIONS.map((o) => o.code).filter((code) => next.has(code));
+}
+
+/** Adds the "חיסור לא מוצדק" flag after a no-show, kept until staff clear it on the profile tab. */
+export function flagUnexcusedAbsence(current: readonly string[]): StudentStatusCode[] {
+  const next = new Set(current.filter((code) => STATUS_CODES.has(code)));
+  next.add("UNEXCUSED_ABSENCE");
   return STUDENT_STATUS_OPTIONS.map((o) => o.code).filter((code) => next.has(code));
 }
 
@@ -149,6 +157,8 @@ export type MeetingRow = {
   canCancel: boolean;
   /** Close the lesson and record attendance: the lesson's teacher, MANAGER or ADMIN, once it has started. */
   canComplete: boolean;
+  /** The student's credit was taken when the lesson was booked, so a cancellation may return it. */
+  creditTakenAtBooking: boolean;
 };
 
 const LESSON_ROOM_OPEN_STATUSES = new Set(["SCHEDULED", "IN_PROGRESS"]);

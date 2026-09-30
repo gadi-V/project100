@@ -51,8 +51,8 @@
 - `GET/POST /api/portal/students/[id]/meetings` — meetings + approved teachers; schedule a mapping / regular lesson with an assigned teacher and open (or update) the quad WhatsApp group. REPRESENTATIVE / ADMIN / MANAGER only (AuditLog `MAPPING_LESSON_SCHEDULED`) (Sprint 12).
 - `GET/POST /api/portal/students/[id]/pedagogic-decision` — 360° overview (intake call, parent / student questionnaires, mapping summary, active teachers) + the pedagogic manager's post-mapping decision: summary log, monthly recurring-lesson batch, active "תלמיד" status, learning plan posted to the quad WhatsApp group. MANAGER / ADMIN / REPRESENTATIVE only (AuditLog `PEDAGOGIC_DECISION_RECORDED`) (Sprint 14).
 - `POST /api/portal/students/[id]/meetings/pending-schedule` — lock date, time and teacher for a `PENDING_SCHEDULE` private lesson → `SCHEDULED`, anti-collision `409`, quad-group update. REPRESENTATIVE / ADMIN / MANAGER only (AuditLog `PENDING_LESSON_SCHEDULED`) (Sprint 15).
-- `PATCH / DELETE /api/portal/students/[id]/meetings/[meetingId]` — staff reschedule (24 h / once policy `422`, anti-collision `409`) and cancel (reason, optional credit return on the direct package track), each posted to the quad group. REPRESENTATIVE / ADMIN / MANAGER only (AuditLog `LESSON_RESCHEDULED_BY_STAFF` / `LESSON_CANCELLED_BY_STAFF`) (Sprint 15). MANAGER / ADMIN may send `allowEmergencyOverride: true` to bypass the 24 h / once policy, audited as an emergency change approved by management (Sprint 16).
-- `POST /api/portal/students/[id]/meetings/[meetingId]/complete` — close a started lesson and record attendance (`ATTENDED` / `STUDENT_NO_SHOW` / `TEACHER_CANCELLED`): teacher payout + ledger, direct-package credit, communication entry. The lesson's teacher, MANAGER or ADMIN only (AuditLog `LESSON_COMPLETED_ATTENDANCE_RECORDED`) (Sprint 16).
+- `PATCH / DELETE /api/portal/students/[id]/meetings/[meetingId]` — staff reschedule (24 h / once policy `422`, anti-collision `409`) and cancel (reason; a credit is returned only if it was taken at booking, Sprint 17), each posted to the quad group. REPRESENTATIVE / ADMIN / MANAGER only (AuditLog `LESSON_RESCHEDULED_BY_STAFF` / `LESSON_CANCELLED_BY_STAFF`) (Sprint 15). MANAGER / ADMIN may send `allowEmergencyOverride: true` to bypass the 24 h / once policy, audited as an emergency change approved by management (Sprint 16).
+- `POST /api/portal/students/[id]/meetings/[meetingId]/complete` — close a started lesson and record attendance (`ATTENDED` / `STUDENT_NO_SHOW` / `TEACHER_CANCELLED`): teacher payout + ledger, direct-package credit, communication entry. The lesson's teacher, MANAGER or ADMIN only (AuditLog `LESSON_COMPLETED_ATTENDANCE_RECORDED`) (Sprint 16). Also used from the Daily room; closes the Daily room, and a no-show flags "חיסור לא מוצדק" on the CRM card and alerts the quad group (AuditLog `STUDENT_NO_SHOW_RECORDED`) (Sprint 17).
 - `POST /api/portal/students/[id]/direct-package` — direct hours package for independent students (no mapping lesson): `lessonCredits` increment + active "תלמיד" status. MANAGER / ADMIN / REPRESENTATIVE only (AuditLog `DIRECT_PACKAGE_ASSIGNED`) (Sprint 14).
 
 ### Diagnostics & packages
@@ -201,6 +201,45 @@ Fresh databases apply all migrations normally with `npx prisma migrate deploy`.
 | 14 | 360° pedagogic decision (intake call + parent / student questionnaires + mapping summary), subscription generator (weekly / twice weekly, extra private lessons, fixed days and hours, monthly lesson batch, quad WhatsApp announcement) and direct hours-package track for independent students | ✅ Completed |
 | 15 | Lesson lifecycle on the meetings tab: scheduling pending private lessons (PENDING_SCHEDULE → SCHEDULED), staff reschedule with conflict check and cancellation with reason / credit return, all with quad WhatsApp updates | ✅ Completed |
 | 16 | Lesson completion loop: closing a lesson with attendance (attended / student no-show / teacher cancelled), teacher compensation in TeacherPayout + BillingLedger at the hourly rate, final direct-package credit deduction, and management emergency override for reschedules inside 24 h | ✅ Completed |
+| 17 | Credit symmetry on cancellation (credit returned only if it was taken at booking), lesson completion and attendance report from inside the Daily room (call closed, teacher sent to the summary form), and no-show retention alert (CRM "חיסור לא מוצדק" flag + quad WhatsApp notice) | ✅ Completed |
+
+### Credit symmetry, in-room completion and no-show retention (Sprint 17)
+
+- **Cancellation credit rule** (`DELETE …/meetings/[meetingId]`): a credit is returned only when it was really taken
+  at booking. Only student self-booking (`POST /api/lessons`, lesson without a title) takes a credit up front; portal
+  lessons are charged on completion, so cancelling them never adds a credit, even with `restoreCredit: true`
+  (previously a direct-package student got a free +1). `cancelCreditOutcome` → `RESTORED` / `NOT_DEDUCTED` /
+  `NOT_REQUESTED`; the communication entry and AuditLog (`creditOutcome`, `creditNote`) state "שיעור בוטל. זוכה קרדיט
+  1 (הוחזר ליתרה)" or "שיעור בוטל. זיכוי קרדיט: לא נדרש (טרם נגרע)". The response carries `creditOutcome`.
+  `CancelLessonModal` shows the restore checkbox only when `MeetingRow.creditTakenAtBooking`, otherwise explains that
+  nothing was deducted yet.
+- **In-room completion** (`app/lessons/[id]/LessonRoomUI.tsx`): the lesson's teacher, MANAGER and ADMIN see "סיום
+  שיעור ודיווח נוכחות" in the room header (`canCompleteFromRoom`: open lesson + management or the assigned teacher).
+  It opens `CompleteLessonModal` (`context="room"`), which posts to `…/meetings/[meetingId]/complete`
+  (`submitLessonCompletion`). On success the Daily call is unmounted (`leave()` + `destroy()`), the server deletes the
+  Daily room (best effort, `dailyRoomUrl` cleared), and the teacher is sent to
+  `/portal/students/[id]?tab=communication&autoPromptSummary=true&lessonId=…`, where the summary form opens with the
+  course prefilled (`/portal/students/[id]?tab=meetings` after a no-show or teacher cancellation). The legacy in-room
+  "סיום שיעור" path (`PostLessonSummaryModal` → `/api/lessons/[id]/summary`, which closed the lesson with no pay,
+  credit or attendance) is no longer used by the room.
+- **No-show retention** (`attendanceStatus: "STUDENT_NO_SHOW"`): inside the completion transaction the student's CRM
+  card gets the `UNEXCUSED_ABSENCE` status ("חיסור לא מוצדק", `StudentProfile.studentStatus`, existing statuses kept);
+  staff clear it from the profile status checkboxes after review. After the transaction the quad group (lesson group,
+  falling back to the student's group) gets "⚠️ *עדכון שיעור - Project 100*" + the absence notice, and AuditLog
+  `STUDENT_NO_SHOW_RECORDED` records `studentStatus`, `whatsappDispatched`, `whatsappGroupLinked`. A WhatsApp failure
+  never rolls back the attendance. Response adds `absenceFlagged` and `whatsappDispatched`; the meetings tab banner says
+  whether the group was notified.
+- **Unchanged:** `LedgerService`, `PayoutService`, `/api/lessons/complete`, `/api/lessons/[id]/cancel`, `/reschedule`
+  and `/api/lessons/[id]/summary`. No schema change (`studentStatus` is a string list).
+- **Tests:** `tests/portal-retention-and-inroom-completion.test.ts` (19 tests) covers:
+  - a portal lesson cancel with `restoreCredit: true` adds no credit; a booking-charged lesson gets exactly +1;
+  - a no-show flags the profile, sends the exact quad message, writes `STUDENT_NO_SHOW_RECORDED`, survives a gateway
+    failure and a missing group; an attended lesson triggers none of it; the Daily room is closed;
+  - `LessonRoomUI` (server render) shows the button to the assigned teacher, MANAGER and ADMIN, not to the student or
+    another teacher, and not on a closed lesson; the room submit reaches the real completion route and succeeds, and a
+    student attempt is refused.
+  Sprint 15 cancel tests were updated to the corrected credit rule. Verified: `tsc` 0, `npm run build` 0, `npm test`
+  0 (24 files, 521 tests).
 
 ### Lesson completion, attendance and teacher compensation (Sprint 16)
 

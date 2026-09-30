@@ -15,8 +15,14 @@ import {
   TEACHER_HOURLY_RATE_ILS,
   type CompleteLessonResponse,
 } from "../../../../../../../../lib/lesson-completion";
-import { resolveStudentAccess, studentHasDirectPackage } from "../../../../../../../../lib/student-portal";
-import { formatQuadLessonDate } from "../../../../../../../../lib/whatsapp";
+import { writeAuditLog } from "../../../../../../../../lib/audit";
+import { dailyRoomNameForLesson, deleteDailyRoom, roomNameFromDailyUrl } from "../../../../../../../../lib/daily";
+import {
+  markUnexcusedAbsence,
+  resolveStudentAccess,
+  studentHasDirectPackage,
+} from "../../../../../../../../lib/student-portal";
+import { formatQuadLessonDate, sendQuadGroupStudentNoShow } from "../../../../../../../../lib/whatsapp";
 import { schedulePayoutInTransaction } from "../../../../../../../../lib/services/PayoutService";
 import { writeLedgerEntryInTransaction } from "../../../../../../../../lib/services/LedgerService";
 
@@ -40,6 +46,29 @@ function closedLessonError(status: string): string {
   return "אפשר לסיים רק שיעור שנקבע לו מועד";
 }
 
+/** Best effort: ends the Daily call for everyone still in the room. */
+async function closeDailyRoom(lessonId: string, roomUrl: string | null): Promise<void> {
+  if (!roomUrl) return;
+  try {
+    await deleteDailyRoom(roomNameFromDailyUrl(roomUrl) ?? dailyRoomNameForLesson(lessonId));
+  } catch (roomError: unknown) {
+    console.error(`[lesson-completion] Daily room teardown for ${lessonId} failed:`, roomError);
+  }
+}
+
+/** Never throws: a WhatsApp failure must not undo the recorded attendance. */
+async function postNoShowAlert(groupId: string | null, lessonId: string): Promise<boolean> {
+  if (!groupId) return false;
+  try {
+    const result = await sendQuadGroupStudentNoShow(groupId);
+    if (!result.sent) console.error(`[lesson-completion] no-show alert for ${lessonId} not sent: ${result.error}`);
+    return result.sent;
+  } catch (whatsappError: unknown) {
+    console.error(`[lesson-completion] no-show alert for ${lessonId} failed:`, whatsappError);
+    return false;
+  }
+}
+
 /**
  * Closes a lesson and records attendance: the lesson's teacher, MANAGER (pedagogic manager) or ADMIN, once the
  * start time has arrived. One transaction:
@@ -47,7 +76,10 @@ function closedLessonError(status: string): string {
  *   teacher's hourly rate (PAYOUT + PLATFORM_FEE ledger rows, same idempotency key as `/api/lessons/complete`),
  *   and one lesson taken from the direct-package balance unless the credit was already taken at booking.
  * - TEACHER_CANCELLED: `CANCELLED`, no payout, and a credit taken at booking goes back to the student.
+ * - STUDENT_NO_SHOW also adds "חיסור לא מוצדק" to the CRM card; after the commit the quad group gets the no-show
+ *   notice and AuditLog `STUDENT_NO_SHOW_RECORDED` is written (a failed post never undoes the attendance).
  * The outcome and internal notes go to the communication tab and AuditLog `LESSON_COMPLETED_ATTENDANCE_RECORDED`.
+ * The Daily room is closed (best effort) so the call ends for everyone still inside.
  */
 export async function POST(request: Request, { params }: RouteContext) {
   const auth = await requireAuth(["TEACHER", "MANAGER", "ADMIN"]);
@@ -81,6 +113,8 @@ export async function POST(request: Request, { params }: RouteContext) {
         scheduledAt: true,
         startTime: true,
         durationMinutes: true,
+        dailyRoomUrl: true,
+        whatsappGroupId: true,
       },
     });
     if (!lesson || lesson.studentId !== id) return fail("השיעור לא נמצא", 404);
@@ -101,19 +135,27 @@ export async function POST(request: Request, { params }: RouteContext) {
     const compensation = effects.compensateTeacher ? teacherCompensation(durationMinutes) : null;
     const subject = lesson.title?.trim() || "שיעור פרטי";
     const payoutKey = lessonPayoutKey(lesson.id);
+    const noShow = attendanceStatus === "STUDENT_NO_SHOW";
 
-    let outcome: { payoutId: string | null; creditCharged: boolean; creditRestored: boolean; lessonCredits: number | null };
+    let outcome: {
+      payoutId: string | null;
+      creditCharged: boolean;
+      creditRestored: boolean;
+      lessonCredits: number | null;
+      studentStatus: string[] | null;
+    };
     try {
       outcome = await prisma.$transaction(async (tx) => {
         const closed = await tx.lesson.updateMany({
           where: { id: lesson.id, status: { in: [...COMPLETABLE_STATUSES] } },
           data: {
             status: effects.status,
+            dailyRoomUrl: null,
             ...(effects.attendance
               ? { attendanceStatus: effects.attendance, attendanceMarkedAt: now, attendanceMarkedById: auth.user.id }
               : {}),
             ...(effects.status === "CANCELLED"
-              ? { canceledAt: now, canceledById: auth.user.id, appealStatus: "NONE", dailyRoomUrl: null }
+              ? { canceledAt: now, canceledById: auth.user.id, appealStatus: "NONE" }
               : {}),
           },
         });
@@ -176,6 +218,7 @@ export async function POST(request: Request, { params }: RouteContext) {
           const balance = await tx.user.findUnique({ where: { id }, select: { lessonCredits: true } });
           lessonCredits = balance?.lessonCredits ?? null;
         }
+        const studentStatus = noShow ? await markUnexcusedAbsence(tx, id, auth.user.id, now) : null;
 
         const content = [
           `השיעור ${subject} (${formatQuadLessonDate(startsAt, durationMinutes)}): ${ATTENDANCE_OUTCOME_LABELS[attendanceStatus]}`,
@@ -183,6 +226,7 @@ export async function POST(request: Request, { params }: RouteContext) {
           ...(creditCharged ? [`ירד שיעור אחד מיתרת החבילה (נותרו ${lessonCredits})`] : []),
           ...(chargeDirectPackage && !creditCharged ? ["יתרת החבילה ריקה, השיעור לא ירד מהיתרה"] : []),
           ...(creditRestored ? [`השיעור הוחזר ליתרת התלמיד (${lessonCredits})`] : []),
+          ...(noShow ? ["סומן בתיק: חיסור לא מוצדק (לבדיקת המנהל הפדגוגי)"] : []),
           ...(internalNotes ? [`הערות פנימיות: ${internalNotes}`] : []),
         ].join("\n");
         await tx.studentCommunicationLog.create({
@@ -228,15 +272,42 @@ export async function POST(request: Request, { params }: RouteContext) {
               creditRestored,
               directPackageBalanceEmpty: chargeDirectPackage && !creditCharged,
               lessonCredits,
+              studentStatus,
             } satisfies Prisma.InputJsonValue,
           },
         });
 
-        return { payoutId, creditCharged, creditRestored, lessonCredits };
+        return { payoutId, creditCharged, creditRestored, lessonCredits, studentStatus };
       });
     } catch (txError: unknown) {
       if (txError instanceof CompletionRaceError) return fail("השיעור עודכן בינתיים, רעננו ונסו שוב", 409);
       throw txError;
+    }
+
+    await closeDailyRoom(lesson.id, lesson.dailyRoomUrl);
+
+    let whatsappDispatched: boolean | undefined;
+    if (noShow) {
+      let groupId = lesson.whatsappGroupId?.trim() || null;
+      if (!groupId) {
+        const student = await prisma.user.findUnique({ where: { id }, select: { whatsappGroupId: true } });
+        groupId = student?.whatsappGroupId?.trim() || null;
+      }
+      whatsappDispatched = await postNoShowAlert(groupId, lesson.id);
+      await writeAuditLog({
+        actorId: auth.user.id,
+        action: "STUDENT_NO_SHOW_RECORDED",
+        entityType: "Lesson",
+        entityId: lesson.id,
+        metadata: {
+          studentId: id,
+          teacherId: lesson.teacherId,
+          scheduledAt: startsAt.toISOString(),
+          studentStatus: outcome.studentStatus,
+          whatsappDispatched,
+          whatsappGroupLinked: groupId !== null,
+        },
+      });
     }
 
     return NextResponse.json({
@@ -250,6 +321,7 @@ export async function POST(request: Request, { params }: RouteContext) {
       creditRestored: outcome.creditRestored,
       lessonCredits: outcome.lessonCredits,
       promptSummary: effects.promptSummary,
+      ...(noShow ? { absenceFlagged: true, whatsappDispatched } : {}),
     } satisfies CompleteLessonResponse);
   } catch (error: unknown) {
     console.error("Lesson completion error:", error);

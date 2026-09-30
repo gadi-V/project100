@@ -11,6 +11,8 @@ import StandingOrdersTab from "./StandingOrdersTab";
 type StudentPortalTabsProps = {
   data: StudentPortalData;
   initialTab: StudentTabKey;
+  /** `?autoPromptSummary=true` (from the lesson room): open the summary form on arrival. */
+  initialSummaryRequest?: SummaryRequest | null;
 };
 
 function tabClass(active: boolean): string {
@@ -19,9 +21,18 @@ function tabClass(active: boolean): string {
     : "text-neutral-600 hover:text-neutral-900 hover:bg-white/60 rounded-full px-5 py-2 text-sm font-medium transition-colors";
 }
 
-export default function StudentPortalTabs({ data, initialTab }: StudentPortalTabsProps) {
+export default function StudentPortalTabs({ data, initialTab, initialSummaryRequest = null }: StudentPortalTabsProps) {
   const [activeTab, setActiveTab] = useState<StudentTabKey>(initialTab);
-  const [summaryRequest, setSummaryRequest] = useState<SummaryRequest | null>(null);
+  const [summaryRequest, setSummaryRequest] = useState<SummaryRequest | null>(initialSummaryRequest);
+
+  const closeSummaryRequest = () => {
+    setSummaryRequest(null);
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has("autoPromptSummary")) return;
+    url.searchParams.delete("autoPromptSummary");
+    url.searchParams.delete("lessonId");
+    window.history.replaceState(null, "", url.toString());
+  };
 
   const selectTab = (tab: StudentTabKey) => {
     setActiveTab(tab);
@@ -84,7 +95,6 @@ export default function StudentPortalTabs({ data, initialTab }: StudentPortalTab
               studentId={data.header.id}
               meetings={data.meetings}
               canSchedule={data.viewer.canEditProfile}
-              canRestoreCredit={data.plans.packages.length > 0}
               onRequestSummary={openLessonSummary}
             />
           )}
@@ -96,7 +106,7 @@ export default function StudentPortalTabs({ data, initialTab }: StudentPortalTab
               courseTitles={courseTitles}
               whatsappGroupLinked={data.whatsappGroupLinked}
               summaryRequest={summaryRequest}
-              onSummaryRequestClosed={() => setSummaryRequest(null)}
+              onSummaryRequestClosed={closeSummaryRequest}
             />
           )}
           {tab.key === "standing-orders" && <StandingOrdersTab standingOrders={data.standingOrders} />}
