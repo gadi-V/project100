@@ -79,7 +79,7 @@ export default function AboutSection() {
   return (
     <section id="about" aria-labelledby="about-heading" dir="rtl" className="scroll-mt-20">
       <div className="bg-white py-16">
-        <div className="mx-auto max-w-5xl px-6">
+        <div className="mx-auto max-w-7xl px-6 lg:px-10">
           <BlockHeading id="about-heading">מי אנחנו?</BlockHeading>
           <div className="mt-10 grid grid-cols-1 gap-x-16 gap-y-12 md:grid-cols-2">
             {ABOUT_ENTRIES.map((entry) => (
@@ -90,7 +90,7 @@ export default function AboutSection() {
       </div>
 
       <div className="border-t border-slate-200/60 bg-[#f8f9fa] py-16">
-        <div className="mx-auto max-w-5xl px-6">
+        <div className="mx-auto max-w-7xl px-6 lg:px-10">
           <BlockHeading id="method-heading">השיעורים והשיטה שלנו</BlockHeading>
           <div className="mt-10 grid grid-cols-1 gap-x-16 gap-y-10 md:grid-cols-2 lg:grid-cols-3">
             {METHOD_ENTRIES.map((entry) => (

@@ -51,7 +51,7 @@ export default function HomePage() {
     <div className="min-h-screen text-[#1d1d1f] font-sans antialiased" dir="rtl">
       
       {/* 1. חלק הגיבור (Hero Section) - כותרת עבה וממוקדת פלטפורמה */}
-      <section id="hero" className="max-w-5xl mx-auto px-6 pt-24 pb-16 grid grid-cols-1 md:grid-cols-12 gap-12 items-center">
+      <section id="hero" className="max-w-7xl mx-auto px-6 lg:px-10 pt-24 pb-16 grid grid-cols-1 md:grid-cols-12 gap-12 items-center">
         <div className="md:col-span-7 space-y-6 text-right">
           <span className="text-sm font-black tracking-widest text-[#0071e3] uppercase block">הסוף לחיפוש מורים</span>
           <h1 dir="ltr" className="text-4xl sm:text-6xl font-black text-[#1d1d1f] tracking-tight leading-none text-right">
@@ -87,7 +87,7 @@ export default function HomePage() {
       {/* 2. גריד היתרונות הטכנולוגיים (Platform Capabilities Grid) */}
       {/* 2. גריד היתרונות הטכנולוגיים במבנה Bento של Apple */}
       <section id="challenge" className="py-24 border-t border-b border-[#e5e5e7]/70">
-        <div className="max-w-5xl mx-auto px-6 space-y-16">
+        <div className="max-w-7xl mx-auto px-6 lg:px-10 space-y-16">
           
           <div className="text-right space-y-3">
             <span className="text-xs font-black tracking-widest text-[#6e6e73] uppercase block">חוויית משתמש מבוקרת</span>
@@ -173,7 +173,7 @@ export default function HomePage() {
       </section>
 
       {/* 3. שלושת מוקדי המומחיות + חשיפת הכרטיסיות האינטראקטיביות (Flip Cards) */}
-      <section id="method" className="max-w-5xl mx-auto px-6 py-24 space-y-16">
+      <section id="method" className="max-w-7xl mx-auto px-6 lg:px-10 py-24 space-y-16">
         <div className="text-right space-y-3">
           <span className="text-xs font-bold tracking-widest text-[#6e6e73] uppercase block">נבחרת המרצים</span>
           <h2 className="text-4xl font-black text-[#1d1d1f] tracking-tight">מורים בעלי תוצאות מוכחות בשטח</h2>
@@ -188,7 +188,7 @@ export default function HomePage() {
       </section>
 
       {/* 3b. מחירון / כרטיסיות — scroll target for nav + ambient violet/gold */}
-      <section id="pricing" className="max-w-5xl mx-auto px-6 py-24 min-h-[70vh] flex flex-col justify-center space-y-6">
+      <section id="pricing" className="max-w-7xl mx-auto px-6 lg:px-10 py-24 min-h-[70vh] flex flex-col justify-center space-y-6">
         <div className="text-center space-y-3">
           <span className="text-xs font-black tracking-widest text-[#6e6e73] uppercase block">מחירון שקוף</span>
           <h2 className="text-3xl sm:text-4xl font-black text-[#1d1d1f] tracking-tight">כרטיסיית מפגשים. בלי אותיות קטנות.</h2>

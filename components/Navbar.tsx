@@ -168,7 +168,7 @@ export default function Navbar() {
       }`}
       dir="rtl"
     >
-      <div className={`max-w-5xl mx-auto px-6 flex items-center justify-between transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+      <div className={`w-full px-4 sm:px-6 lg:px-10 flex items-center justify-between gap-4 transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${
         scrolled ? "py-2.5" : "py-4"
       }`}>
         {/* Right cluster: logo + Group A scroll anchors */}

@@ -176,7 +176,7 @@ export default function BenefitsBar({ className = "" }: BenefitsBarProps) {
       dir="rtl"
       className={`bg-transparent ${className}`}
     >
-      <ul className="mx-auto grid max-w-6xl grid-cols-2 items-start gap-x-4 gap-y-8 px-4 py-8 sm:grid-cols-3 lg:grid-cols-5 lg:gap-6 lg:px-6 lg:py-10">
+      <ul className="mx-auto grid max-w-7xl grid-cols-2 items-start gap-x-4 gap-y-8 px-4 py-8 sm:grid-cols-3 lg:grid-cols-5 lg:gap-6 lg:px-10 lg:py-10">
         {BENEFITS.map(({ id, Icon, title, description }) => (
           <li
             key={id}
