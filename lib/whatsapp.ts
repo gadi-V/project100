@@ -758,6 +758,46 @@ export async function sendQuadGroupCommunicationSummary(
   }
 }
 
+export type PedagogicDecisionMessageInput = {
+  /** "חד שבועי" / "דו שבועי" */
+  subscriptionLabel: string;
+  teacherName: string;
+  /** e.g. "יום שני 17:00, יום חמישי 18:00" */
+  scheduleLabel: string;
+};
+
+/** Official learning-plan announcement posted to the quad group after the pedagogic decision. */
+export function buildPedagogicDecisionMessage(input: PedagogicDecisionMessageInput): string {
+  return (
+    `שלום לכולם, כאן המנהל הפדגוגי של ${SUMMARY_BRAND} 🎓\n` +
+    `לאחר מעבר על שיעור המיפוי והשאלונים, נקבעה תוכנית הלמידה האישית:\n` +
+    `📌 *מסלול:* ${input.subscriptionLabel.trim()}\n` +
+    `👨‍🏫 *מורה קבוע:* ${input.teacherName.trim()}\n` +
+    `⏰ *מועדים קבועים:* ${input.scheduleLabel.trim()}\n\n` +
+    `לוח השיעורים שובץ במערכת ופתוח לצפייה בפורטל. שיהיה המון בהצלחה! 🚀`
+  );
+}
+
+/** Posts the learning-plan announcement into the student's quad group (`…@g.us`). Never throws. */
+export async function sendQuadGroupPedagogicDecision(
+  groupChatId: string,
+  input: PedagogicDecisionMessageInput
+): Promise<QuadWelcomeStatus> {
+  if (!groupChatId.trim().endsWith("@g.us")) {
+    return { sent: false, error: "Not a WhatsApp group chat id (…@g.us)" };
+  }
+  try {
+    const sent = await sendWhatsAppMessage(groupChatId.trim(), buildPedagogicDecisionMessage(input), {
+      timeoutMs: QUAD_GATEWAY_TIMEOUT_MS,
+    });
+    return sent.mocked
+      ? { sent: false, error: "WhatsApp gateway is not configured" }
+      : { sent: true, messageId: sent.messageId };
+  } catch (error) {
+    return { sent: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 export type QuadLessonSummaryInput = {
   groupUrl?: string | null;
   groupChatId?: string | null;

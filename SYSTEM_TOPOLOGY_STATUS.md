@@ -49,6 +49,8 @@
 - `PATCH /api/portal/students/[id]/profile` — status checkboxes + profile fields, REPRESENTATIVE / ADMIN / MANAGER (AuditLog `STUDENT_PROFILE_UPDATED`) (Sprint 10b).
 - `POST /api/portal/students/[id]/attendance` — present / absent on a started lesson (AuditLog `LESSON_ATTENDANCE_MARKED`) (Sprint 10b).
 - `GET/POST /api/portal/students/[id]/meetings` — meetings + approved teachers; schedule a mapping / regular lesson with an assigned teacher and open (or update) the quad WhatsApp group. REPRESENTATIVE / ADMIN / MANAGER only (AuditLog `MAPPING_LESSON_SCHEDULED`) (Sprint 12).
+- `GET/POST /api/portal/students/[id]/pedagogic-decision` — 360° overview (intake call, parent / student questionnaires, mapping summary, active teachers) + the pedagogic manager's post-mapping decision: summary log, monthly recurring-lesson batch, active "תלמיד" status, learning plan posted to the quad WhatsApp group. MANAGER / ADMIN / REPRESENTATIVE only (AuditLog `PEDAGOGIC_DECISION_RECORDED`) (Sprint 14).
+- `POST /api/portal/students/[id]/direct-package` — direct hours package for independent students (no mapping lesson): `lessonCredits` increment + active "תלמיד" status. MANAGER / ADMIN / REPRESENTATIVE only (AuditLog `DIRECT_PACKAGE_ASSIGNED`) (Sprint 14).
 
 ### Diagnostics & packages
 - `POST /api/diagnostic/teaser` — 5-step funnel (also triggers WhatsApp Closer).
@@ -193,6 +195,48 @@ Fresh databases apply all migrations normally with `npx prisma migrate deploy`.
 | 11d | All-green hardening: zero build warnings (`middleware.ts` → `proxy.ts`), E2E scripts synced with the post-mapping-lesson WhatsApp group, `GET /api/health` live DB probe, Neon fully stable | ✅ Completed |
 | 12 | Operational loop closed: mapping-lesson scheduler in the student meetings tab (teacher assignment + date), `POST /api/portal/students/[id]/meetings`, automatic quad WhatsApp group trigger (student + teacher + parent + admin) with welcome message, no duplicate groups | ✅ Completed |
 | 13 | Daily lesson room launched from the meetings tab ("היכנס לשיעור" → `/lessons/[lessonId]`), lesson and mapping summaries saved on the communication tab auto-dispatched to the quad WhatsApp group (`whatsappGroupId`) | ✅ Completed |
+| 14 | 360° pedagogic decision (intake call + parent / student questionnaires + mapping summary), subscription generator (weekly / twice weekly, extra private lessons, fixed days and hours, monthly lesson batch, quad WhatsApp announcement) and direct hours-package track for independent students | ✅ Completed |
+
+### Pedagogic decision 360° and direct package track (Sprint 14)
+
+- **Courses tab** (`CoursesTab.tsx`, now a client component): for REPRESENTATIVE / ADMIN / MANAGER two actions at the
+  top: "הכרעה פדגוגית ומנוי שנתי" (`PedagogicDecisionModal`) and "שיוך חבילת שעות ישירה" (`DirectPackageModal`). Two new
+  tables above the enrollments table: "מנויים שבועיים קבועים" (subject, track, teacher, fixed slots, start date, extra
+  private lessons) and "חבילות שעות" (package, subject, lessons, preferred teacher, date) with the `lessonCredits`
+  balance (billing viewers only). After saving: toast + `router.refresh()`.
+- **`StudentPortalData.plans`** (`EnrollmentPlans`) comes from `loadEnrollmentPlans`: communication-log rows whose
+  `structuredData.source` is `PEDAGOGIC_DECISION` (subscriptions) or `DIRECT_PACKAGE` (packages).
+- **`PedagogicDecisionModal`:** loads `GET …/pedagogic-decision` and shows four 360° cards: intake call (representative,
+  grade, level, notes), parent questionnaire (yearly goal, target / average score, motivation, difficulties), student
+  questionnaire (last score, aspirations, main difficulty, diagnostic gaps; `IntakeAssessment` + latest
+  `DiagnosticQuiz`) and the mapping teacher's `MAPPING_SUMMARY` (4-topic ranking, class / home learning, motivation,
+  personal connection, format fit, recommendation). The form holds the "סיכום שיחה לאחר מיפוי" fields (background,
+  personal / learning notes, main goal, parent type, subscription, extra private lessons 0/1/2, professional manager
+  yes/no, approved teacher, subject, 1 or 2 weekday+time slots, start date). Defaults come from the mapping lesson
+  teacher / subject and the mapping recommendation.
+- **`POST …/pedagogic-decision`** (`requireAuth(ENROLLMENT_DECISION_ROLES)`, others `403`): parsed by
+  `parsePedagogicDecisionInput` (slot count must match the track, two slots on different weekdays, start date from
+  today up to 180 days, first lesson in the future, teacher must be an approved TEACHER). One transaction:
+  anti-collision check of every generated slot for student and teacher (60-minute window, `409` names the conflicting
+  time), `StudentCommunicationLog` `type: "POST_MAPPING_CALL"` (label "סיכום שיחה לאחר מיפוי", `authorRole`
+  `PEDAGOGIC_MANAGER` for MANAGER) whose `content` re-parses as the template and whose `structuredData` holds the
+  template fields + `decision`, `lesson.createMany` of the next 4 weeks (4 / 8 lessons, `SCHEDULED`, `REGULAR`, 50 min,
+  DST-aware Israel time, `whatsappGroupId`), 1–2 extra private lessons as `PENDING_SCHEDULE` (placeholder
+  `scheduledAt` = first lesson), and `markStudentActive` (adds `STUDENT`, removes `MAPPING_FAILED` / `CALL_BACK_PARENT`).
+  Then `sendQuadGroupPedagogicDecision` posts the official learning plan (track, fixed teacher, fixed slots) to the
+  group. No group or any gateway failure → `201` with `whatsappDispatched: false`; the decision is never rolled back.
+- **`PENDING_SCHEDULE`** ("ממתין לשיבוץ"): not on the weekly board, not in anti-collision or reminders (all filter
+  SCHEDULED / IN_PROGRESS), excluded from recurring slots, attendance marking and the directory's last-lesson date.
+- **`POST …/direct-package`:** `DIRECT_PACKAGES` = חבילת 5 שיעורים (5) / חבילת 10 שיעורים (10) / חבילת מרתון בחינה (8);
+  subject required, preferred teacher optional (approved TEACHER or `404`). One transaction: `lessonCredits`
+  increment, `GENERAL` log with `structuredData.source = "DIRECT_PACKAGE"`, `markStudentActive`. No mapping lesson is
+  checked. Writes no `Payment` / `BillingLedger` row (billing stays on the payment flow).
+- **Tests:** `tests/pedagogic-decision-and-packages.test.ts` (34 tests) — summary log + 4 / 8 lessons with exact UTC
+  times (incl. the 25.10 DST switch) + PENDING_SCHEDULE extras + exact WhatsApp text, status activation, template
+  round-trip, 409 collision, validation `400`s, 360° overview composition, direct package credits / status / audit
+  without mapping, plans split, TEACHER / STUDENT `403` and anonymous `401` on all three handlers, 503 / network /
+  thrown / not-configured WhatsApp keeps the decision.
+- **Verified:** `npm run build` exit `0`; `npm test` 21 files / 429 tests exit `0`; `tsc --noEmit` 0.
 
 ### Lesson room entry and summary dispatch to the quad group (Sprint 13)
 

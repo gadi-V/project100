@@ -65,7 +65,14 @@ export default function StudentPortalTabs({ data, initialTab }: StudentPortalTab
           {tab.key === "profile" && (
             <ProfileTab studentId={data.header.id} profile={data.profile} viewer={data.viewer} />
           )}
-          {tab.key === "courses" && <CoursesTab courses={data.courses} />}
+          {tab.key === "courses" && (
+            <CoursesTab
+              studentId={data.header.id}
+              courses={data.courses}
+              plans={data.plans}
+              canDecide={data.viewer.canEditProfile}
+            />
+          )}
           {tab.key === "meetings" && (
             <MeetingsTab
               studentId={data.header.id}

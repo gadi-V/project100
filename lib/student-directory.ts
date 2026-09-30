@@ -19,7 +19,8 @@ import {
 
 type Viewer = { id: string; role: string };
 
-const CANCELLED_STATUSES = ["CANCELLED", "CANCELLED_LATE"];
+/** Lessons that never took place: cancelled, or extra private lessons still waiting for a slot. */
+const CANCELLED_STATUSES = ["CANCELLED", "CANCELLED_LATE", "PENDING_SCHEDULE"];
 
 /** Digit spellings of a phone term, so "0547654321" also finds "+972547654321" and vice versa. */
 function phoneVariants(token: string): string[] {

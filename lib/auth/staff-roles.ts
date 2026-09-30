@@ -11,6 +11,9 @@ export const STAFF_PORTAL_ROLES = [
 /** Roles allowed to record and read mapping-call intake assessments. */
 export const INTAKE_RECORDER_ROLES: Role[] = ["REPRESENTATIVE", "ADMIN", "MANAGER"];
 
+/** Pedagogic decision (subscription) and direct package assignment. MANAGER is the pedagogic manager. */
+export const ENROLLMENT_DECISION_ROLES: Role[] = ["MANAGER", "ADMIN", "REPRESENTATIVE"];
+
 export function isStaffPortalRole(role: string | null | undefined): boolean {
   return (STAFF_PORTAL_ROLES as readonly string[]).includes(role ?? "");
 }

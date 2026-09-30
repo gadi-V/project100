@@ -1,4 +1,5 @@
 import type { CommunicationAuthorRole, CommunicationType } from "./communication-templates";
+import type { EnrollmentPlans } from "./pedagogic-decision";
 
 /** Client-safe types and parsers for the staff student screen (`/portal/students/[id]`). */
 
@@ -33,6 +34,16 @@ export type StudentStatusCode = (typeof STUDENT_STATUS_OPTIONS)[number]["code"];
 
 const STATUS_CODES = new Set<string>(STUDENT_STATUS_OPTIONS.map((option) => option.code));
 
+/** Waiting statuses cleared once the student starts a subscription or a package. */
+const WAITING_STATUS_CODES = new Set<string>(["MAPPING_FAILED", "CALL_BACK_PARENT"]);
+
+/** Adds the active "תלמיד" status and drops waiting statuses. Unknown codes are dropped; order follows the options list. */
+export function activateStudentStatuses(current: readonly string[]): StudentStatusCode[] {
+  const next = new Set(current.filter((code) => STATUS_CODES.has(code) && !WAITING_STATUS_CODES.has(code)));
+  next.add("STUDENT");
+  return STUDENT_STATUS_OPTIONS.map((o) => o.code).filter((code) => next.has(code));
+}
+
 export type AttendanceStatus = "PRESENT" | "ABSENT";
 export type EnrollmentType = "ONE_TIME" | "SUBSCRIPTION";
 
@@ -47,6 +58,7 @@ export const LESSON_STATUS_LABELS: Record<string, string> = {
   COMPLETED: "הסתיים",
   CANCELLED: "בוטל",
   CANCELLED_LATE: "בוטל ברגע האחרון",
+  PENDING_SCHEDULE: "ממתין לשיבוץ",
 };
 
 export type StudentPortalViewer = {
@@ -232,6 +244,8 @@ export type StudentPortalData = {
   viewer: StudentPortalViewer;
   profile: ProfileTabData;
   courses: CourseRow[];
+  /** Weekly subscriptions decided by the pedagogic manager and direct hour packages. */
+  plans: EnrollmentPlans;
   meetings: MeetingRow[];
   communication: CommunicationEntry[];
   /** The student has a quad WhatsApp group (`User.whatsappGroupId`) that summaries can be posted to. */
