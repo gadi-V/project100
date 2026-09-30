@@ -254,7 +254,7 @@ function PricingPageInner() {
           )}
         </div>
 
-        <BenefitsBar className="mb-12 overflow-hidden rounded-2xl border-x" />
+        <BenefitsBar className="mb-12" />
 
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-8 items-stretch mb-28 pt-4 overflow-visible">
           {PACKAGES.map((pkg) => {

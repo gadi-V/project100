@@ -174,23 +174,23 @@ export default function BenefitsBar({ className = "" }: BenefitsBarProps) {
     <section
       aria-label="היתרונות שלנו"
       dir="rtl"
-      className={`border-y border-slate-100 bg-slate-50/70 ${className}`}
+      className={`bg-transparent ${className}`}
     >
-      <ul
-        className="mx-auto flex max-w-6xl snap-x snap-mandatory gap-3 overflow-x-auto scroll-ps-4 px-4 py-6 [scrollbar-width:none] md:grid md:grid-cols-5 md:gap-4 md:overflow-visible md:px-6 md:py-8 [&::-webkit-scrollbar]:hidden"
-      >
+      <ul className="mx-auto grid max-w-6xl grid-cols-2 items-start gap-x-4 gap-y-8 px-4 py-8 sm:grid-cols-3 lg:grid-cols-5 lg:gap-6 lg:px-6 lg:py-10">
         {BENEFITS.map(({ id, Icon, title, description }) => (
           <li
             key={id}
-            className="flex w-[70%] shrink-0 snap-start items-stretch gap-2 rounded-2xl border border-slate-100 bg-white/80 ps-4 pe-3 py-4 sm:w-[45%] md:w-auto md:border-0 md:bg-transparent md:p-0"
+            className="group flex min-w-0 flex-col items-center text-center last:col-span-2 sm:last:col-span-1"
           >
-            <span className="flex aspect-square min-h-10 shrink-0 items-center justify-center rounded-xl bg-white text-slate-700 ring-1 ring-slate-200/80">
-              <Icon aria-hidden="true" className="h-[80%] w-[80%]" />
+            <span className="mb-3 flex h-14 w-14 shrink-0 items-center justify-center transition-transform duration-200 ease-out group-hover:-translate-y-0.5 motion-reduce:transition-none motion-reduce:group-hover:translate-y-0">
+              <Icon aria-hidden="true" className="h-12 w-12" />
             </span>
-            <div className="min-w-0 space-y-1 text-start">
-              <h3 className="text-sm font-semibold leading-snug text-slate-900 lg:whitespace-nowrap lg:tracking-tight">{title}</h3>
-              <p className="text-xs leading-relaxed text-slate-500">{description}</p>
-            </div>
+            <h3 className="text-balance text-[0.92rem] font-semibold leading-snug text-slate-900 sm:text-base">
+              {title}
+            </h3>
+            <p className="mt-1 max-w-[18ch] text-balance text-xs leading-relaxed text-slate-500 sm:text-sm">
+              {description}
+            </p>
           </li>
         ))}
       </ul>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 
 type AmbientSection = "hero" | "challenge" | "pricing" | "faq";
 
@@ -37,36 +37,61 @@ type OrbClasses = {
   orb1: string;
   orb2: string;
   orb3: string;
+  orb4: string;
 };
 
 /**
  * Per-section ambient moods — full Tailwind class strings so JIT can see them.
- * Orb 1 = primary wash, Orb 2 = secondary accent, Orb 3 = depth fill.
+ * Orb 1 = primary wash, Orb 2 = secondary accent, Orb 3 = depth fill,
+ * Orb 4 = third hue that keeps the mix lively between sections.
  */
 const PALETTES: Record<AmbientSection, OrbClasses> = {
   hero: {
-    orb1: "bg-gradient-to-br from-sky-300/35 via-sky-200/20 to-transparent",
-    orb2: "bg-gradient-to-tr from-amber-200/30 via-amber-100/20 to-transparent",
-    orb3: "bg-gradient-to-tl from-sky-200/25 via-amber-100/15 to-transparent",
+    orb1: "bg-gradient-to-br from-sky-300/40 via-sky-200/20 to-transparent",
+    orb2: "bg-gradient-to-tr from-amber-200/35 via-orange-100/20 to-transparent",
+    orb3: "bg-gradient-to-tl from-fuchsia-200/30 via-pink-100/15 to-transparent",
+    orb4: "bg-gradient-to-bl from-cyan-200/30 via-sky-100/15 to-transparent",
   },
   challenge: {
-    orb1: "bg-gradient-to-br from-indigo-400/30 via-indigo-300/20 to-transparent",
-    orb2: "bg-gradient-to-tr from-emerald-300/25 via-emerald-200/15 to-transparent",
-    orb3: "bg-gradient-to-tl from-indigo-300/20 via-emerald-200/15 to-transparent",
+    orb1: "bg-gradient-to-br from-indigo-400/35 via-indigo-300/20 to-transparent",
+    orb2: "bg-gradient-to-tr from-emerald-300/30 via-emerald-200/15 to-transparent",
+    orb3: "bg-gradient-to-tl from-cyan-300/25 via-sky-200/15 to-transparent",
+    orb4: "bg-gradient-to-bl from-violet-300/25 via-purple-200/15 to-transparent",
   },
   pricing: {
-    orb1: "bg-gradient-to-br from-violet-400/30 via-violet-300/20 to-transparent",
+    orb1: "bg-gradient-to-br from-violet-400/35 via-violet-300/20 to-transparent",
     orb2: "bg-gradient-to-tr from-amber-300/35 via-amber-200/20 to-transparent",
-    orb3: "bg-gradient-to-tl from-violet-300/25 via-amber-200/20 to-transparent",
+    orb3: "bg-gradient-to-tl from-rose-300/30 via-pink-200/15 to-transparent",
+    orb4: "bg-gradient-to-bl from-sky-300/25 via-indigo-200/15 to-transparent",
   },
   faq: {
-    orb1: "bg-gradient-to-br from-teal-300/30 via-teal-200/20 to-transparent",
-    orb2: "bg-gradient-to-tr from-rose-300/25 via-rose-200/15 to-transparent",
-    orb3: "bg-gradient-to-tl from-teal-200/25 via-rose-200/15 to-transparent",
+    orb1: "bg-gradient-to-br from-teal-300/35 via-teal-200/20 to-transparent",
+    orb2: "bg-gradient-to-tr from-rose-300/30 via-rose-200/15 to-transparent",
+    orb3: "bg-gradient-to-tl from-amber-200/30 via-yellow-100/15 to-transparent",
+    orb4: "bg-gradient-to-bl from-indigo-300/25 via-sky-200/15 to-transparent",
   },
 };
 
 const ORB_TRANSITION = "transition-all duration-1000 ease-out";
+
+/**
+ * Scroll-linked drift (px at full page scroll). Orbs move in different
+ * directions so their colors overlap differently along the page.
+ */
+const ORB_DRIFT = {
+  orb1: "translate3d(calc(var(--ambient-p) * -180px), calc(var(--ambient-p) * 260px), 0)",
+  orb2: "translate3d(calc(var(--ambient-p) * 220px), calc(var(--ambient-p) * -160px), 0)",
+  orb3: "translate3d(calc(var(--ambient-p) * -140px), calc(var(--ambient-p) * -240px), 0)",
+  orb4: "translate3d(calc(var(--ambient-p) * 200px), calc(var(--ambient-p) * 180px), 0)",
+} as const;
+
+function scrollProgress(): number {
+  const max = Math.max(
+    document.documentElement.scrollHeight - window.innerHeight,
+    1
+  );
+  return Math.min(Math.max(window.scrollY / max, 0), 1);
+}
 
 function resolveActiveSection(): AmbientSection {
   const viewportH = window.innerHeight;
@@ -124,14 +149,20 @@ function resolveActiveSection(): AmbientSection {
  */
 export default function AmbientCanvas() {
   const [activeSection, setActiveSection] = useState<AmbientSection>("hero");
+  const canvasRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let frame = 0;
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
     const update = () => {
       frame = 0;
       const next = resolveActiveSection();
       setActiveSection((prev) => (prev === next ? prev : next));
+      canvasRef.current?.style.setProperty(
+        "--ambient-p",
+        reduceMotion.matches ? "0" : scrollProgress().toFixed(4)
+      );
     };
 
     const onScrollOrResize = () => {
@@ -162,7 +193,9 @@ export default function AmbientCanvas() {
 
   return (
     <div
+      ref={canvasRef}
       className="pointer-events-none fixed inset-0 overflow-hidden z-0"
+      style={{ "--ambient-p": 0 } as CSSProperties}
       aria-hidden="true"
       data-active-section={activeSection}
     >
@@ -181,14 +214,22 @@ export default function AmbientCanvas() {
             {/* Orb 1 — Top-right */}
             <div
               className={`absolute w-[600px] h-[600px] rounded-full blur-[90px] -top-20 -right-20 ${ORB_TRANSITION} ${palette.orb1}`}
+              style={{ transform: ORB_DRIFT.orb1 }}
             />
             {/* Orb 2 — Mid-left */}
             <div
               className={`absolute w-[700px] h-[700px] rounded-full blur-[110px] top-[30%] -left-32 ${ORB_TRANSITION} ${palette.orb2}`}
+              style={{ transform: ORB_DRIFT.orb2 }}
             />
             {/* Orb 3 — Bottom-right */}
             <div
               className={`absolute w-[650px] h-[650px] rounded-full blur-[100px] bottom-10 right-10 ${ORB_TRANSITION} ${palette.orb3}`}
+              style={{ transform: ORB_DRIFT.orb3 }}
+            />
+            {/* Orb 4 — Top-left */}
+            <div
+              className={`absolute w-[520px] h-[520px] rounded-full blur-[100px] -top-24 left-[15%] ${ORB_TRANSITION} ${palette.orb4}`}
+              style={{ transform: ORB_DRIFT.orb4 }}
             />
           </div>
         );
