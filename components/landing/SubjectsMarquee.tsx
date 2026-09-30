@@ -1,3 +1,6 @@
+"use client";
+
+import { useEffect, useRef } from "react";
 import { BookOpen, Landmark, type LucideIcon } from "lucide-react";
 import styles from "./SubjectsMarquee.module.css";
 
@@ -103,6 +106,87 @@ function Chips({ row }: { row: MarqueeRow }) {
   );
 }
 
+/**
+ * Drives the row with requestAnimationFrame instead of a CSS animation:
+ * iOS Safari hands CSS transform animations to Core Animation and drops them
+ * inside backdrop-filter / mask-image ancestors (.liquid-glass), freezing the rows.
+ */
+function MarqueeTrack({ row }: { row: MarqueeRow }) {
+  const trackRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const track = trackRef.current;
+    const viewport = track?.parentElement;
+    if (!track || !viewport) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+    const direction = row.reverse ? -1 : 1;
+    let loopWidth = track.scrollWidth / 2;
+    let offset = 0;
+    let last = 0;
+    let frame = 0;
+    let hovered = false;
+
+    const step = (now: number) => {
+      frame = window.requestAnimationFrame(step);
+      const dt = last ? Math.min(now - last, 100) : 0;
+      last = now;
+      if (hovered || loopWidth <= 0) return;
+      const delta = (loopWidth / (row.durationSec * 1000)) * dt * direction;
+      offset = (((offset + delta) % loopWidth) + loopWidth) % loopWidth;
+      track.style.transform = `translate3d(${offset}px, 0, 0)`;
+    };
+
+    const start = () => {
+      if (frame) return;
+      last = 0;
+      frame = window.requestAnimationFrame(step);
+    };
+    const stop = () => {
+      if (!frame) return;
+      window.cancelAnimationFrame(frame);
+      frame = 0;
+    };
+
+    const visibility = new IntersectionObserver(([entry]) => {
+      if (entry?.isIntersecting) start();
+      else stop();
+    });
+    visibility.observe(viewport);
+
+    const resize = new ResizeObserver(() => {
+      loopWidth = track.scrollWidth / 2;
+    });
+    resize.observe(track);
+
+    const onEnter = (event: PointerEvent) => {
+      if (event.pointerType === "mouse") hovered = true;
+    };
+    const onLeave = () => {
+      hovered = false;
+    };
+    viewport.addEventListener("pointerenter", onEnter);
+    viewport.addEventListener("pointerleave", onLeave);
+
+    return () => {
+      stop();
+      visibility.disconnect();
+      resize.disconnect();
+      viewport.removeEventListener("pointerenter", onEnter);
+      viewport.removeEventListener("pointerleave", onLeave);
+    };
+  }, [row.durationSec, row.reverse]);
+
+  return (
+    <div ref={trackRef} className="flex w-max">
+      <Chips row={row} />
+      <div aria-hidden="true" className="flex shrink-0">
+        <Chips row={row} />
+      </div>
+    </div>
+  );
+}
+
 type SubjectsMarqueeProps = {
   className?: string;
 };
@@ -111,19 +195,11 @@ export default function SubjectsMarquee({ className = "" }: SubjectsMarqueeProps
   return (
     <div
       dir="rtl"
-      className={`${styles.root} space-y-2.5 overflow-hidden [mask-image:linear-gradient(to_right,transparent,black_10%,black_90%,transparent)] ${className}`}
+      className={`space-y-2.5 overflow-hidden [mask-image:linear-gradient(to_right,transparent,black_10%,black_90%,transparent)] ${className}`}
     >
       {ROWS.map((row) => (
         <div key={row.id} role="group" aria-label={row.label} className={`${styles.row} overflow-hidden`}>
-          <div
-            className={`${styles.track} ${row.reverse ? styles.reverse : ""} flex w-max`}
-            style={{ animationDuration: `${row.durationSec}s` }}
-          >
-            <Chips row={row} />
-            <div aria-hidden="true" className="flex shrink-0">
-              <Chips row={row} />
-            </div>
-          </div>
+          <MarqueeTrack row={row} />
         </div>
       ))}
     </div>

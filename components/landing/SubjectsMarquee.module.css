@@ -1,38 +1,6 @@
-/* Each track holds two identical copies, so shifting by 50% loops seamlessly. */
-@keyframes slide {
-  from {
-    transform: translate3d(0, 0, 0);
-  }
-  to {
-    transform: translate3d(50%, 0, 0);
-  }
-}
-
-/* Own compositing layer: iOS Safari skips repaints of animated children inside
-   backdrop-filter surfaces (.liquid-glass) without it. */
-.track {
-  animation: slide 40s linear infinite;
-  will-change: transform;
-  backface-visibility: hidden;
-}
-
-.reverse {
-  animation-direction: reverse;
-}
-
-/* Touch devices keep :hover "stuck" after a tap, which froze the rows. */
-@media (hover: hover) and (pointer: fine) {
-  .root:hover .track {
-    animation-play-state: paused;
-  }
-}
-
-/* Reduced motion: no autoplay, rows become swipeable so every chip stays reachable. */
+/* Motion is driven from JS (MarqueeTrack). Under reduced motion it never
+   starts, so rows become swipeable to keep every chip reachable. */
 @media (prefers-reduced-motion: reduce) {
-  .track {
-    animation: none;
-  }
-
   .row {
     overflow-x: auto;
     scrollbar-width: none;
