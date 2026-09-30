@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import { Menu, X } from "lucide-react";
 import BrandWordmark from "./BrandWordmark";
 
 type NavItem = {
@@ -54,6 +55,20 @@ export default function Navbar() {
   const pathname = usePathname() ?? "";
   const [activeSection, setActiveSection] = useState<string | null>(null);
   const [scrolled, setScrolled] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  useEffect(() => {
+    setMenuOpen(false);
+  }, [pathname]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMenuOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [menuOpen]);
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 20);
@@ -172,7 +187,17 @@ export default function Navbar() {
         scrolled ? "py-2.5" : "py-4"
       }`}>
         {/* Right cluster: logo + Group A scroll anchors */}
-        <div className="flex items-center gap-8">
+        <div className="flex items-center gap-2 md:gap-8">
+          <button
+            type="button"
+            onClick={() => setMenuOpen((open) => !open)}
+            aria-expanded={menuOpen}
+            aria-controls="mobile-nav"
+            aria-label={menuOpen ? "סגירת תפריט" : "פתיחת תפריט"}
+            className="md:hidden -ms-1 flex h-9 w-9 items-center justify-center rounded-full text-neutral-800 hover:bg-white/60 transition-colors"
+          >
+            {menuOpen ? <X size={20} aria-hidden="true" /> : <Menu size={20} aria-hidden="true" />}
+          </button>
           <Link href="/" className="text-lg" aria-label="PROJECT100 – דף הבית">
             <BrandWordmark />
           </Link>
@@ -199,6 +224,48 @@ export default function Navbar() {
           </Link>
         </div>
       </div>
+
+      {menuOpen && (
+        <nav
+          id="mobile-nav"
+          aria-label="תפריט ראשי"
+          className="md:hidden border-t border-white/60 bg-white/85 backdrop-blur-2xl px-4 pb-4 pt-2 shadow-sm"
+        >
+          <ul className="flex flex-col">
+            {[...SCROLL_NAV_ITEMS, DIAGNOSTIC_ITEM].map((item) => {
+              const active =
+                item === DIAGNOSTIC_ITEM ? isDiagnosticActive : isScrollItemActive(item);
+              const LinkTag = item.href.startsWith("/#") ? "a" : Link;
+              return (
+                <li key={item.label}>
+                  <LinkTag
+                    href={item.href}
+                    onClick={() => setMenuOpen(false)}
+                    aria-current={active ? "page" : undefined}
+                    className={`block rounded-xl px-3 py-3 text-sm font-semibold transition-colors ${
+                      active ? "bg-neutral-900 text-white" : "text-neutral-800 hover:bg-white/80"
+                    }`}
+                  >
+                    {item.label}
+                  </LinkTag>
+                </li>
+              );
+            })}
+            <li>
+              <Link
+                href="/login"
+                onClick={() => setMenuOpen(false)}
+                aria-current={isPersonalAreaActive ? "page" : undefined}
+                className={`block rounded-xl px-3 py-3 text-sm font-semibold transition-colors ${
+                  isPersonalAreaActive ? "bg-neutral-900 text-white" : "text-neutral-800 hover:bg-white/80"
+                }`}
+              >
+                אזור אישי
+              </Link>
+            </li>
+          </ul>
+        </nav>
+      )}
     </header>
   );
 }

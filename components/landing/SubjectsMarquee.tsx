@@ -114,7 +114,7 @@ export default function SubjectsMarquee({ className = "" }: SubjectsMarqueeProps
       className={`${styles.root} space-y-2.5 overflow-hidden [mask-image:linear-gradient(to_right,transparent,black_10%,black_90%,transparent)] ${className}`}
     >
       {ROWS.map((row) => (
-        <div key={row.id} role="group" aria-label={row.label} className="overflow-hidden">
+        <div key={row.id} role="group" aria-label={row.label} className={`${styles.row} overflow-hidden`}>
           <div
             className={`${styles.track} ${row.reverse ? styles.reverse : ""} flex w-max`}
             style={{ animationDuration: `${row.durationSec}s` }}
