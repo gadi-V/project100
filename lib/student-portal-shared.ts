@@ -1,5 +1,6 @@
 import type { CommunicationAuthorRole, CommunicationType } from "./communication-templates";
 import type { EnrollmentPlans } from "./pedagogic-decision";
+import type { RescheduleBlock } from "./lesson-lifecycle";
 
 /** Client-safe types and parsers for the staff student screen (`/portal/students/[id]`). */
 
@@ -136,6 +137,14 @@ export type MeetingRow = {
   canMarkAttendance: boolean;
   /** The lesson is still open and the viewer may join the video room at `/lessons/[id]`. */
   canEnterRoom: boolean;
+  teacherId: string;
+  durationMinutes: number;
+  /** Staff lifecycle actions (REPRESENTATIVE / ADMIN / MANAGER only; always false for other viewers). */
+  canSchedulePending: boolean;
+  canReschedule: boolean;
+  /** Why a staff viewer may not reschedule this scheduled lesson (null when allowed or not applicable). */
+  rescheduleBlock: RescheduleBlock | null;
+  canCancel: boolean;
 };
 
 const LESSON_ROOM_OPEN_STATUSES = new Set(["SCHEDULED", "IN_PROGRESS"]);

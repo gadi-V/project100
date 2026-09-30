@@ -14,15 +14,35 @@ import {
   type MeetingRow,
   type ScheduleMeetingResult,
 } from "../../../lib/student-portal-shared";
+import {
+  RESCHEDULE_BLOCK_LABELS,
+  type CancelResult,
+  type RescheduleResult,
+  type SchedulePendingResult,
+} from "../../../lib/lesson-lifecycle";
+import { PENDING_SCHEDULE_STATUS } from "../../../lib/pedagogic-decision";
 import { emptyState, frostPanel } from "../../../lib/ui";
 import ScheduleMeetingModal from "./ScheduleMeetingModal";
+import SchedulePendingLessonModal from "./SchedulePendingLessonModal";
+import RescheduleLessonModal from "./RescheduleLessonModal";
+import CancelLessonModal from "./CancelLessonModal";
 
 type MeetingsTabProps = {
   studentId: string;
   meetings: MeetingRow[];
-  /** REPRESENTATIVE / ADMIN / MANAGER may schedule meetings. */
+  /** REPRESENTATIVE / ADMIN / MANAGER may schedule, reschedule and cancel meetings. */
   canSchedule: boolean;
+  /** The student is on the direct package track, so a cancelled lesson may return a credit. */
+  canRestoreCredit: boolean;
 };
+
+type LifecycleModal = { kind: "pending" | "reschedule" | "cancel"; meeting: MeetingRow };
+
+const actionButtonBase = "whitespace-nowrap rounded-full px-3.5 py-1.5 text-xs font-medium transition-colors disabled:opacity-40";
+
+function groupNote(whatsappDispatched: boolean): string {
+  return whatsappDispatched ? " ועדכון נשלח לקבוצת הוואטסאפ" : ". העדכון לא נשלח לקבוצת הוואטסאפ, כדאי לעדכן ידנית";
+}
 
 type AttendanceResponse = {
   success: boolean;
@@ -106,13 +126,19 @@ function bannerFor(result: ScheduleMeetingResult): Banner {
   }
 }
 
-export default function MeetingsTab({ studentId, meetings: initialMeetings, canSchedule }: MeetingsTabProps) {
+export default function MeetingsTab({
+  studentId,
+  meetings: initialMeetings,
+  canSchedule,
+  canRestoreCredit,
+}: MeetingsTabProps) {
   const [meetings, setMeetings] = useState<MeetingRow[]>(initialMeetings);
   const [attendance, setAttendance] = useState<Record<string, AttendanceStatus | null>>(() =>
     attendanceMap(initialMeetings)
   );
   const [savingId, setSavingId] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+  const [lifecycleModal, setLifecycleModal] = useState<LifecycleModal | null>(null);
   const [banner, setBanner] = useState<Banner | null>(null);
 
   const mark = async (lessonId: string, status: AttendanceStatus) => {
@@ -155,6 +181,26 @@ export default function MeetingsTab({ studentId, meetings: initialMeetings, canS
     setBanner(bannerFor(result));
     await refreshMeetings();
   };
+
+  const closeLifecycleModal = useCallback(() => setLifecycleModal(null), []);
+
+  const finishLifecycle = async (text: string, whatsappDispatched: boolean) => {
+    setLifecycleModal(null);
+    setBanner({ tone: whatsappDispatched ? "success" : "warning", text: `${text}${groupNote(whatsappDispatched)}` });
+    await refreshMeetings();
+  };
+
+  const handlePendingScheduled = (result: SchedulePendingResult, whatsappDispatched: boolean) =>
+    finishLifecycle(`השיעור הפרטי שובץ ל-${formatIsraelDateTime(result.scheduledAt)} עם ${result.teacherName}`, whatsappDispatched);
+
+  const handleRescheduled = (result: RescheduleResult, whatsappDispatched: boolean) =>
+    finishLifecycle(`המועד עודכן ל-${formatIsraelDateTime(result.scheduledAt)}`, whatsappDispatched);
+
+  const handleCancelled = (result: CancelResult, whatsappDispatched: boolean) =>
+    finishLifecycle(
+      result.creditRestored ? `השיעור בוטל ושיעור אחד הוחזר ליתרה (${result.lessonCredits})` : "השיעור בוטל",
+      whatsappDispatched
+    );
 
   return (
     <div className="space-y-4">
@@ -199,20 +245,29 @@ export default function MeetingsTab({ studentId, meetings: initialMeetings, canS
                 <th scope="col" className="px-5 py-3 text-start font-medium">מצב</th>
                 <th scope="col" className="px-5 py-3 text-start font-medium">נוכחות</th>
                 <th scope="col" className="px-5 py-3 text-start font-medium">חדר שיעור</th>
+                {canSchedule && <th scope="col" className="px-5 py-3 text-start font-medium">פעולות</th>}
               </tr>
             </thead>
             <tbody>
               {meetings.map((meeting) => {
                 const current = attendance[meeting.id] ?? null;
                 const busy = savingId === meeting.id;
+                const pending = meeting.status === PENDING_SCHEDULE_STATUS;
                 return (
                   <tr key={meeting.id} className="border-b border-neutral-100 last:border-b-0">
                     <td className="px-5 py-4 whitespace-nowrap text-neutral-800">
-                      {formatIsraelDateTime(meeting.scheduledAt)}–{israelTime.format(new Date(meeting.endsAt))}
+                      {pending
+                        ? "טרם נקבע מועד"
+                        : `${formatIsraelDateTime(meeting.scheduledAt)}–${israelTime.format(new Date(meeting.endsAt))}`}
                     </td>
                     <td className="px-5 py-4">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="font-medium text-neutral-900">{meeting.title}</span>
+                        {pending && (
+                          <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-900">
+                            ש.פ - ממתין לשיבוץ
+                          </span>
+                        )}
                         {meeting.lessonType === "MAPPING" && (
                           <span className="inline-flex items-center rounded-full bg-sky-50 px-2.5 py-0.5 text-xs font-medium text-sky-800">
                             {LESSON_TYPE_LABELS.MAPPING}
@@ -260,6 +315,41 @@ export default function MeetingsTab({ studentId, meetings: initialMeetings, canS
                     <td className="px-5 py-4">
                       <LessonRoomAction meeting={meeting} />
                     </td>
+                    {canSchedule && (
+                      <td className="px-5 py-4">
+                        <div className="flex flex-wrap gap-2">
+                          {meeting.canSchedulePending && (
+                            <button
+                              type="button"
+                              className={`${actionButtonBase} bg-emerald-600 text-white hover:bg-emerald-700`}
+                              onClick={() => setLifecycleModal({ kind: "pending", meeting })}
+                            >
+                              שבץ מועד
+                            </button>
+                          )}
+                          {(meeting.canReschedule || meeting.rescheduleBlock) && (
+                            <button
+                              type="button"
+                              className={`${actionButtonBase} border border-neutral-300 text-neutral-800 hover:bg-white/70`}
+                              disabled={!meeting.canReschedule}
+                              title={meeting.rescheduleBlock ? RESCHEDULE_BLOCK_LABELS[meeting.rescheduleBlock] : undefined}
+                              onClick={() => setLifecycleModal({ kind: "reschedule", meeting })}
+                            >
+                              שנה מועד
+                            </button>
+                          )}
+                          {meeting.canCancel && (
+                            <button
+                              type="button"
+                              className={`${actionButtonBase} border border-red-200 text-red-700 hover:bg-red-50`}
+                              onClick={() => setLifecycleModal({ kind: "cancel", meeting })}
+                            >
+                              בטל שיעור
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 );
               })}
@@ -270,6 +360,31 @@ export default function MeetingsTab({ studentId, meetings: initialMeetings, canS
 
       {modalOpen && (
         <ScheduleMeetingModal studentId={studentId} onClose={closeModal} onScheduled={handleScheduled} />
+      )}
+      {lifecycleModal?.kind === "pending" && (
+        <SchedulePendingLessonModal
+          studentId={studentId}
+          meeting={lifecycleModal.meeting}
+          onClose={closeLifecycleModal}
+          onDone={handlePendingScheduled}
+        />
+      )}
+      {lifecycleModal?.kind === "reschedule" && (
+        <RescheduleLessonModal
+          studentId={studentId}
+          meeting={lifecycleModal.meeting}
+          onClose={closeLifecycleModal}
+          onDone={handleRescheduled}
+        />
+      )}
+      {lifecycleModal?.kind === "cancel" && (
+        <CancelLessonModal
+          studentId={studentId}
+          meeting={lifecycleModal.meeting}
+          canRestoreCredit={canRestoreCredit}
+          onClose={closeLifecycleModal}
+          onDone={handleCancelled}
+        />
       )}
     </div>
   );

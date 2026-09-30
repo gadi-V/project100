@@ -8,6 +8,8 @@ import {
   type CommunicationStructuredData,
   type RankedTopic,
 } from "./communication-templates";
+import { rescheduleBlock } from "./lesson-lifecycle";
+import { lessonAntiCollisionWindow } from "./scheduling";
 import {
   PENDING_SCHEDULE_STATUS,
   readDecisionRecord,
@@ -111,6 +113,7 @@ type LessonForTabs = {
   attendanceStatus: string | null;
   lessonType: string;
   whatsappGroupId: string | null;
+  rescheduledCount?: number;
   teacher: { name: string } | null;
   package: { name: string; credits: number } | null;
 };
@@ -129,6 +132,7 @@ const LESSON_TAB_SELECT = {
   attendanceStatus: true,
   lessonType: true,
   whatsappGroupId: true,
+  rescheduledCount: true,
   teacher: { select: { name: true } },
   package: { select: { name: true, credits: true } },
 } as const;
@@ -239,8 +243,67 @@ export function buildMeetingRows(lessons: LessonForTabs[], viewer: Viewer, now: 
         lesson.status !== PENDING_SCHEDULE_STATUS &&
         (canMarkAny || ownLesson),
       canEnterRoom: canEnterLessonRoom(viewer, lesson),
+      teacherId: lesson.teacherId,
+      durationMinutes: lesson.durationMinutes ?? 60,
+      ...lifecycleFlags(lesson, canMarkAny, now),
     };
   });
+}
+
+function lifecycleFlags(
+  lesson: LessonForTabs,
+  staff: boolean,
+  now: Date
+): Pick<MeetingRow, "canSchedulePending" | "canReschedule" | "rescheduleBlock" | "canCancel"> {
+  const upcoming = lesson.status === "SCHEDULED" && lessonStart(lesson) > now;
+  const block =
+    staff && upcoming
+      ? rescheduleBlock({ scheduledAt: lessonStart(lesson), rescheduledCount: lesson.rescheduledCount ?? 0 }, now)
+      : null;
+  return {
+    canSchedulePending: staff && lesson.status === PENDING_SCHEDULE_STATUS,
+    canReschedule: staff && upcoming && block === null,
+    rescheduleBlock: block,
+    canCancel: staff && upcoming,
+  };
+}
+
+export type LessonConflict = { party: "STUDENT" | "TEACHER"; at: Date } | null;
+
+/** 60-minute anti-collision check for one start time, ignoring `excludeLessonId` (the lesson being moved). */
+export async function findLessonConflict(
+  tx: Prisma.TransactionClient,
+  params: { studentId: string; teacherId: string; at: Date; excludeLessonId?: string }
+): Promise<LessonConflict> {
+  const { windowStart, windowEnd } = lessonAntiCollisionWindow(params.at);
+  const where = {
+    ...(params.excludeLessonId ? { id: { not: params.excludeLessonId } } : {}),
+    status: { in: ["SCHEDULED", "IN_PROGRESS"] },
+    scheduledAt: { gt: windowStart, lt: windowEnd },
+  };
+  const [studentOverlap, teacherOverlap] = await Promise.all([
+    tx.lesson.findFirst({ where: { studentId: params.studentId, ...where }, select: { scheduledAt: true } }),
+    tx.lesson.findFirst({ where: { teacherId: params.teacherId, ...where }, select: { scheduledAt: true } }),
+  ]);
+  if (studentOverlap) return { party: "STUDENT", at: studentOverlap.scheduledAt };
+  if (teacherOverlap) return { party: "TEACHER", at: teacherOverlap.scheduledAt };
+  return null;
+}
+
+/** Frees the teacher's availability slot that started at `at`, if one backs the lesson. */
+export async function releaseTeacherSlot(tx: Prisma.TransactionClient, teacherId: string, at: Date): Promise<void> {
+  await tx.teacherAvailability.updateMany({ where: { teacherId, startTime: at, isBooked: true }, data: { isBooked: false } });
+}
+
+/** Marks the teacher's open availability slot at `at` as booked, if the teacher opened one. */
+export async function bookTeacherSlot(tx: Prisma.TransactionClient, teacherId: string, at: Date): Promise<void> {
+  await tx.teacherAvailability.updateMany({ where: { teacherId, startTime: at, isBooked: false }, data: { isBooked: true } });
+}
+
+/** The student bought at least one direct hours package (Sprint 14 track). */
+export async function studentHasDirectPackage(studentId: string): Promise<boolean> {
+  const plans = await loadEnrollmentPlans(studentId, null);
+  return plans.packages.length > 0;
 }
 
 export async function listMeetingRows(studentId: string, viewer: Viewer, now: Date = new Date()): Promise<MeetingRow[]> {

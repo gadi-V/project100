@@ -798,6 +798,75 @@ export async function sendQuadGroupPedagogicDecision(
   }
 }
 
+/** Posts any prepared message into a quad group (`…@g.us`). Never throws. */
+async function postToQuadGroup(groupChatId: string, message: string): Promise<QuadWelcomeStatus> {
+  if (!groupChatId.trim().endsWith("@g.us")) {
+    return { sent: false, error: "Not a WhatsApp group chat id (…@g.us)" };
+  }
+  try {
+    const sent = await sendWhatsAppMessage(groupChatId.trim(), message, { timeoutMs: QUAD_GATEWAY_TIMEOUT_MS });
+    return sent.mocked
+      ? { sent: false, error: "WhatsApp gateway is not configured" }
+      : { sent: true, messageId: sent.messageId };
+  } catch (error) {
+    return { sent: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+export type QuadLessonChangeInput = {
+  subject: string;
+  scheduledAt: Date;
+  durationMinutes: number;
+};
+
+/** "יום שני 05.10.2026 בשעה 17:00-17:50" in Israel time. */
+export function formatQuadLessonDate(scheduledAt: Date, durationMinutes: number): string {
+  const { dayName, date, timeRange } = formatQuadLessonWindow(scheduledAt, durationMinutes);
+  return `יום ${dayName} ${date} בשעה ${timeRange}`;
+}
+
+export function buildLessonRescheduledMessage(input: QuadLessonChangeInput): string {
+  return (
+    `🗓️ *עדכון מועד שיעור - ${SUMMARY_BRAND}*\n` +
+    `שלום לכולם, שיעור בנושא ${input.subject.trim()} עודכן למועד חדש:\n` +
+    `תאריך ושעה חדשים: ${formatQuadLessonDate(input.scheduledAt, input.durationMinutes)}\n` +
+    `היומן עודכן בהתאם. המשך שבוע מצוין!`
+  );
+}
+
+export function buildPrivateLessonScheduledMessage(input: QuadLessonChangeInput & { teacherName: string }): string {
+  return (
+    `📌 *שיבוץ שיעור פרטי - ${SUMMARY_BRAND}*\n` +
+    `שלום לכולם, נקבע שיעור פרטי (ש.פ) בנושא ${input.subject.trim()}:\n` +
+    `מורה: ${input.teacherName.trim()}\n` +
+    `תאריך ושעה: ${formatQuadLessonDate(input.scheduledAt, input.durationMinutes)}\n` +
+    `היומן עודכן בהתאם. בהצלחה!`
+  );
+}
+
+export function buildLessonCancelledMessage(input: QuadLessonChangeInput): string {
+  return (
+    `❌ *ביטול שיעור - ${SUMMARY_BRAND}*\n` +
+    `שלום לכולם, השיעור בנושא ${input.subject.trim()} שתוכנן ל${formatQuadLessonDate(input.scheduledAt, input.durationMinutes)} בוטל.\n` +
+    `נחזור אליכם כאן לתיאום מועד חלופי במידת הצורך.`
+  );
+}
+
+export async function sendQuadGroupLessonRescheduled(groupChatId: string, input: QuadLessonChangeInput) {
+  return postToQuadGroup(groupChatId, buildLessonRescheduledMessage(input));
+}
+
+export async function sendQuadGroupPrivateLessonScheduled(
+  groupChatId: string,
+  input: QuadLessonChangeInput & { teacherName: string }
+) {
+  return postToQuadGroup(groupChatId, buildPrivateLessonScheduledMessage(input));
+}
+
+export async function sendQuadGroupLessonCancelled(groupChatId: string, input: QuadLessonChangeInput) {
+  return postToQuadGroup(groupChatId, buildLessonCancelledMessage(input));
+}
+
 export type QuadLessonSummaryInput = {
   groupUrl?: string | null;
   groupChatId?: string | null;

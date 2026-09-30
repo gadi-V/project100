@@ -50,6 +50,8 @@
 - `POST /api/portal/students/[id]/attendance` — present / absent on a started lesson (AuditLog `LESSON_ATTENDANCE_MARKED`) (Sprint 10b).
 - `GET/POST /api/portal/students/[id]/meetings` — meetings + approved teachers; schedule a mapping / regular lesson with an assigned teacher and open (or update) the quad WhatsApp group. REPRESENTATIVE / ADMIN / MANAGER only (AuditLog `MAPPING_LESSON_SCHEDULED`) (Sprint 12).
 - `GET/POST /api/portal/students/[id]/pedagogic-decision` — 360° overview (intake call, parent / student questionnaires, mapping summary, active teachers) + the pedagogic manager's post-mapping decision: summary log, monthly recurring-lesson batch, active "תלמיד" status, learning plan posted to the quad WhatsApp group. MANAGER / ADMIN / REPRESENTATIVE only (AuditLog `PEDAGOGIC_DECISION_RECORDED`) (Sprint 14).
+- `POST /api/portal/students/[id]/meetings/pending-schedule` — lock date, time and teacher for a `PENDING_SCHEDULE` private lesson → `SCHEDULED`, anti-collision `409`, quad-group update. REPRESENTATIVE / ADMIN / MANAGER only (AuditLog `PENDING_LESSON_SCHEDULED`) (Sprint 15).
+- `PATCH / DELETE /api/portal/students/[id]/meetings/[meetingId]` — staff reschedule (24 h / once policy `422`, anti-collision `409`) and cancel (reason, optional credit return on the direct package track), each posted to the quad group. REPRESENTATIVE / ADMIN / MANAGER only (AuditLog `LESSON_RESCHEDULED_BY_STAFF` / `LESSON_CANCELLED_BY_STAFF`) (Sprint 15).
 - `POST /api/portal/students/[id]/direct-package` — direct hours package for independent students (no mapping lesson): `lessonCredits` increment + active "תלמיד" status. MANAGER / ADMIN / REPRESENTATIVE only (AuditLog `DIRECT_PACKAGE_ASSIGNED`) (Sprint 14).
 
 ### Diagnostics & packages
@@ -196,6 +198,50 @@ Fresh databases apply all migrations normally with `npx prisma migrate deploy`.
 | 12 | Operational loop closed: mapping-lesson scheduler in the student meetings tab (teacher assignment + date), `POST /api/portal/students/[id]/meetings`, automatic quad WhatsApp group trigger (student + teacher + parent + admin) with welcome message, no duplicate groups | ✅ Completed |
 | 13 | Daily lesson room launched from the meetings tab ("היכנס לשיעור" → `/lessons/[lessonId]`), lesson and mapping summaries saved on the communication tab auto-dispatched to the quad WhatsApp group (`whatsappGroupId`) | ✅ Completed |
 | 14 | 360° pedagogic decision (intake call + parent / student questionnaires + mapping summary), subscription generator (weekly / twice weekly, extra private lessons, fixed days and hours, monthly lesson batch, quad WhatsApp announcement) and direct hours-package track for independent students | ✅ Completed |
+| 15 | Lesson lifecycle on the meetings tab: scheduling pending private lessons (PENDING_SCHEDULE → SCHEDULED), staff reschedule with conflict check and cancellation with reason / credit return, all with quad WhatsApp updates | ✅ Completed |
+
+### Lesson lifecycle: pending private lessons, reschedule and cancel (Sprint 15)
+
+- **Meetings tab** (`MeetingsTab.tsx`): a "פעולות" column for REPRESENTATIVE / ADMIN / MANAGER only. A `PENDING_SCHEDULE`
+  row shows "טרם נקבע מועד", an amber "ש.פ - ממתין לשיבוץ" badge and a green "שבץ מועד" button
+  (`SchedulePendingLessonModal`: teacher, date, time). An upcoming `SCHEDULED` row shows "שנה מועד"
+  (`RescheduleLessonModal`: new date / time + optional reason; disabled with a tooltip inside 24 h or after one move)
+  and "בטל שיעור" (`CancelLessonModal`: required reason + "להחזיר שיעור אחד ליתרת החבילה", offered only when the
+  student has a direct package). After each action: status banner (honest about the WhatsApp result) + table refresh.
+- **`MeetingRow`** gains `teacherId`, `durationMinutes` and server-computed staff flags `canSchedulePending`,
+  `canReschedule`, `rescheduleBlock` (`WITHIN_24H` / `ALREADY_RESCHEDULED`) and `canCancel`, which are always false for teachers.
+- **Shared helpers** (`lib/student-portal.ts`): `findLessonConflict` (60-minute window, student + teacher, excludes the
+  moved lesson), `releaseTeacherSlot` / `bookTeacherSlot` (`TeacherAvailability.isBooked` via `updateMany`),
+  `studentHasDirectPackage`. Parsers and policy in `lib/lesson-lifecycle.ts`.
+- **`POST …/meetings/pending-schedule`:** lesson must belong to the student and be `PENDING_SCHEDULE` (`409`
+  otherwise), teacher must be an approved TEACHER. Transaction: conflict check, claim via
+  `updateMany({ id, status: PENDING_SCHEDULE })` (parallel request → `409`) → `SCHEDULED`, exact `scheduledAt`,
+  `teacherId`, `whatsappGroupId`, `reminderSent: false`; the teacher's open slot at that time is booked. Group post "📌
+  *שיבוץ שיעור פרטי - Project 100*".
+- **`PATCH …/meetings/[meetingId]`** `{ newScheduledAt, reason? }`: same policy as `/api/lessons/[id]/reschedule` (more
+  than 24 h ahead, once per lesson → `422`). Transaction: conflict check, optimistic
+  `updateMany({ id, status: SCHEDULED, rescheduledCount })`, `rescheduledCount + 1`, `reminderSent: false`,
+  `dailyRoomUrl: null` (the classroom page provisions a new room; the old one is deleted best-effort), old slot freed /
+  new slot booked, `GENERAL` communication entry (`structuredData.source = "LESSON_RESCHEDULED"`, from / to / reason).
+  Group post: "🗓️ *עדכון מועד שיעור - Project 100*" with the new day, date and time range.
+- **`DELETE …/meetings/[meetingId]`** `{ cancellationReason, restoreCredit }`: only `SCHEDULED` lessons (`409` "השיעור
+  כבר בוטל"). Transaction: `CANCELLED`, `canceledAt`, `canceledById`, slot freed, `lessonCredits + 1` only when
+  `restoreCredit` and the student has a direct package, `GENERAL` entry (`source = "LESSON_CANCELLED"`, reason,
+  `creditRestored`). The reason is kept on the communication tab + AuditLog (no new `Lesson` column, so no migration)
+  and is **not** posted to the group ("❌ *ביטול שיעור - Project 100*"). No `BillingLedger` row; the protected
+  `/api/lessons/[id]/cancel` and `/reschedule` routes are unchanged.
+- **WhatsApp** (`lib/whatsapp.ts`): `formatQuadLessonDate`, `buildLessonRescheduledMessage`,
+  `buildPrivateLessonScheduledMessage`, `buildLessonCancelledMessage` + senders over one never-throwing `postToQuadGroup`.
+  Target: `Lesson.whatsappGroupId`, falling back to `User.whatsappGroupId`. Any gateway failure → `200` with
+  `whatsappDispatched: false`; the DB change stays.
+- **Tests:** `tests/portal-lesson-lifecycle.test.ts` (39 tests) covers:
+  - scheduling a pending lesson, with collision `409` and race `409`;
+  - reschedule: exact message, self-excluded conflict check, foreign lesson `404`;
+  - cancel: reason stored and not posted, credit returned only on the direct package track, double cancel `409`;
+  - TEACHER / STUDENT `403` (including the lesson's own teacher and student) and `401`;
+  - unreachable, 503 and throwing WhatsApp, and a failed Daily teardown, all keep the DB change;
+  - staff flags in `buildMeetingRows` (including the 24 h / once block) and the request-body parsers.
+- **Verified:** `npm run build` exit `0`; `npm test` 22 files / 468 tests exit `0`; `tsc --noEmit` 0.
 
 ### Pedagogic decision 360° and direct package track (Sprint 14)
 

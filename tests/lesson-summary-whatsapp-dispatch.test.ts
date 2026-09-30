@@ -294,6 +294,12 @@ describe("meetings tab — enter lesson room", () => {
       attendanceStatus: null,
       canMarkAttendance: false,
       canEnterRoom: true,
+      teacherId: TEACHER_ID,
+      durationMinutes: 50,
+      canSchedulePending: false,
+      canReschedule: false,
+      rescheduleBlock: null,
+      canCancel: false,
       ...overrides,
     };
   }

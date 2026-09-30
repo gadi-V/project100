@@ -78,6 +78,7 @@ export default function StudentPortalTabs({ data, initialTab }: StudentPortalTab
               studentId={data.header.id}
               meetings={data.meetings}
               canSchedule={data.viewer.canEditProfile}
+              canRestoreCredit={data.plans.packages.length > 0}
             />
           )}
           {tab.key === "communication" && (
