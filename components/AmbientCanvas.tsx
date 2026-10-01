@@ -47,28 +47,28 @@ type OrbClasses = {
  */
 const PALETTES: Record<AmbientSection, OrbClasses> = {
   hero: {
-    orb1: "bg-gradient-to-br from-sky-300/40 via-sky-200/20 to-transparent",
-    orb2: "bg-gradient-to-tr from-amber-200/35 via-orange-100/20 to-transparent",
-    orb3: "bg-gradient-to-tl from-fuchsia-200/30 via-pink-100/15 to-transparent",
-    orb4: "bg-gradient-to-bl from-cyan-200/30 via-sky-100/15 to-transparent",
+    orb1: "bg-gradient-to-br from-sky-300/60 via-sky-200/30 to-transparent",
+    orb2: "bg-gradient-to-tr from-amber-200/55 via-orange-100/30 to-transparent",
+    orb3: "bg-gradient-to-tl from-fuchsia-200/45 via-pink-100/25 to-transparent",
+    orb4: "bg-gradient-to-bl from-cyan-200/45 via-sky-100/25 to-transparent",
   },
   challenge: {
-    orb1: "bg-gradient-to-br from-indigo-400/35 via-indigo-300/20 to-transparent",
-    orb2: "bg-gradient-to-tr from-emerald-300/30 via-emerald-200/15 to-transparent",
-    orb3: "bg-gradient-to-tl from-cyan-300/25 via-sky-200/15 to-transparent",
-    orb4: "bg-gradient-to-bl from-violet-300/25 via-purple-200/15 to-transparent",
+    orb1: "bg-gradient-to-br from-indigo-400/50 via-indigo-300/30 to-transparent",
+    orb2: "bg-gradient-to-tr from-emerald-300/45 via-emerald-200/25 to-transparent",
+    orb3: "bg-gradient-to-tl from-cyan-300/40 via-sky-200/25 to-transparent",
+    orb4: "bg-gradient-to-bl from-violet-300/40 via-purple-200/25 to-transparent",
   },
   pricing: {
-    orb1: "bg-gradient-to-br from-violet-400/35 via-violet-300/20 to-transparent",
-    orb2: "bg-gradient-to-tr from-amber-300/35 via-amber-200/20 to-transparent",
-    orb3: "bg-gradient-to-tl from-rose-300/30 via-pink-200/15 to-transparent",
-    orb4: "bg-gradient-to-bl from-sky-300/25 via-indigo-200/15 to-transparent",
+    orb1: "bg-gradient-to-br from-violet-400/50 via-violet-300/30 to-transparent",
+    orb2: "bg-gradient-to-tr from-amber-300/55 via-amber-200/30 to-transparent",
+    orb3: "bg-gradient-to-tl from-rose-300/45 via-pink-200/25 to-transparent",
+    orb4: "bg-gradient-to-bl from-sky-300/40 via-indigo-200/25 to-transparent",
   },
   faq: {
-    orb1: "bg-gradient-to-br from-teal-300/35 via-teal-200/20 to-transparent",
-    orb2: "bg-gradient-to-tr from-rose-300/30 via-rose-200/15 to-transparent",
-    orb3: "bg-gradient-to-tl from-amber-200/30 via-yellow-100/15 to-transparent",
-    orb4: "bg-gradient-to-bl from-indigo-300/25 via-sky-200/15 to-transparent",
+    orb1: "bg-gradient-to-br from-teal-300/50 via-teal-200/30 to-transparent",
+    orb2: "bg-gradient-to-tr from-rose-300/45 via-rose-200/25 to-transparent",
+    orb3: "bg-gradient-to-tl from-amber-200/45 via-yellow-100/25 to-transparent",
+    orb4: "bg-gradient-to-bl from-indigo-300/40 via-sky-200/25 to-transparent",
   },
 };
 
