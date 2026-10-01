@@ -14,10 +14,15 @@ import {
 } from "../../../lib/student-portal-shared";
 import { eyebrow, fieldClass, frostPanel, primaryCta, secondaryCta } from "../../../lib/ui";
 
+export type StatusSnapshot = { studentStatus: string[]; statusUpdatedAt: string | null };
+
 type ProfileTabProps = {
   studentId: string;
   profile: ProfileTabData;
   viewer: StudentPortalViewer;
+  /** Status change made on another tab (e.g. an absence follow-up); applied when the reference changes. */
+  externalStatus?: StatusSnapshot | null;
+  onStatusChange?: (snapshot: StatusSnapshot) => void;
 };
 
 type ApiResponse<T> = { success: boolean; data?: T; error?: string };
@@ -61,8 +66,19 @@ function orDash(value: string | number | null | undefined): string {
   return value === null || value === undefined || value === "" ? "—" : String(value);
 }
 
-export default function ProfileTab({ studentId, profile: initialProfile, viewer }: ProfileTabProps) {
+export default function ProfileTab({
+  studentId,
+  profile: initialProfile,
+  viewer,
+  externalStatus = null,
+  onStatusChange,
+}: ProfileTabProps) {
   const [profile, setProfile] = useState(initialProfile);
+  const [appliedExternal, setAppliedExternal] = useState(externalStatus);
+  if (externalStatus !== appliedExternal) {
+    setAppliedExternal(externalStatus);
+    if (externalStatus) setProfile((p) => ({ ...p, ...externalStatus }));
+  }
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState<EditForm>(() => toForm(initialProfile));
   const [saving, setSaving] = useState(false);
@@ -90,6 +106,7 @@ export default function ProfileTab({ studentId, profile: initialProfile, viewer 
       if (!result.success || !result.data) throw new Error(result.error ?? "השמירה נכשלה");
       const saved = result.data;
       setProfile((p) => ({ ...p, studentStatus: saved.studentStatus, statusUpdatedAt: saved.statusUpdatedAt }));
+      onStatusChange?.({ studentStatus: saved.studentStatus, statusUpdatedAt: saved.statusUpdatedAt });
     } catch (error: unknown) {
       setProfile((p) => ({ ...p, studentStatus: previous }));
       toast.error(error instanceof Error ? error.message : "השמירה נכשלה");

@@ -834,10 +834,13 @@ export function buildLessonRescheduledMessage(input: QuadLessonChangeInput): str
   );
 }
 
-export function buildPrivateLessonScheduledMessage(input: QuadLessonChangeInput & { teacherName: string }): string {
+export function buildPrivateLessonScheduledMessage(
+  input: QuadLessonChangeInput & { teacherName: string; makeup?: boolean }
+): string {
+  const kind = input.makeup ? "שיעור השלמה" : "שיעור פרטי";
   return (
-    `📌 *שיבוץ שיעור פרטי - ${SUMMARY_BRAND}*\n` +
-    `שלום לכולם, נקבע שיעור פרטי (ש.פ) בנושא ${input.subject.trim()}:\n` +
+    `📌 *שיבוץ ${kind} - ${SUMMARY_BRAND}*\n` +
+    `שלום לכולם, נקבע ${input.makeup ? kind : `${kind} (ש.פ)`} בנושא ${input.subject.trim()}:\n` +
     `מורה: ${input.teacherName.trim()}\n` +
     `תאריך ושעה: ${formatQuadLessonDate(input.scheduledAt, input.durationMinutes)}\n` +
     `היומן עודכן בהתאם. בהצלחה!`
@@ -858,7 +861,7 @@ export async function sendQuadGroupLessonRescheduled(groupChatId: string, input:
 
 export async function sendQuadGroupPrivateLessonScheduled(
   groupChatId: string,
-  input: QuadLessonChangeInput & { teacherName: string }
+  input: QuadLessonChangeInput & { teacherName: string; makeup?: boolean }
 ) {
   return postToQuadGroup(groupChatId, buildPrivateLessonScheduledMessage(input));
 }

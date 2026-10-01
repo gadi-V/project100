@@ -3,6 +3,7 @@ import { prisma } from "./prisma";
 import { isIntakeRecorderRole } from "./auth/staff-roles";
 import { whatsappUrl } from "./student-portal";
 import {
+  DIRECTORY_ABSENCE_FILTER,
   gradeVariants,
   paginationMeta,
   type StudentDirectoryPage,
@@ -88,11 +89,20 @@ export async function listStudentDirectory(
   now: Date = new Date()
 ): Promise<StudentDirectoryPage> {
   const where = buildStudentDirectoryWhere(viewer, query);
-  if (!where) return { students: [], ...paginationMeta(0, 1, query.limit) };
+  if (!where) return { students: [], unexcusedAbsenceCount: 0, ...paginationMeta(0, 1, query.limit) };
 
-  const totalCount = await prisma.user.count({ where });
+  const absenceWhere = buildStudentDirectoryWhere(viewer, {
+    ...query,
+    searchTokens: [],
+    statuses: [DIRECTORY_ABSENCE_FILTER],
+    grade: null,
+  }) as Prisma.UserWhereInput;
+  const [totalCount, unexcusedAbsenceCount] = await Promise.all([
+    prisma.user.count({ where }),
+    prisma.user.count({ where: absenceWhere }),
+  ]);
   const { skip, ...meta } = paginationMeta(totalCount, query.page, query.limit);
-  if (totalCount === 0) return { students: [], ...meta };
+  if (totalCount === 0) return { students: [], unexcusedAbsenceCount, ...meta };
 
   const users = await prisma.user.findMany({
     where,
@@ -164,5 +174,5 @@ export async function listStudentDirectory(
     };
   });
 
-  return { students, ...meta };
+  return { students, unexcusedAbsenceCount, ...meta };
 }

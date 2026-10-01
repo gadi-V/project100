@@ -53,7 +53,46 @@ export function flagUnexcusedAbsence(current: readonly string[]): StudentStatusC
   return STUDENT_STATUS_OPTIONS.map((o) => o.code).filter((code) => next.has(code));
 }
 
+/** Drops the "חיסור לא מוצדק" flag once the absence was followed up; other known codes are kept. */
+export function clearUnexcusedAbsence(current: readonly string[]): StudentStatusCode[] {
+  const next = new Set(current.filter((code) => STATUS_CODES.has(code) && code !== "UNEXCUSED_ABSENCE"));
+  return STUDENT_STATUS_OPTIONS.map((o) => o.code).filter((code) => next.has(code));
+}
+
+export function hasOpenAbsence(statuses: readonly string[]): boolean {
+  return statuses.includes("UNEXCUSED_ABSENCE");
+}
+
 export type AttendanceStatus = "PRESENT" | "ABSENT";
+
+export type AttendanceMetrics = {
+  attended: number;
+  noShow: number;
+  cancelled: number;
+  /** attended / (attended + no-show), whole percent; null before any lesson took place. */
+  attendanceRate: number | null;
+};
+
+const CANCELLED_LESSON_STATUSES = new Set(["CANCELLED", "CANCELLED_LATE"]);
+
+/**
+ * Meetings tab summary. A cancelled lesson counts only as cancelled; an absent mark is a no-show;
+ * a present mark or a completed lesson without a mark counts as attended. Cancellations stay out of the rate.
+ */
+export function attendanceMetrics(
+  lessons: readonly { status: string; attendanceStatus: AttendanceStatus | null }[]
+): AttendanceMetrics {
+  let attended = 0;
+  let noShow = 0;
+  let cancelled = 0;
+  for (const lesson of lessons) {
+    if (CANCELLED_LESSON_STATUSES.has(lesson.status)) cancelled += 1;
+    else if (lesson.attendanceStatus === "ABSENT") noShow += 1;
+    else if (lesson.attendanceStatus === "PRESENT" || lesson.status === "COMPLETED") attended += 1;
+  }
+  const held = attended + noShow;
+  return { attended, noShow, cancelled, attendanceRate: held > 0 ? Math.round((attended * 100) / held) : null };
+}
 export type EnrollmentType = "ONE_TIME" | "SUBSCRIPTION";
 
 export const ENROLLMENT_TYPE_LABELS: Record<EnrollmentType, string> = {
@@ -159,6 +198,8 @@ export type MeetingRow = {
   canComplete: boolean;
   /** The student's credit was taken when the lesson was booked, so a cancellation may return it. */
   creditTakenAtBooking: boolean;
+  /** Replacement for an excused absence (opened from the absence follow-up). */
+  isMakeup: boolean;
 };
 
 const LESSON_ROOM_OPEN_STATUSES = new Set(["SCHEDULED", "IN_PROGRESS"]);

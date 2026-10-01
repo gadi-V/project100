@@ -15,6 +15,7 @@ import {
   TEACHER_HOURLY_RATE_ILS,
   type CompleteLessonResponse,
 } from "../../../../../../../../lib/lesson-completion";
+import { isMakeupLesson } from "../../../../../../../../lib/absence-resolution";
 import { writeAuditLog } from "../../../../../../../../lib/audit";
 import { dailyRoomNameForLesson, deleteDailyRoom, roomNameFromDailyUrl } from "../../../../../../../../lib/daily";
 import {
@@ -74,7 +75,8 @@ async function postNoShowAlert(groupId: string | null, lessonId: string): Promis
  * start time has arrived. One transaction:
  * - ATTENDED / STUDENT_NO_SHOW: `COMPLETED`, attendance PRESENT / ABSENT, a scheduled `TeacherPayout` at the
  *   teacher's hourly rate (PAYOUT + PLATFORM_FEE ledger rows, same idempotency key as `/api/lessons/complete`),
- *   and one lesson taken from the direct-package balance unless the credit was already taken at booking.
+ *   and one lesson taken from the direct-package balance unless the credit was already taken at booking or the
+ *   lesson is a make-up for an excused absence (the missed lesson was already counted).
  * - TEACHER_CANCELLED: `CANCELLED`, no payout, and a credit taken at booking goes back to the student.
  * - STUDENT_NO_SHOW also adds "חיסור לא מוצדק" to the CRM card; after the commit the quad group gets the no-show
  *   notice and AuditLog `STUDENT_NO_SHOW_RECORDED` is written (a failed post never undoes the attendance).
@@ -115,6 +117,7 @@ export async function POST(request: Request, { params }: RouteContext) {
         durationMinutes: true,
         dailyRoomUrl: true,
         whatsappGroupId: true,
+        lessonType: true,
       },
     });
     if (!lesson || lesson.studentId !== id) return fail("השיעור לא נמצא", 404);
@@ -129,7 +132,8 @@ export async function POST(request: Request, { params }: RouteContext) {
 
     const effects = outcomeEffects(attendanceStatus);
     const prepaid = creditTakenAtBooking(lesson);
-    const chargeDirectPackage = effects.consumesCredit && !prepaid && (await studentHasDirectPackage(id));
+    const makeup = isMakeupLesson(lesson);
+    const chargeDirectPackage = effects.consumesCredit && !prepaid && !makeup && (await studentHasDirectPackage(id));
     const restoreBookingCredit = !effects.consumesCredit && prepaid;
     const durationMinutes = lesson.durationMinutes ?? 60;
     const compensation = effects.compensateTeacher ? teacherCompensation(durationMinutes) : null;
@@ -226,6 +230,7 @@ export async function POST(request: Request, { params }: RouteContext) {
           ...(creditCharged ? [`ירד שיעור אחד מיתרת החבילה (נותרו ${lessonCredits})`] : []),
           ...(chargeDirectPackage && !creditCharged ? ["יתרת החבילה ריקה, השיעור לא ירד מהיתרה"] : []),
           ...(creditRestored ? [`השיעור הוחזר ליתרת התלמיד (${lessonCredits})`] : []),
+          ...(makeup && effects.consumesCredit ? ["שיעור השלמה: לא ירד מיתרת החבילה (השיעור שהוחסר כבר נספר)"] : []),
           ...(noShow ? ["סומן בתיק: חיסור לא מוצדק (לבדיקת המנהל הפדגוגי)"] : []),
           ...(internalNotes ? [`הערות פנימיות: ${internalNotes}`] : []),
         ].join("\n");
@@ -268,6 +273,7 @@ export async function POST(request: Request, { params }: RouteContext) {
                 ? { ...compensation, hourlyRate: TEACHER_HOURLY_RATE_ILS }
                 : null,
               creditTakenAtBooking: prepaid,
+              makeupLesson: makeup,
               creditCharged,
               creditRestored,
               directPackageBalanceEmpty: chargeDirectPackage && !creditCharged,

@@ -43,7 +43,7 @@
 - `GET/POST /api/admin/intake` — mapping-call questionnaire (`IntakeAssessment`), REPRESENTATIVE / ADMIN / MANAGER only (Sprint 9).
 - Pages `/portal/dashboard` (staff dashboard) and `/portal/intake` (mapping-call workspace) — server-side role gate (Sprint 10).
 - Page `/portal/students/[id]` — student CRM screen with 5 tabs (Sprint 10b).
-- `GET /api/portal/students` — student directory: `search`, `status`, `grade`, `page`, `limit` (25 by default); TEACHER sees own students only (Sprint 11).
+- `GET /api/portal/students` — student directory: `search`, `status`, `grade`, `page`, `limit` (25 by default); TEACHER sees own students only (Sprint 11). Response adds `unexcusedAbsenceCount` for the retention chip (Sprint 18).
 - Page `/portal/students` — customer / student directory with quick status + grade filters and pagination (Sprint 11).
 - `GET/POST /api/portal/students/[id]/communication` — communication history (newest first) + save summary (AuditLog `STUDENT_COMMUNICATION_LOGGED`) (Sprint 10b). Lesson / mapping summaries are also posted to the student's quad WhatsApp group (`sendToWhatsApp`, default `true`; response `whatsappDispatched`) (Sprint 13).
 - `PATCH /api/portal/students/[id]/profile` — status checkboxes + profile fields, REPRESENTATIVE / ADMIN / MANAGER (AuditLog `STUDENT_PROFILE_UPDATED`) (Sprint 10b).
@@ -53,6 +53,7 @@
 - `POST /api/portal/students/[id]/meetings/pending-schedule` — lock date, time and teacher for a `PENDING_SCHEDULE` private lesson → `SCHEDULED`, anti-collision `409`, quad-group update. REPRESENTATIVE / ADMIN / MANAGER only (AuditLog `PENDING_LESSON_SCHEDULED`) (Sprint 15).
 - `PATCH / DELETE /api/portal/students/[id]/meetings/[meetingId]` — staff reschedule (24 h / once policy `422`, anti-collision `409`) and cancel (reason; a credit is returned only if it was taken at booking, Sprint 17), each posted to the quad group. REPRESENTATIVE / ADMIN / MANAGER only (AuditLog `LESSON_RESCHEDULED_BY_STAFF` / `LESSON_CANCELLED_BY_STAFF`) (Sprint 15). MANAGER / ADMIN may send `allowEmergencyOverride: true` to bypass the 24 h / once policy, audited as an emergency change approved by management (Sprint 16).
 - `POST /api/portal/students/[id]/meetings/[meetingId]/complete` — close a started lesson and record attendance (`ATTENDED` / `STUDENT_NO_SHOW` / `TEACHER_CANCELLED`): teacher payout + ledger, direct-package credit, communication entry. The lesson's teacher, MANAGER or ADMIN only (AuditLog `LESSON_COMPLETED_ATTENDANCE_RECORDED`) (Sprint 16). Also used from the Daily room; closes the Daily room, and a no-show flags "חיסור לא מוצדק" on the CRM card and alerts the quad group (AuditLog `STUDENT_NO_SHOW_RECORDED`) (Sprint 17).
+- `POST /api/portal/students/[id]/resolve-absence` — close the follow-up of an unexcused absence (`reason`, `resolutionType` `EXCUSED_MAKEUP` / `EXCUSED_NO_MAKEUP` / `UNEXCUSED_CLOSED`, `notes`): removes "חיסור לא מוצדק", logs "שיחת בירור חיסור", opens a `PENDING_SCHEDULE` make-up lesson for `EXCUSED_MAKEUP`. MANAGER / ADMIN / REPRESENTATIVE only (AuditLog `ABSENCE_RESOLVED`) (Sprint 18).
 - `POST /api/portal/students/[id]/direct-package` — direct hours package for independent students (no mapping lesson): `lessonCredits` increment + active "תלמיד" status. MANAGER / ADMIN / REPRESENTATIVE only (AuditLog `DIRECT_PACKAGE_ASSIGNED`) (Sprint 14).
 
 ### Diagnostics & packages
@@ -64,7 +65,7 @@
 
 ### Lessons
 - `POST /api/lessons/complete` — close + payout + platform fee (atomic, idempotent).
-- `POST /api/lessons/[id]/summary` — pedagogical summary + gap closure.
+- `POST /api/lessons/[id]/summary` — pedagogical summary + gap closure. Session required (`401`); only the lesson's assigned teacher, ADMIN or MANAGER (`403` otherwise); the teacher comes from the lesson, never from the body (Sprint 18).
 - `POST /api/lessons/[id]/cancel` / `reschedule` / `rate` / `appeal`.
 
 ### WhatsApp
@@ -202,6 +203,49 @@ Fresh databases apply all migrations normally with `npx prisma migrate deploy`.
 | 15 | Lesson lifecycle on the meetings tab: scheduling pending private lessons (PENDING_SCHEDULE → SCHEDULED), staff reschedule with conflict check and cancellation with reason / credit return, all with quad WhatsApp updates | ✅ Completed |
 | 16 | Lesson completion loop: closing a lesson with attendance (attended / student no-show / teacher cancelled), teacher compensation in TeacherPayout + BillingLedger at the hourly rate, final direct-package credit deduction, and management emergency override for reschedules inside 24 h | ✅ Completed |
 | 17 | Credit symmetry on cancellation (credit returned only if it was taken at booking), lesson completion and attendance report from inside the Daily room (call closed, teacher sent to the summary form), and no-show retention alert (CRM "חיסור לא מוצדק" flag + quad WhatsApp notice) | ✅ Completed |
+| 18 | Lesson summary API hardening (session + assigned teacher / management only, IDOR closed), legacy `PostLessonSummaryModal` removed, and absence retention workflow: directory "חיסור לא מוצדק" quick filter, absence follow-up modal with make-up lesson, attendance metrics on the meetings tab | ✅ Completed |
+
+### Summary API hardening and absence resolution (Sprint 18)
+
+- **`POST /api/lessons/[id]/summary`**: previously open to anyone and trusted `teacherId` from the body (IDOR: any
+  caller could close any lesson as COMPLETED). Now `requireAuth()` → `401` without a session; STUDENT /
+  REPRESENTATIVE get `403` before any lookup; a TEACHER must be the lesson's `teacherId` (`403` otherwise); ADMIN /
+  MANAGER may write any lesson; unknown lesson `404`, missing `summaryText` `400`. The teacher passed to
+  `savePostLessonSummary` is the lesson's, the body's `teacherId` is ignored. `components/lessons/PostLessonSummaryModal.tsx`
+  (orphaned since Sprint 17) is deleted; nothing imports it.
+- **`POST /api/portal/students/[id]/resolve-absence`** (MANAGER / ADMIN / REPRESENTATIVE; `403` for TEACHER /
+  STUDENT): `{ reason, resolutionType, notes?, lessonId? }`. The missed lesson is `lessonId` or the latest lesson
+  with attendance `ABSENT` (`404` for a lesson that is not an absence of this student; `422` for `EXCUSED_MAKEUP`
+  when no lesson was marked absent). One transaction:
+  - `UNEXCUSED_ABSENCE` removed from `StudentProfile.studentStatus` with a conditional update (`has`), so a second
+    or parallel follow-up of the same absence answers `409` and never opens a second make-up;
+  - `GENERAL` communication entry, `courseContext` "שיחת בירור חיסור", with the missed lesson, reason, decision
+    and notes (`structuredData.source = "ABSENCE_RESOLUTION"`);
+  - `EXCUSED_MAKEUP`: new lesson `PENDING_SCHEDULE`, `lessonType = "MAKEUP"`, title "{subject} · שיעור השלמה",
+    same teacher and duration as the missed lesson, ready for "שבץ מועד";
+  - AuditLog `ABSENCE_RESOLVED` (`entityType: "Student"`, `entityId: studentId`).
+  Response `{ success, absenceResolved, makeupLessonCreated, makeupLessonId, studentStatus }`.
+- **Make-up lessons**: completing one pays the teacher as usual but takes no credit from the direct package (the
+  missed lesson was already counted); the quad group gets "שיבוץ שיעור השלמה" instead of "שיעור פרטי (ש.פ)" when it
+  is scheduled. Meetings rows carry `isMakeup` and show a "שיעור השלמה" badge.
+- **Meetings tab**: attendance bar (attended / no-show / cancelled / attendance %). A cancelled lesson counts only
+  as cancelled, an `ABSENT` mark is a no-show, a `PRESENT` mark or a completed lesson without a mark is attended;
+  the rate is attended / (attended + no-show), "—" before any lesson (last 100 meetings, like the table). When
+  the student carries "חיסור לא מוצדק" an amber banner "לתלמיד זה רשום חיסור לא מוצדק הממתין לבירור" appears, with
+  "טפל בחיסור" for staff, opening `ResolveAbsenceModal` (three decision cards, call summary, internal notes). The
+  status list lives in `StudentPortalTabs`, so the profile checkboxes and the banner stay in sync (a no-show
+  completion raises the banner at once, a resolution clears it).
+- **Directory** (`StudentDirectory.tsx`): amber "חיסור לא מוצדק" chip with the number of flagged students in the
+  viewer's scope (independent of search / grade), one click filters to them; the tag is shown as an amber badge.
+- **Unchanged:** `LedgerService`, `PayoutService`, `/api/lessons/complete`, `/api/lessons/[id]/cancel` and
+  `/reschedule`. No schema change (`lessonType` is a string column).
+- **Tests:** `tests/portal-retention-absence-resolution.test.ts` (34 tests): summary route `401` / `403` (student,
+  representative, unassigned teacher even with a spoofed body) / `200` for the assigned teacher and management,
+  legacy modal removed; resolve-absence access, validation, tag removal, make-up creation, `409` / `422` / `404`,
+  modal submit through the real route; make-up completion without a second credit; attendance metrics and the
+  meetings tab render (bar, banner, button for staff only); directory chip, count and teacher scope. One directory
+  assertion was updated for the new `unexcusedAbsenceCount` field. Verified: `tsc` 0, `npm run build` 0,
+  `npm test` 0 (25 files, 555 tests).
 
 ### Credit symmetry, in-room completion and no-show retention (Sprint 17)
 

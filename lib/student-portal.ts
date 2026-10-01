@@ -10,6 +10,7 @@ import {
 } from "./communication-templates";
 import { rescheduleBlock } from "./lesson-lifecycle";
 import { canCompleteLesson, creditTakenAtBooking, isLessonManagementRole } from "./lesson-completion";
+import { isMakeupLesson } from "./absence-resolution";
 import { lessonAntiCollisionWindow } from "./scheduling";
 import {
   PENDING_SCHEDULE_STATUS,
@@ -22,6 +23,7 @@ import {
   activateStudentStatuses,
   ageFromBirthDate,
   canEnterLessonRoom,
+  clearUnexcusedAbsence,
   flagUnexcusedAbsence,
   type AttendanceStatus,
   type CardLookup,
@@ -254,6 +256,7 @@ export function buildMeetingRows(lessons: LessonForTabs[], viewer: Viewer, now: 
         now
       ),
       creditTakenAtBooking: creditTakenAtBooking(lesson),
+      isMakeup: isMakeupLesson(lesson),
     };
   });
 }
@@ -492,6 +495,26 @@ export async function markUnexcusedAbsence(
   const data = { studentStatus, statusUpdatedAt: now, statusUpdatedById: actorId };
   await tx.studentProfile.upsert({ where: { userId: studentId }, create: { userId: studentId, ...data }, update: data });
   return studentStatus;
+}
+
+/**
+ * Removes the "חיסור לא מוצדק" flag inside the caller's transaction. Returns null when the student has no open
+ * absence; the conditional update also makes a second, parallel follow-up of the same absence a no-op.
+ */
+export async function clearUnexcusedAbsenceFlag(
+  tx: Prisma.TransactionClient,
+  studentId: string,
+  actorId: string,
+  now: Date = new Date()
+): Promise<StudentStatusCode[] | null> {
+  const current = await tx.studentProfile.findUnique({ where: { userId: studentId }, select: { studentStatus: true } });
+  if (!current?.studentStatus.includes("UNEXCUSED_ABSENCE")) return null;
+  const studentStatus = clearUnexcusedAbsence(current.studentStatus);
+  const cleared = await tx.studentProfile.updateMany({
+    where: { userId: studentId, studentStatus: { has: "UNEXCUSED_ABSENCE" } },
+    data: { studentStatus, statusUpdatedAt: now, statusUpdatedById: actorId },
+  });
+  return cleared.count === 1 ? studentStatus : null;
 }
 
 function structuredText(fields: Record<string, unknown>, key: string): string | null {

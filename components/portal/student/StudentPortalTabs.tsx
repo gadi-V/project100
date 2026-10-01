@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { STUDENT_TABS, type StudentPortalData, type StudentTabKey } from "../../../lib/student-portal-shared";
-import ProfileTab from "./ProfileTab";
+import ProfileTab, { type StatusSnapshot } from "./ProfileTab";
 import CoursesTab from "./CoursesTab";
 import MeetingsTab, { type SummaryRequest } from "./MeetingsTab";
 import CommunicationTab from "./CommunicationTab";
@@ -24,6 +24,13 @@ function tabClass(active: boolean): string {
 export default function StudentPortalTabs({ data, initialTab, initialSummaryRequest = null }: StudentPortalTabsProps) {
   const [activeTab, setActiveTab] = useState<StudentTabKey>(initialTab);
   const [summaryRequest, setSummaryRequest] = useState<SummaryRequest | null>(initialSummaryRequest);
+  const [studentStatus, setStudentStatus] = useState<string[]>(data.profile.studentStatus);
+  const [externalStatus, setExternalStatus] = useState<StatusSnapshot | null>(null);
+
+  const updateStatusFromMeetings = (next: string[]) => {
+    setStudentStatus(next);
+    setExternalStatus({ studentStatus: next, statusUpdatedAt: new Date().toISOString() });
+  };
 
   const closeSummaryRequest = () => {
     setSummaryRequest(null);
@@ -80,7 +87,13 @@ export default function StudentPortalTabs({ data, initialTab, initialSummaryRequ
           hidden={activeTab !== tab.key}
         >
           {tab.key === "profile" && (
-            <ProfileTab studentId={data.header.id} profile={data.profile} viewer={data.viewer} />
+            <ProfileTab
+              studentId={data.header.id}
+              profile={data.profile}
+              viewer={data.viewer}
+              externalStatus={externalStatus}
+              onStatusChange={(snapshot) => setStudentStatus(snapshot.studentStatus)}
+            />
           )}
           {tab.key === "courses" && (
             <CoursesTab
@@ -96,6 +109,9 @@ export default function StudentPortalTabs({ data, initialTab, initialSummaryRequ
               meetings={data.meetings}
               canSchedule={data.viewer.canEditProfile}
               onRequestSummary={openLessonSummary}
+              studentStatus={studentStatus}
+              canResolveAbsence={data.viewer.canEditProfile}
+              onStudentStatusChange={updateStatusFromMeetings}
             />
           )}
           {tab.key === "communication" && (

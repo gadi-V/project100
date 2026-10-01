@@ -4,6 +4,7 @@ import { requireAuth } from "../../../../../../../lib/api-auth";
 import { writeAuditLog } from "../../../../../../../lib/audit";
 import { INTAKE_RECORDER_ROLES } from "../../../../../../../lib/auth/staff-roles";
 import { PENDING_SCHEDULE_STATUS } from "../../../../../../../lib/pedagogic-decision";
+import { isMakeupLesson } from "../../../../../../../lib/absence-resolution";
 import {
   parseSchedulePendingInput,
   type SchedulePendingResult,
@@ -59,7 +60,7 @@ export async function POST(request: Request, { params }: RouteContext) {
     const [lesson, student, teacher] = await Promise.all([
       prisma.lesson.findUnique({
         where: { id: lessonId },
-        select: { id: true, studentId: true, status: true, title: true, durationMinutes: true },
+        select: { id: true, studentId: true, status: true, title: true, durationMinutes: true, lessonType: true },
       }),
       prisma.user.findUnique({ where: { id }, select: { whatsappGroupId: true } }),
       prisma.user.findUnique({ where: { id: teacherId }, select: { id: true, name: true, role: true, isApproved: true } }),
@@ -118,6 +119,7 @@ export async function POST(request: Request, { params }: RouteContext) {
           scheduledAt,
           durationMinutes,
           teacherName: teacher.name,
+          makeup: isMakeupLesson(lesson),
         });
         whatsappDispatched = sent.sent;
         if (!sent.sent) console.error(`[pending-schedule] group post for lesson ${lessonId} not sent: ${sent.error}`);

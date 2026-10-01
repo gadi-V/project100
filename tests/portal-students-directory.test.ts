@@ -419,7 +419,7 @@ describe("teacher data isolation", () => {
   it("a teacher with no lessons gets an empty list", async () => {
     session.getCurrentUser.mockResolvedValue(sessionUser("TEACHER", "teacher-new"));
     const page = await directoryPage();
-    expect(page).toEqual({ students: [], totalCount: 0, page: 1, limit: 25, totalPages: 1 });
+    expect(page).toEqual({ students: [], unexcusedAbsenceCount: 0, totalCount: 0, page: 1, limit: 25, totalPages: 1 });
   });
 });
 

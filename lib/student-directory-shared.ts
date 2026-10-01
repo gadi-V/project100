@@ -27,6 +27,9 @@ export const DIRECTORY_STATUS_FILTERS: StudentStatusCode[] = [
   "SUBSCRIPTION_CANCELLED",
 ];
 
+/** Retention chip: students with an absence still waiting for the follow-up call. */
+export const DIRECTORY_ABSENCE_FILTER: StudentStatusCode = "UNEXCUSED_ABSENCE";
+
 const STATUS_BY_CODE = new Map<string, StudentStatusCode>(STUDENT_STATUS_OPTIONS.map((o) => [o.code, o.code]));
 const STATUS_BY_LABEL = new Map<string, StudentStatusCode>(STUDENT_STATUS_OPTIONS.map((o) => [o.label, o.code]));
 const ALL_STATUSES = new Set(["ALL", "הכל"]);
@@ -142,4 +145,6 @@ export type StudentDirectoryRow = {
 
 export type StudentDirectoryPage = PaginationMeta & {
   students: StudentDirectoryRow[];
+  /** Students in the viewer's scope flagged "חיסור לא מוצדק", regardless of the active search and filters. */
+  unexcusedAbsenceCount: number;
 };

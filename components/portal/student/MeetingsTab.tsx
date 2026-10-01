@@ -3,9 +3,12 @@
 import { useCallback, useState } from "react";
 import Link from "next/link";
 import { toast } from "react-hot-toast";
-import { Check, MessageCircle, Video } from "lucide-react";
+import { AlertTriangle, Check, MessageCircle, Video } from "lucide-react";
 import {
+  attendanceMetrics,
+  flagUnexcusedAbsence,
   formatIsraelDateTime,
+  hasOpenAbsence,
   isLessonRoomOpen,
   lessonRoomHref,
   LESSON_STATUS_LABELS,
@@ -21,6 +24,7 @@ import {
   type SchedulePendingResult,
 } from "../../../lib/lesson-lifecycle";
 import { type CompleteLessonResponse } from "../../../lib/lesson-completion";
+import { MAKEUP_LESSON_LABEL, type ResolveAbsenceSuccess } from "../../../lib/absence-resolution";
 import { PENDING_SCHEDULE_STATUS } from "../../../lib/pedagogic-decision";
 import { emptyState, frostPanel } from "../../../lib/ui";
 import ScheduleMeetingModal from "./ScheduleMeetingModal";
@@ -28,6 +32,7 @@ import SchedulePendingLessonModal from "./SchedulePendingLessonModal";
 import RescheduleLessonModal from "./RescheduleLessonModal";
 import CancelLessonModal from "./CancelLessonModal";
 import CompleteLessonModal from "./CompleteLessonModal";
+import ResolveAbsenceModal from "./ResolveAbsenceModal";
 
 /** Opens the lesson summary form on the communication tab for a lesson that just ended. */
 export type SummaryRequest = { courseContext: string; lessonType: MeetingRow["lessonType"] };
@@ -38,7 +43,30 @@ type MeetingsTabProps = {
   /** REPRESENTATIVE / ADMIN / MANAGER may schedule, reschedule and cancel meetings. */
   canSchedule: boolean;
   onRequestSummary?: (request: SummaryRequest) => void;
+  /** CRM status codes of the student; "חיסור לא מוצדק" shows the follow-up banner. */
+  studentStatus?: string[];
+  /** REPRESENTATIVE / ADMIN / MANAGER may close an absence follow-up. */
+  canResolveAbsence?: boolean;
+  onStudentStatusChange?: (studentStatus: string[]) => void;
 };
+
+function resolutionBanner(result: ResolveAbsenceSuccess): Banner {
+  return {
+    tone: "success",
+    text: result.makeupLessonCreated
+      ? `הטיפול בחיסור נסגר ונפתח ${MAKEUP_LESSON_LABEL} שממתין לשיבוץ מועד`
+      : "הטיפול בחיסור נסגר והשיחה תועדה בלשונית התקשורת",
+  };
+}
+
+function MetricTile({ label, value, tone }: { label: string; value: string; tone: string }) {
+  return (
+    <div className="flex flex-col gap-0.5 rounded-2xl bg-white/70 px-4 py-3">
+      <dt className="text-xs text-neutral-500">{label}</dt>
+      <dd className={`text-xl font-semibold tabular-nums ${tone}`}>{value}</dd>
+    </div>
+  );
+}
 
 type LifecycleModal = { kind: "pending" | "reschedule" | "cancel" | "complete"; meeting: MeetingRow };
 
@@ -159,6 +187,9 @@ export default function MeetingsTab({
   meetings: initialMeetings,
   canSchedule,
   onRequestSummary,
+  studentStatus = [],
+  canResolveAbsence = false,
+  onStudentStatusChange,
 }: MeetingsTabProps) {
   const [meetings, setMeetings] = useState<MeetingRow[]>(initialMeetings);
   const [attendance, setAttendance] = useState<Record<string, AttendanceStatus | null>>(() =>
@@ -167,7 +198,17 @@ export default function MeetingsTab({
   const [savingId, setSavingId] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [lifecycleModal, setLifecycleModal] = useState<LifecycleModal | null>(null);
+  const [absenceModalOpen, setAbsenceModalOpen] = useState(false);
   const [banner, setBanner] = useState<Banner | null>(null);
+
+  const metrics = attendanceMetrics(
+    meetings.map((m) => ({ status: m.status, attendanceStatus: attendance[m.id] ?? null }))
+  );
+  const openAbsence = hasOpenAbsence(studentStatus);
+  const latestAbsent =
+    [...meetings]
+      .filter((m) => attendance[m.id] === "ABSENT")
+      .sort((a, b) => new Date(b.scheduledAt).getTime() - new Date(a.scheduledAt).getTime())[0] ?? null;
 
   const mark = async (lessonId: string, status: AttendanceStatus) => {
     setSavingId(lessonId);
@@ -218,8 +259,20 @@ export default function MeetingsTab({
     await refreshMeetings();
   };
 
-  const handlePendingScheduled = (result: SchedulePendingResult, whatsappDispatched: boolean) =>
-    finishLifecycle(`השיעור הפרטי שובץ ל-${formatIsraelDateTime(result.scheduledAt)} עם ${result.teacherName}`, whatsappDispatched);
+  const handlePendingScheduled = (meeting: MeetingRow, result: SchedulePendingResult, whatsappDispatched: boolean) =>
+    finishLifecycle(
+      `${meeting.isMakeup ? MAKEUP_LESSON_LABEL : "השיעור הפרטי"} שובץ ל-${formatIsraelDateTime(result.scheduledAt)} עם ${result.teacherName}`,
+      whatsappDispatched
+    );
+
+  const closeAbsenceModal = useCallback(() => setAbsenceModalOpen(false), []);
+
+  const handleAbsenceResolved = async (result: ResolveAbsenceSuccess) => {
+    setAbsenceModalOpen(false);
+    setBanner(resolutionBanner(result));
+    onStudentStatusChange?.(result.studentStatus);
+    if (result.makeupLessonCreated) await refreshMeetings();
+  };
 
   const handleRescheduled = (result: RescheduleResult, whatsappDispatched: boolean) =>
     finishLifecycle(
@@ -247,6 +300,7 @@ export default function MeetingsTab({
       )
     );
     if (closedAttendance) setAttendance((prev) => ({ ...prev, [meeting.id]: closedAttendance }));
+    if (result.absenceFlagged) onStudentStatusChange?.(flagUnexcusedAbsence(studentStatus));
     if (canSchedule) await refreshMeetings();
     if (result.promptSummary && onRequestSummary) {
       onRequestSummary({ courseContext: meeting.title, lessonType: meeting.lessonType });
@@ -267,6 +321,42 @@ export default function MeetingsTab({
 
   return (
     <div className="space-y-4">
+      {openAbsence && (
+        <div
+          role="alert"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-300 bg-amber-50 px-5 py-4"
+        >
+          <p className="flex items-center gap-2 text-sm font-semibold text-amber-950">
+            <AlertTriangle className="h-5 w-5 shrink-0 text-amber-600" aria-hidden="true" />
+            לתלמיד זה רשום חיסור לא מוצדק הממתין לבירור
+          </p>
+          {canResolveAbsence && (
+            <button
+              type="button"
+              className="rounded-full bg-amber-600 px-5 py-2 text-sm font-semibold text-white hover:bg-amber-700 transition-colors"
+              onClick={() => setAbsenceModalOpen(true)}
+            >
+              טפל בחיסור
+            </button>
+          )}
+        </div>
+      )}
+
+      {meetings.length > 0 && (
+        <section aria-label="מדדי נוכחות" className={`${frostPanel} p-4`}>
+          <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <MetricTile label="שיעורים שהתקיימו" value={metrics.attended.toLocaleString("he-IL")} tone="text-emerald-700" />
+            <MetricTile label="חיסורים (אי-הופעה)" value={metrics.noShow.toLocaleString("he-IL")} tone="text-amber-700" />
+            <MetricTile label="שיעורים שבוטלו" value={metrics.cancelled.toLocaleString("he-IL")} tone="text-neutral-700" />
+            <MetricTile
+              label="אחוז נוכחות"
+              value={metrics.attendanceRate === null ? "—" : `${metrics.attendanceRate}%`}
+              tone="text-neutral-900"
+            />
+          </dl>
+        </section>
+      )}
+
       {(canSchedule || banner) && (
         <div className="flex flex-wrap items-center justify-between gap-3">
           {banner ? (
@@ -328,7 +418,12 @@ export default function MeetingsTab({
                         <span className="font-medium text-neutral-900">{meeting.title}</span>
                         {pending && (
                           <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-900">
-                            ש.פ - ממתין לשיבוץ
+                            {meeting.isMakeup ? "ממתין לשיבוץ" : "ש.פ - ממתין לשיבוץ"}
+                          </span>
+                        )}
+                        {meeting.isMakeup && (
+                          <span className="inline-flex items-center rounded-full bg-violet-50 px-2.5 py-0.5 text-xs font-medium text-violet-800">
+                            {MAKEUP_LESSON_LABEL}
                           </span>
                         )}
                         {meeting.lessonType === "MAPPING" && (
@@ -441,7 +536,15 @@ export default function MeetingsTab({
           studentId={studentId}
           meeting={lifecycleModal.meeting}
           onClose={closeLifecycleModal}
-          onDone={handlePendingScheduled}
+          onDone={(result, whatsappDispatched) => handlePendingScheduled(lifecycleModal.meeting, result, whatsappDispatched)}
+        />
+      )}
+      {absenceModalOpen && (
+        <ResolveAbsenceModal
+          studentId={studentId}
+          absentLesson={latestAbsent}
+          onClose={closeAbsenceModal}
+          onDone={handleAbsenceResolved}
         />
       )}
       {lifecycleModal?.kind === "reschedule" && (

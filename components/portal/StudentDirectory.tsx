@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import { AlertTriangle } from "lucide-react";
 import {
+  DIRECTORY_ABSENCE_FILTER,
   DIRECTORY_STATUS_FILTERS,
   GRADE_OPTIONS,
   studentStatusLabel,
@@ -35,6 +37,12 @@ function chipClass(active: boolean): string {
   return active
     ? "bg-neutral-900 border-neutral-900 text-white"
     : "bg-white/70 border-neutral-200 text-neutral-700 hover:border-neutral-400";
+}
+
+function absenceChipClass(active: boolean): string {
+  return active
+    ? "bg-amber-600 border-amber-600 text-white"
+    : "bg-amber-50 border-amber-300 text-amber-900 hover:border-amber-500";
 }
 
 function pageWindow(page: number, totalPages: number): number[] {
@@ -140,6 +148,7 @@ export default function StudentDirectory({
   }, []);
 
   const hasFilters = Boolean(searchInput.trim() || status || grade);
+  const absenceActive = status === DIRECTORY_ABSENCE_FILTER;
   const { data, loading, error } = state;
 
   return (
@@ -183,6 +192,26 @@ export default function StudentDirectory({
               {studentStatusLabel(code)}
             </button>
           ))}
+          <span className="mx-1 h-5 w-px bg-neutral-200" aria-hidden="true" />
+          <button
+            type="button"
+            onClick={() => selectStatus(absenceActive ? null : DIRECTORY_ABSENCE_FILTER)}
+            aria-pressed={absenceActive}
+            title="תלמידים עם חיסור שממתין לשיחת בירור"
+            className={`inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full border transition-colors ${absenceChipClass(absenceActive)}`}
+          >
+            <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
+            {studentStatusLabel(DIRECTORY_ABSENCE_FILTER)}
+            {data && (
+              <span
+                className={`min-w-5 rounded-full px-1.5 text-center text-[11px] leading-5 ${
+                  absenceActive ? "bg-white/25 text-white" : "bg-amber-200/80 text-amber-950"
+                }`}
+              >
+                {data.unexcusedAbsenceCount.toLocaleString("he-IL")}
+              </span>
+            )}
+          </button>
         </div>
 
         <div className="flex flex-wrap items-center gap-2" role="group" aria-label="סינון לפי כיתה">
@@ -288,11 +317,20 @@ export default function StudentDirectory({
                           <span className="text-neutral-400">—</span>
                         ) : (
                           <span className="flex flex-wrap gap-1">
-                            {student.statuses.map((code) => (
-                              <span key={code} className={badgeNeutral}>
-                                {studentStatusLabel(code)}
-                              </span>
-                            ))}
+                            {student.statuses.map((code) =>
+                              code === DIRECTORY_ABSENCE_FILTER ? (
+                                <span
+                                  key={code}
+                                  className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-900"
+                                >
+                                  {studentStatusLabel(code)}
+                                </span>
+                              ) : (
+                                <span key={code} className={badgeNeutral}>
+                                  {studentStatusLabel(code)}
+                                </span>
+                              )
+                            )}
                           </span>
                         )}
                       </td>
