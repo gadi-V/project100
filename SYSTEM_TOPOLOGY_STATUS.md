@@ -41,9 +41,10 @@
 ### Staff & intake
 - `POST /api/login` with `portal: "staff"` — staff gate used by `/portal/login`; non-staff roles get `403` and no cookie (Sprint 9).
 - `GET/POST /api/admin/intake` — mapping-call questionnaire (`IntakeAssessment`), REPRESENTATIVE / ADMIN / MANAGER only (Sprint 9).
-- Pages `/portal/dashboard` (staff dashboard) and `/portal/intake` (mapping-call workspace) — server-side role gate (Sprint 10).
+- Pages `/portal/dashboard` (staff dashboard) and `/portal/intake` (mapping-call workspace) — server-side role gate (Sprint 10). `/portal/dashboard` is the teacher cockpit for approved teachers and offers ADMIN / MANAGER a teacher view (`?view=teacher&teacherId=`) (Sprint 19).
+- `GET /api/portal/teacher/dashboard` — teacher cockpit: upcoming lessons (7 days), completed lessons missing a summary (14 days), monthly lessons / hours / accrued PAYOUT ledger total. TEACHER (own data) / ADMIN / MANAGER (`?teacherId=`) only (Sprint 19).
 - Page `/portal/students/[id]` — student CRM screen with 5 tabs (Sprint 10b).
-- `GET /api/portal/students` — student directory: `search`, `status`, `grade`, `page`, `limit` (25 by default); TEACHER sees own students only (Sprint 11). Response adds `unexcusedAbsenceCount` for the retention chip (Sprint 18).
+- `GET /api/portal/students` — student directory: `search`, `status`, `grade`, `page`, `limit` (25 by default); TEACHER sees own students only (Sprint 11): a lesson with them or a teacher referral to them (Sprint 19). Response adds `unexcusedAbsenceCount` for the retention chip (Sprint 18).
 - Page `/portal/students` — customer / student directory with quick status + grade filters and pagination (Sprint 11).
 - `GET/POST /api/portal/students/[id]/communication` — communication history (newest first) + save summary (AuditLog `STUDENT_COMMUNICATION_LOGGED`) (Sprint 10b). Lesson / mapping summaries are also posted to the student's quad WhatsApp group (`sendToWhatsApp`, default `true`; response `whatsappDispatched`) (Sprint 13).
 - `PATCH /api/portal/students/[id]/profile` — status checkboxes + profile fields, REPRESENTATIVE / ADMIN / MANAGER (AuditLog `STUDENT_PROFILE_UPDATED`) (Sprint 10b).
@@ -204,6 +205,41 @@ Fresh databases apply all migrations normally with `npx prisma migrate deploy`.
 | 16 | Lesson completion loop: closing a lesson with attendance (attended / student no-show / teacher cancelled), teacher compensation in TeacherPayout + BillingLedger at the hourly rate, final direct-package credit deduction, and management emergency override for reschedules inside 24 h | ✅ Completed |
 | 17 | Credit symmetry on cancellation (credit returned only if it was taken at booking), lesson completion and attendance report from inside the Daily room (call closed, teacher sent to the summary form), and no-show retention alert (CRM "חיסור לא מוצדק" flag + quad WhatsApp notice) | ✅ Completed |
 | 18 | Lesson summary API hardening (session + assigned teacher / management only, IDOR closed), legacy `PostLessonSummaryModal` removed, and absence retention workflow: directory "חיסור לא מוצדק" quick filter, absence follow-up modal with make-up lesson, attendance metrics on the meetings tab | ✅ Completed |
+| 19 | Teacher cockpit on `/portal/dashboard` (today / week lessons, room entry, completion with attendance, summaries waiting to be written, hours and accrued monthly pay), `GET /api/portal/teacher/dashboard`, management "תצוגת מורה" switch, and student-directory isolation for teachers (own lessons or referral only) | ✅ Completed |
+
+### Teacher cockpit and role isolation (Sprint 19)
+
+- **Directory isolation** (`buildStudentDirectoryWhere`, behind `GET /api/portal/students`): a TEACHER sees a student
+  only with a lesson where they are the teacher (any status, past or future) **or** a `TeacherReferral` to them, the
+  same rule as `resolveStudentAccess`. Other teachers' students and students never assigned to anyone stay hidden;
+  REPRESENTATIVE / ADMIN / MANAGER still see everyone. The directory uses teacher wording ("התלמידים שלי",
+  "סטטוס תלמיד", no "מורה אחראי" column, "תיק תלמיד וסיכומים", link back to the cockpit).
+- **`GET /api/portal/teacher/dashboard`** (TEACHER / ADMIN / MANAGER; `401` without a session, `403` for STUDENT /
+  REPRESENTATIVE before any query). A TEACHER always gets their own data (`teacherId` is ignored); ADMIN / MANAGER pass
+  `?teacherId=` (`404` if it is not a teacher) and receive the approved-teacher list (`data: null` until one is picked).
+  `lib/teacher-dashboard.ts` (server) + `lib/teacher-dashboard-shared.ts` (types and pure rules). Response
+  `{ success, data: { teacher, generatedAt, todayCount, weekCount, upcoming[], pendingSummaries[], earnings }, teachers }`:
+  - `upcoming`: `SCHEDULED` lessons from the start of today (Israel) to now + 7 days, plus any `IN_PROGRESS` lesson,
+    ascending, with student name, grade, subject, start / end, make-up flag, `canEnterRoom` and `canComplete` (started
+    and still open, same rule as the meetings tab);
+  - `pendingSummaries`: `COMPLETED` lessons of the last 14 days (no-shows excluded) without a summary. Summaries carry
+    no lesson id, so a lesson counts as summarised when a `LESSON_SUMMARY` (`MAPPING_SUMMARY` for mapping lessons) of
+    that student was written between the lesson start and the student's next completed lesson. WhatsApp dispatch is
+    recorded only in the audit log, so an unsent summary is not detected. Each row links to
+    `/portal/students/{id}?tab=communication&autoPromptSummary=true&lessonId=…`;
+  - `earnings`: Israel calendar month — `COMPLETED` lessons (attended / no-show split), minutes and hours, and
+    `accruedPayoutIls` = sum of the teacher's `PAYOUT` ledger rows created this month (lesson pay and late-cancel
+    shares). The second `PAYOUT` row `markPayoutPaid` writes on settlement (`transactionId` `payout-paid-…`) is skipped
+    so a paid lesson is not counted twice.
+- **`/portal/dashboard`**: approved teachers get `components/portal/teacher/TeacherDashboard.tsx` (teachers in onboarding
+  stay on `/dashboard`). KPI cards "שיעורים להיום / השבוע", "סיכומים ממתינים להזנה" (amber when above 0), "שעות שבוצעו
+  החודש", "צפי שכר חודשי צבור (₪)"; upcoming list with "היכנס לשיעור" and "סיום שיעור ונוכחות" (reuses
+  `CompleteLessonModal`; an attended lesson continues to the summary form); "משימות לטיפול מהיר" with one link per missing
+  summary. ADMIN / MANAGER keep the representative dashboard and get "תצוגת מורה" (`?view=teacher&teacherId=`) with a
+  teacher picker. The portal "היום" tab and logo now open `/portal/dashboard` for teachers too; the teacher's directory
+  tab reads "התלמידים שלי".
+- Tests: `tests/portal-teacher-cockpit.test.ts` (29); `staff-intake-portal` and `portal-students-directory` updated
+  for the new teacher routing.
 
 ### Summary API hardening and absence resolution (Sprint 18)
 

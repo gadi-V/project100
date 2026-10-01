@@ -18,18 +18,17 @@ export type PortalNavTab = {
 export type PortalNavLink = { href: string; label: string };
 
 /**
- * "היום" opens the role's daily workspace, "קורסים" the lessons view the role may open
- * (`/admin/lessons` is ADMIN / MANAGER only, teachers get their lesson list), "לקוחות" the directory.
+ * "היום" opens the role's daily workspace (`/portal/dashboard`: the teacher cockpit for teachers),
+ * "קורסים" the lessons view the role may open (`/admin/lessons` is ADMIN / MANAGER only, teachers get
+ * their lesson list), and the directory ("התלמידים שלי" for a teacher, "לקוחות" for staff).
  * Representatives have no lessons view yet, so they get no "קורסים" tab.
  */
 export function portalNavTabs(role: string): PortalNavTab[] {
   const isAdmin = role === "ADMIN" || role === "MANAGER";
-  const tabs: PortalNavTab[] = [
-    { key: "today", label: "היום", href: role === "TEACHER" ? "/dashboard" : "/portal/dashboard" },
-  ];
+  const tabs: PortalNavTab[] = [{ key: "today", label: "היום", href: "/portal/dashboard" }];
   if (isAdmin) tabs.push({ key: "courses", label: "קורסים", href: "/admin/lessons" });
   else if (role === "TEACHER") tabs.push({ key: "courses", label: "קורסים", href: "/dashboard#teacher-lessons" });
-  tabs.push({ key: "students", label: "לקוחות", href: "/portal/students" });
+  tabs.push({ key: "students", label: role === "TEACHER" ? "התלמידים שלי" : "לקוחות", href: "/portal/students" });
   return tabs;
 }
 
@@ -46,6 +45,6 @@ export function isPortalTabActive(tab: PortalNavTab, pathname: string): boolean 
   return pathname === path || pathname.startsWith(`${path}/`);
 }
 
-export function portalHomeHref(role: string): string {
-  return role === "TEACHER" ? "/dashboard" : "/portal/dashboard";
+export function portalHomeHref(_role: string): string {
+  return "/portal/dashboard";
 }

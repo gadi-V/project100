@@ -187,8 +187,21 @@ describe("staff portal access control", () => {
     expect(db.intakeAssessmentFindMany).not.toHaveBeenCalled();
   });
 
-  it("/portal/dashboard keeps teachers on their weekly board in /dashboard", async () => {
+  it("/portal/dashboard renders the teacher cockpit for approved teachers", async () => {
     session.getCurrentUser.mockResolvedValue(sessionUser("TEACHER"));
+    const Dashboard = await loadDashboard();
+    const tree = asElement(await Dashboard());
+    expect(navigation.redirect).not.toHaveBeenCalled();
+    const [header, main] = tree.props.children as ElementLike[];
+    expect(header.props.role).toBe("TEACHER");
+    const cockpit = asElement(main.props.children);
+    expect((cockpit.type as { name?: string }).name).toBe("TeacherDashboard");
+    expect(cockpit.props.viewerRole).toBe("TEACHER");
+    expect(db.fallbackLeadCount).not.toHaveBeenCalled();
+  });
+
+  it("/portal/dashboard keeps teachers in onboarding on /dashboard", async () => {
+    session.getCurrentUser.mockResolvedValue({ ...sessionUser("TEACHER"), isApproved: false });
     const Dashboard = await loadDashboard();
     await expectRedirect(() => Dashboard(), "/dashboard");
   });

@@ -150,6 +150,8 @@ export default function StudentDirectory({
   const hasFilters = Boolean(searchInput.trim() || status || grade);
   const absenceActive = status === DIRECTORY_ABSENCE_FILTER;
   const { data, loading, error } = state;
+  const columnCount = isTeacher ? 6 : 7;
+  const resultCount = data ? data.totalCount.toLocaleString("he-IL") : null;
 
   return (
     <div className="space-y-6">
@@ -158,8 +160,17 @@ export default function StudentDirectory({
           <div>
             <h1 className="text-2xl font-semibold text-neutral-900">{isTeacher ? "התלמידים שלי" : "לקוחות"}</h1>
             <p className="text-sm text-neutral-500 mt-1">
-              {data ? `נמצאו ${data.totalCount.toLocaleString("he-IL")} תוצאות` : "טוענים את הרשימה..."}
+              {resultCount === null
+                ? "טוענים את הרשימה..."
+                : isTeacher
+                  ? `${resultCount} תלמידים שלומדים איתך או שובצו אליך`
+                  : `נמצאו ${resultCount} תוצאות`}
             </p>
+            {isTeacher && (
+              <Link href="/portal/dashboard" className="inline-block mt-2 text-xs font-medium text-neutral-700 hover:underline underline-offset-4">
+                חזרה למרחב המורה
+              </Link>
+            )}
           </div>
           <input
             type="search"
@@ -249,7 +260,11 @@ export default function StudentDirectory({
         ) : data && data.students.length === 0 && !loading ? (
           <div className={`${emptyState} m-5`}>
             <p className="text-sm font-medium text-neutral-900">
-              {hasFilters ? "לא נמצאו תלמידים שמתאימים לסינון" : "עדיין אין תלמידים ברשימה"}
+              {hasFilters
+                ? "לא נמצאו תלמידים שמתאימים לסינון"
+                : isTeacher
+                  ? "עדיין לא שובצו אליך תלמידים. תלמיד יופיע כאן אחרי שישובץ אליך או שייקבע איתך שיעור"
+                  : "עדיין אין תלמידים ברשימה"}
             </p>
             {hasFilters && (
               <button type="button" onClick={resetFilters} className={secondaryCta}>
@@ -264,9 +279,11 @@ export default function StudentDirectory({
                 <th scope="col" className="px-5 py-3 font-medium text-start">שם התלמיד</th>
                 <th scope="col" className="px-5 py-3 font-medium text-start">טלפון</th>
                 <th scope="col" className="px-5 py-3 font-medium text-start">כיתה והקבצה</th>
-                <th scope="col" className="px-5 py-3 font-medium text-start">סטטוס לקוח</th>
-                <th scope="col" className="px-5 py-3 font-medium text-start">שיעור קרוב / אחרון</th>
-                <th scope="col" className="px-5 py-3 font-medium text-start">מורה אחראי</th>
+                <th scope="col" className="px-5 py-3 font-medium text-start">{isTeacher ? "סטטוס תלמיד" : "סטטוס לקוח"}</th>
+                <th scope="col" className="px-5 py-3 font-medium text-start">
+                  {isTeacher ? "השיעור הקרוב / האחרון איתך" : "שיעור קרוב / אחרון"}
+                </th>
+                {!isTeacher && <th scope="col" className="px-5 py-3 font-medium text-start">מורה אחראי</th>}
                 <th scope="col" className="px-5 py-3">
                   <span className="sr-only">פעולות</span>
                 </th>
@@ -276,7 +293,7 @@ export default function StudentDirectory({
               {!data || (loading && data.students.length === 0)
                 ? Array.from({ length: SKELETON_ROWS }, (_, row) => (
                     <tr key={row} className="border-b border-neutral-100 last:border-b-0">
-                      {Array.from({ length: 7 }, (_, cell) => (
+                      {Array.from({ length: columnCount }, (_, cell) => (
                         <td key={cell} className="px-5 py-4">
                           <div className={`${skeletonShimmer} h-4 w-full max-w-[9rem]`} />
                         </td>
@@ -337,13 +354,13 @@ export default function StudentDirectory({
                       <td className="px-5 py-3 whitespace-nowrap">
                         <LessonCell nextLessonAt={student.nextLessonAt} lastLessonAt={student.lastLessonAt} />
                       </td>
-                      <td className="px-5 py-3 text-neutral-700">{student.teacherName ?? "—"}</td>
+                      {!isTeacher && <td className="px-5 py-3 text-neutral-700">{student.teacherName ?? "—"}</td>}
                       <td className="px-5 py-3 text-end">
                         <Link
                           href={`/portal/students/${encodeURIComponent(student.id)}`}
                           className="inline-flex whitespace-nowrap rounded-full bg-neutral-900 text-white text-xs font-medium px-4 py-1.5 hover:bg-neutral-800 transition-colors"
                         >
-                          פתח תיק תלמיד
+                          {isTeacher ? "תיק תלמיד וסיכומים" : "פתח תיק תלמיד"}
                         </Link>
                       </td>
                     </tr>

@@ -21,27 +21,60 @@ import {
   secondaryCta,
 } from "../../../lib/ui";
 import PortalHeader from "../../../components/portal/PortalHeader";
+import TeacherDashboard from "../../../components/portal/teacher/TeacherDashboard";
 
 export const dynamic = "force-dynamic";
 
 const PENDING_PREVIEW = 5;
+
+type SearchParams = Record<string, string | string[] | undefined>;
 
 function intakeHref(candidate: IntakeCandidate): string {
   const param = candidate.kind === "STUDENT" ? "studentId" : "leadId";
   return `/portal/intake?${param}=${encodeURIComponent(candidate.id)}`;
 }
 
+function firstParam(value: string | string[] | undefined): string | null {
+  const raw = Array.isArray(value) ? value[0] : value;
+  return raw?.trim() || null;
+}
+
 /**
- * Staff dashboard. Representatives (and admins) get the mapping-call queue; teachers keep their
- * weekly board in `/dashboard`; every other role is sent back to the staff gate.
+ * Staff dashboard. Approved teachers get their cockpit (lessons, missing summaries, monthly pay);
+ * teachers still in onboarding stay on `/dashboard`. Representatives and admins get the mapping-call
+ * queue, and ADMIN / MANAGER can switch to any teacher's cockpit with `?view=teacher&teacherId=`.
+ * Every other role is sent back to the staff gate.
  */
-export default async function StaffDashboardPage() {
+export default async function StaffDashboardPage({ searchParams }: { searchParams?: Promise<SearchParams> } = {}) {
   const user = await getCurrentUser();
   if (!user) redirect("/portal/login");
-  if (user.role === "TEACHER") redirect("/dashboard");
+
+  if (user.role === "TEACHER") {
+    if (!user.isApproved) redirect("/dashboard");
+    return (
+      <>
+        <PortalHeader userName={user.name} role={user.role} />
+        <main className={`${pageCanvas} relative z-10 py-10 px-6`} dir="rtl">
+          <TeacherDashboard viewerRole={user.role} viewerName={user.name} />
+        </main>
+      </>
+    );
+  }
   if (!isIntakeRecorderRole(user.role)) redirect("/portal/login");
 
   const isAdmin = user.role === "ADMIN" || user.role === "MANAGER";
+  const params: SearchParams = (await searchParams) ?? {};
+  if (isAdmin && firstParam(params.view) === "teacher") {
+    return (
+      <>
+        <PortalHeader userName={user.name} role={user.role} />
+        <main className={`${pageCanvas} relative z-10 py-10 px-6`} dir="rtl">
+          <TeacherDashboard viewerRole={user.role} viewerName={user.name} initialTeacherId={firstParam(params.teacherId)} />
+        </main>
+      </>
+    );
+  }
+
   const [counts, pending, recent] = await Promise.all([
     countPendingIntakes(),
     getPendingIntakeCandidates(),
@@ -62,9 +95,14 @@ export default async function StaffDashboardPage() {
             </div>
             <div className="flex items-center gap-3">
               {isAdmin && (
-                <Link href="/admin" className={secondaryCta}>
-                  לוח ניהול
-                </Link>
+                <>
+                  <Link href="/portal/dashboard?view=teacher" className={secondaryCta}>
+                    תצוגת מורה
+                  </Link>
+                  <Link href="/admin" className={secondaryCta}>
+                    לוח ניהול
+                  </Link>
+                </>
               )}
               <Link href="/portal/intake" className={primaryCta}>
                 התחל שיחת מיפוי חדשה

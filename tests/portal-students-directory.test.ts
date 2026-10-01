@@ -599,7 +599,11 @@ describe("/portal/students page and navigation", () => {
   it("offers היום / קורסים / לקוחות tabs routed per role", () => {
     const labels = (role: string) => portalNavTabs(role).map((t) => `${t.label}:${t.href}`);
     expect(labels("ADMIN")).toEqual(["היום:/portal/dashboard", "קורסים:/admin/lessons", "לקוחות:/portal/students"]);
-    expect(labels("TEACHER")).toEqual(["היום:/dashboard", "קורסים:/dashboard#teacher-lessons", "לקוחות:/portal/students"]);
+    expect(labels("TEACHER")).toEqual([
+      "היום:/portal/dashboard",
+      "קורסים:/dashboard#teacher-lessons",
+      "התלמידים שלי:/portal/students",
+    ]);
     expect(labels("REPRESENTATIVE")).toEqual(["היום:/portal/dashboard", "לקוחות:/portal/students"]);
     expect(portalExtraLinks("TEACHER")).toEqual([]);
     expect(portalExtraLinks("REPRESENTATIVE").map((l) => l.href)).toEqual(["/portal/intake"]);

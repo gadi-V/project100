@@ -14,8 +14,9 @@ import {
 /**
  * Server-only student list behind `GET /api/portal/students`.
  * REPRESENTATIVE / ADMIN / MANAGER see every student. A TEACHER sees only students with at least
- * one lesson (scheduled or past) where they are the teacher, and only their own lessons in the
- * next / last lesson columns. Any other role gets nothing.
+ * one lesson (scheduled or past) where they are the teacher, or who are assigned to them through a
+ * teacher referral, and only their own lessons in the next / last lesson columns. Leads that were
+ * never assigned are not students and never appear. Any other role gets nothing.
  */
 
 type Viewer = { id: string; role: string };
@@ -52,7 +53,12 @@ export function buildStudentDirectoryWhere(viewer: Viewer, query: StudentDirecto
   const conditions: Prisma.UserWhereInput[] = [{ role: "STUDENT" }];
 
   if (viewer.role === "TEACHER") {
-    conditions.push({ takenLessons: { some: { teacherId: viewer.id } } });
+    conditions.push({
+      OR: [
+        { takenLessons: { some: { teacherId: viewer.id } } },
+        { referralsAsStudent: { some: { teacherId: viewer.id } } },
+      ],
+    });
   } else if (!isIntakeRecorderRole(viewer.role)) {
     return null;
   }
