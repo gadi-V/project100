@@ -2,7 +2,7 @@
 
 > Final wiring map as-built. Status: **FULLY WIRED** — every layer verified by
 > `scripts/test-live-db-pipeline.ts` (Live-DB), `agents_hive/test_hive_mcp_tools.py`
-> (9 FastMCP tools), `scripts/verify-closed-loop-e2e.ts` (18 dry-run checks) and
+> (9 FastMCP tools), `scripts/verify-closed-loop-e2e.ts` (25 dry-run checks) and
 > `scripts/e2e-dry-run-verification.ts` (13 live-server checks). Readiness probe: `GET /api/health`.
 
 ---
@@ -78,8 +78,8 @@
 - `GET /api/admin/audit/risk-events` — Head-of-Desk risk surface.
 - `POST /api/admin/override/compensation` — make-up lesson + PLATFORM_COMPENSATION.
 - `GET/POST/PUT/DELETE /api/admin/curriculum` — curriculum tree + syllabus agent.
-- `GET /api/admin/payouts` (per-teacher open balance from the PAYOUT ledger + the per-payout queue), `POST /api/admin/payouts` (mark a teacher's whole balance as paid: negative `payout-paid-{uuid}` ledger offset, open payouts → PAID; Sprint 20), `POST /api/admin/payouts/settle` (single payout), `GET/POST /api/admin/appeals`.
-- Page `/admin/payouts` — teacher payroll: balances, bank details, bank-transfer CSV, "סמן תשלום כבוצע" (Sprint 20).
+- `GET /api/admin/payouts` (per teacher `earnedAmount`, `penaltyAmount`, `paidAmount` and net `balance` = PAYOUT − PENALTY − `payout-paid-`, floored at 0; Sprint 21 — plus the per-payout queue), `POST /api/admin/payouts` (mark a teacher's whole net balance as paid: negative `payout-paid-{uuid}` ledger offset, open payouts → PAID; Sprints 20–21), `POST /api/admin/payouts/settle` (single payout), `GET/POST /api/admin/appeals`.
+- Page `/admin/payouts` — teacher payroll: gross pay, "קנסות/קיזוזים (₪)" column, net balances, bank details, bank-transfer CSV, "סמן תשלום כבוצע" (Sprints 20–21).
 
 ### Cron / Webhooks
 - `GET /api/cron/lesson-reminders` (`*/5`), `GET /api/cron/head-of-desk` (`*/15`).
@@ -142,7 +142,7 @@ Verified by `test_hive_mcp_tools.py`:
 | Script | Purpose | Status |
 |---|---|---|
 | `scripts/test-live-db-pipeline.ts` | 6-station live-DB integration + teardown | ✅ (run) |
-| `scripts/verify-closed-loop-e2e.ts` | 18 dry-run checks (4 layers + 6 desks + WhatsApp group lifecycle), no DB writes | ✅ 18/18 |
+| `scripts/verify-closed-loop-e2e.ts` | 25 dry-run checks (4 layers + 6 desks + WhatsApp group lifecycle + teacher payroll penalties + unified כספים tab), no DB writes | ✅ 25/25 |
 | `scripts/e2e-dry-run-verification.ts` | 8-station funnel against a running server (`APP_URL`), self-cleaning fixtures | ✅ 13/13 |
 | `agents_hive/test_hive_mcp_tools.py` | 9 FastMCP tools | ✅ PASS |
 | `scripts/test-curriculum-e2e.ts` | matching-adjacent curriculum E2E | ✅ |
@@ -209,6 +209,35 @@ Fresh databases apply all migrations normally with `npx prisma migrate deploy`.
 | 18 | Lesson summary API hardening (session + assigned teacher / management only, IDOR closed), legacy `PostLessonSummaryModal` removed, and absence retention workflow: directory "חיסור לא מוצדק" quick filter, absence follow-up modal with make-up lesson, attendance metrics on the meetings tab | ✅ Completed |
 | 19 | Teacher cockpit on `/portal/dashboard` (today / week lessons, room entry, completion with attendance, summaries waiting to be written, hours and accrued monthly pay), `GET /api/portal/teacher/dashboard`, management "תצוגת מורה" switch, and student-directory isolation for teachers (own lessons or referral only) | ✅ Completed |
 | 20 | Financial loop closed: "כספים" tab in the student file (payment history, ledger, manual payment with credit top-up), teacher payroll at `/admin/payouts` (open balance per teacher, "סמן תשלום כבוצע" with a `payout-paid-` ledger offset), and approved teachers routed to `/portal/dashboard` after sign-in | ✅ Completed |
+| 21 | Financial consolidation: teacher fines (PENALTY, less appeal waivers) deducted from the payroll net balance with a "קנסות/קיזוזים (₪)" column, the "הוראות קבע" tab merged into "כספים" (weekly plan, next charge, standing order, card, credits, payments, ledger) with five tabs left and legacy `?tab=` redirects, and full verification (624 Vitest, 25/25 closed-loop E2E, clean build) | ✅ Completed |
+
+### Financial consolidation: teacher penalties and unified billing tab (Sprint 21)
+
+- **Net teacher balance** (`summarizePayoutLedger` in `lib/teacher-payouts-shared.ts`, read by `lib/teacher-payouts.ts`
+  from `PAYOUT`, `PENALTY` and `ADJUSTMENT` rows): earned = PAYOUT rows without `payout-paid-`; fines = PENALTY rows by
+  absolute value (the cancel route writes them positive) less `appeal-waive-{lessonId}` ADJUSTMENT rows written by an
+  approved appeal; paid = `payout-paid-` rows by absolute value; balance = earned − fines − paid, never below 0. Other
+  ADJUSTMENT rows are ignored. Fines are cumulative, so a fine larger than the pay is carried into the next lessons and
+  a settled fine is never deducted twice.
+- **`GET /api/admin/payouts`**: each teacher row is `earnedAmount`, `penaltyAmount`, `paidAmount`, `balance` (renamed
+  from `earnedIls` / `paidIls` / `balanceIls`). **`POST`**: `amount` must equal the net balance; the `payout-paid-`
+  offset, ledger metadata and AuditLog carry `penaltyAmount`, and the response adds `penaltyAmount`.
+- **`/admin/payouts`**: new "קנסות/קיזוזים (₪)" column (red `−₪…`, `—` when none); a teacher whose pay is fully
+  offset by fines shows "קוזז בקנסות" instead of a pay button; the confirmation states the deducted fines.
+- **Student file tabs**: `STUDENT_TABS` = סקירה כללית (`profile`), מפגשים, תקשורת, קורסים, כספים. `StandingOrdersTab`
+  was removed; `?tab=standing-orders|subscriptions|recurring` redirects to `/portal/students/[id]?tab=billing`
+  (`isLegacyBillingTab`, after the auth and access checks).
+- **"כספים" tab** (`BillingTab`): a "מנוי פעיל והוראות קבע" section on top (`summarizeSubscription` in
+  `lib/student-billing-shared.ts`): plan from the latest pedagogic decision (חד שבועי / דו שבועי / ללא מנוי שבועי),
+  next charge = next four-week batch boundary of the plan's start date (Israel date), standing order פעיל (plan + card
+  on file) / ממתין (plan, no card) / בוטל ("ביטול מנוי" status) / לא הוגדר (no plan), and the card. Below it: lesson
+  credits, total paid, "+ הזן תשלום והטען חבילה", payment history and the ledger. `StudentPortalTabs` passes
+  `data.standingOrders` and `data.plans.subscriptions`.
+- **E2E**: `scripts/verify-closed-loop-e2e.ts` gained 7 finance checks (penalty offset, net settlement, floor + appeal
+  waiver, ledger query, five tabs + legacy keys, plan + standing order, unified tab wiring): 25/25.
+- Tests: `tests/portal-financial-consolidation.test.ts` (15); `portal-financial-engine` updated for the net balance
+  (Dana's ₪50 fine: ₪350 → ₪300) and the renamed fields; `student-tabs-and-templates` updated for the five tabs and
+  the legacy-tab redirect. Totals: 28 files, 624 tests.
 
 ### Financial engine: student billing, teacher payouts, teacher sign-in routing (Sprint 20)
 

@@ -2,9 +2,27 @@
 
 import { useCallback, useEffect, useState } from "react";
 import ManualPaymentModal from "./ManualPaymentModal";
-import { billingEndpoint, type BillingResponse, type StudentBillingData } from "../../../lib/student-billing-shared";
-import { formatIls, formatIsraelDay } from "../../../lib/student-portal-shared";
-import { badgeNeutral, badgeSuccess, badgeWarning, emptyState, eyebrow, frostPanel, primaryCta, secondaryCta } from "../../../lib/ui";
+import {
+  billingEndpoint,
+  RECURRING_STATUS_LABELS,
+  summarizeSubscription,
+  type BillingResponse,
+  type RecurringStatus,
+  type StudentBillingData,
+} from "../../../lib/student-billing-shared";
+import { formatIls, formatIsraelDay, type StandingOrderData } from "../../../lib/student-portal-shared";
+import type { SubscriptionRow } from "../../../lib/pedagogic-decision";
+import {
+  badgeDanger,
+  badgeNeutral,
+  badgeSuccess,
+  badgeWarning,
+  emptyState,
+  eyebrow,
+  frostPanel,
+  primaryCta,
+  secondaryCta,
+} from "../../../lib/ui";
 
 type BillingTabProps = {
   studentId: string;
@@ -12,6 +30,10 @@ type BillingTabProps = {
   canViewBilling: boolean;
   /** Server-provided first payload; the tab fetches it itself when absent. */
   initialData?: StudentBillingData | null;
+  /** Card on file and subscription status from the student screen loader. */
+  standingOrders?: StandingOrderData | null;
+  /** Pedagogic decisions, newest first; the first one is the current weekly plan. */
+  subscriptions?: readonly SubscriptionRow[];
 };
 
 function statusBadge(status: string): string {
@@ -20,11 +42,28 @@ function statusBadge(status: string): string {
   return badgeNeutral;
 }
 
+const RECURRING_BADGE: Record<RecurringStatus, string> = {
+  ACTIVE: badgeSuccess,
+  PENDING: badgeWarning,
+  CANCELLED: badgeDanger,
+  NOT_SET: badgeNeutral,
+};
+
 function signedIls(amount: number): string {
   return amount < 0 ? `−${formatIls(Math.abs(amount))}` : formatIls(amount);
 }
 
-export default function BillingTab({ studentId, canViewBilling, initialData = null }: BillingTabProps) {
+function dateKeyLabel(dateKey: string): string {
+  return dateKey.split("-").reverse().join(".");
+}
+
+export default function BillingTab({
+  studentId,
+  canViewBilling,
+  initialData = null,
+  standingOrders = null,
+  subscriptions = [],
+}: BillingTabProps) {
   const [data, setData] = useState<StudentBillingData | null>(initialData);
   const [loading, setLoading] = useState(canViewBilling && initialData === null);
   const [error, setError] = useState<string | null>(null);
@@ -61,8 +100,56 @@ export default function BillingTab({ studentId, canViewBilling, initialData = nu
     );
   }
 
+  const subscription = summarizeSubscription(standingOrders, subscriptions);
+
   return (
     <div className="space-y-6">
+      <section className={`${frostPanel} p-5 space-y-4`} aria-labelledby="billing-subscription-title" data-testid="billing-subscription">
+        <div className="space-y-1">
+          <h2 id="billing-subscription-title" className="text-sm font-semibold text-neutral-900">
+            מנוי פעיל והוראות קבע
+          </h2>
+          <p className="text-xs text-neutral-500">החיוב הקרוב חל בתחילת מחזור 4 השבועות הבא של המנוי.</p>
+        </div>
+        <dl className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+          <div className="space-y-1">
+            <dt className={eyebrow}>מסלול</dt>
+            <dd className="text-sm font-medium text-neutral-900" data-testid="billing-plan">
+              {subscription.planLabel}
+            </dd>
+            {subscription.subject && (
+              <dd className="text-xs text-neutral-500">
+                {subscription.subject}
+                {subscription.teacherName ? ` · ${subscription.teacherName}` : ""}
+              </dd>
+            )}
+          </div>
+          <div className="space-y-1">
+            <dt className={eyebrow}>חיוב קרוב</dt>
+            <dd className="text-sm font-medium text-neutral-900 tabular-nums" data-testid="billing-next-charge">
+              {subscription.nextChargeDate ? dateKeyLabel(subscription.nextChargeDate) : "—"}
+            </dd>
+          </div>
+          <div className="space-y-1">
+            <dt className={eyebrow}>הוראת קבע</dt>
+            <dd>
+              <span className={RECURRING_BADGE[subscription.recurringStatus]} data-testid="billing-recurring-status">
+                {RECURRING_STATUS_LABELS[subscription.recurringStatus]}
+              </span>
+            </dd>
+          </div>
+          <div className="space-y-1">
+            <dt className={eyebrow}>כרטיס אשראי</dt>
+            <dd
+              className="text-sm font-medium text-neutral-900"
+              dir={standingOrders?.card.state === "FOUND" ? "ltr" : undefined}
+            >
+              {subscription.cardLabel}
+            </dd>
+          </div>
+        </dl>
+      </section>
+
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="grid grid-cols-2 gap-4 sm:w-auto">
           <section className={`${frostPanel} p-5 space-y-1 min-w-40`}>

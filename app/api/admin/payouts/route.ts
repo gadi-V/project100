@@ -17,7 +17,8 @@ function isSerializationFailure(error: unknown): boolean {
 
 /**
  * ADMIN / MANAGER only.
- * `teachers`: open balance per teacher from the PAYOUT ledger (earned − `payout-paid-` settlements) with the
+ * `teachers`: per teacher `earnedAmount` (PAYOUT rows), `penaltyAmount` (PENALTY rows less appeal waivers),
+ * `paidAmount` (`payout-paid-` settlements) and `balance` = earned − penalties − paid (never below 0), with the
  * number of completed lessons and bank details. `payouts`: the per-payout queue (SCHEDULED / PROCESSING)
  * still used by the `/admin` payouts tab.
  */
@@ -99,8 +100,8 @@ export async function GET() {
 }
 
 /**
- * Mark a teacher's open balance as paid: `{ teacherId, amount, note? }`. `amount` must equal the open balance
- * (`409` otherwise, with `currentBalance`). Writes a negative PAYOUT ledger offset `payout-paid-{uuid}`,
+ * Mark a teacher's open balance as paid: `{ teacherId, amount, note? }`. `amount` must equal the net balance after
+ * fines (`409` otherwise, with `currentBalance`). Writes a negative PAYOUT ledger offset `payout-paid-{uuid}`,
  * closes the teacher's open TeacherPayout rows and logs AuditLog `TEACHER_BALANCE_SETTLED`.
  */
 export async function POST(request: Request) {
@@ -130,6 +131,7 @@ export async function POST(request: Request) {
       success: true,
       teacherId: parsed.data.teacherId,
       amountPaid: parsed.data.amount,
+      penaltyAmount: result.penaltyAmount,
       balanceBefore: result.balanceBefore,
       balanceAfter: result.balanceAfter,
       transactionId: result.transactionId,

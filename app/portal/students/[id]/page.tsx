@@ -2,7 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { getCurrentUser } from "../../../../lib/session";
 import { isStaffPortalRole } from "../../../../lib/auth/staff-roles";
 import { loadStudentPortal, resolveStudentAccess } from "../../../../lib/student-portal";
-import { formatIsraelDay, isStudentTabKey } from "../../../../lib/student-portal-shared";
+import { formatIsraelDay, isLegacyBillingTab, isStudentTabKey } from "../../../../lib/student-portal-shared";
 import { eyebrow, frostCard, pageCanvas } from "../../../../lib/ui";
 import PortalHeader from "../../../../components/portal/PortalHeader";
 import StudentPortalTabs from "../../../../components/portal/student/StudentPortalTabs";
@@ -23,6 +23,7 @@ function firstValue(value: SearchValue): string | undefined {
 /**
  * Student CRM screen shared by representatives, pedagogic managers and teachers.
  * Teachers only reach students they teach; everyone else outside the staff roles goes to the staff gate.
+ * The old standing-orders tab lives inside כספים, so its `?tab=` values redirect to `?tab=billing`.
  */
 export default async function StudentPortalPage({ params, searchParams }: StudentPageProps) {
   const user = await getCurrentUser();
@@ -32,11 +33,13 @@ export default async function StudentPortalPage({ params, searchParams }: Studen
   const access = await resolveStudentAccess(user, id);
   if (!access.ok) notFound();
 
+  const query = await searchParams;
+  const requestedTab = firstValue(query.tab);
+  if (isLegacyBillingTab(requestedTab)) redirect(`/portal/students/${encodeURIComponent(id)}?tab=billing`);
+
   const data = await loadStudentPortal(id, user);
   if (!data) notFound();
 
-  const query = await searchParams;
-  const requestedTab = firstValue(query.tab);
   const initialTab = isStudentTabKey(requestedTab) ? requestedTab : "profile";
   const promptLesson = data.meetings.find((meeting) => meeting.id === firstValue(query.lessonId));
   const initialSummaryRequest =

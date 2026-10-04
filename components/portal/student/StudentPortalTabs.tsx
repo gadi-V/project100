@@ -6,7 +6,6 @@ import ProfileTab, { type StatusSnapshot } from "./ProfileTab";
 import CoursesTab from "./CoursesTab";
 import MeetingsTab, { type SummaryRequest } from "./MeetingsTab";
 import CommunicationTab from "./CommunicationTab";
-import StandingOrdersTab from "./StandingOrdersTab";
 import BillingTab from "./BillingTab";
 
 type StudentPortalTabsProps = {
@@ -126,9 +125,13 @@ export default function StudentPortalTabs({ data, initialTab, initialSummaryRequ
               onSummaryRequestClosed={closeSummaryRequest}
             />
           )}
-          {tab.key === "standing-orders" && <StandingOrdersTab standingOrders={data.standingOrders} />}
           {tab.key === "billing" && activeTab === "billing" && (
-            <BillingTab studentId={data.header.id} canViewBilling={data.viewer.canViewBilling} />
+            <BillingTab
+              studentId={data.header.id}
+              canViewBilling={data.viewer.canViewBilling}
+              standingOrders={data.standingOrders}
+              subscriptions={data.plans.subscriptions}
+            />
           )}
         </section>
       ))}

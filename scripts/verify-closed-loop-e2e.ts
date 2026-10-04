@@ -18,12 +18,21 @@
  *   1. Scanner Desk       2. Creative Factory       3. Head of Desk
  *   4. Teacher Vetting    5. WhatsApp Closer        6. Fintech/Override
  *
+ * Finance paths (in-memory, no ledger writes):
+ *   Teacher payroll   — net balance = PAYOUT − PENALTY (less appeal waivers) − `payout-paid-`, floored at 0.
+ *   Student file      — one כספים tab holds the weekly plan, standing order, credits and payments;
+ *                       old `?tab=standing-orders|subscriptions|recurring` links redirect to `?tab=billing`.
+ *
  * Run: npx tsx scripts/verify-closed-loop-e2e.ts
  */
 import fs from "fs";
 import path from "path";
 import { VETTING_STEPS_ORDER } from "../lib/teacher-vetting";
 import { PrismaClient, VettingStatus, VettingStepStatus } from "@prisma/client";
+import { summarizePayoutLedger, type PayoutLedgerRow } from "../lib/teacher-payouts-shared";
+import { summarizeSubscription } from "../lib/student-billing-shared";
+import { isLegacyBillingTab, STUDENT_TABS } from "../lib/student-portal-shared";
+import type { SubscriptionRow } from "../lib/pedagogic-decision";
 import {
   analyzeGapsAndGenerateOutreach,
   buildQuadWelcomeMessage,
@@ -275,6 +284,105 @@ function layer3Fintech() {
   record("L4.Fintech", "Ledger immutability", ledgerImmutables.size === 8, "8 LedgerEntryType variants honored");
 }
 
+function layer3FinancePayroll() {
+  const at = new Date();
+  const row = (entryType: string, amount: number, transactionId: string | null): PayoutLedgerRow => ({
+    userId: "e2e-teacher",
+    entryType,
+    amount,
+    transactionId,
+    createdAt: at,
+  });
+  const balanceOf = (rows: PayoutLedgerRow[]) => summarizePayoutLedger(rows).get("e2e-teacher");
+
+  const earned = [row("PAYOUT", 300, "lesson-payout-e2e-1"), row("PAYOUT", 200, "lesson-payout-e2e-2"), row("PENALTY", 100, null)];
+  const open = balanceOf(earned);
+  record(
+    "L3.Finance",
+    "Payroll: PENALTY offset",
+    open?.earnedIls === 500 && open.penaltyIls === 100 && open.balanceIls === 400,
+    `earned ₪${open?.earnedIls} − fines ₪${open?.penaltyIls} → net ₪${open?.balanceIls} (expect 500 − 100 → 400)`
+  );
+
+  const settled = balanceOf([...earned, row("PAYOUT", -400, "payout-paid-e2e")]);
+  record(
+    "L3.Finance",
+    "Payroll: net settlement",
+    settled?.paidIls === 400 && settled.balanceIls === 0,
+    `payout-paid- offset of ₪400 → paid ₪${settled?.paidIls}, balance ₪${settled?.balanceIls} (expect 400 / 0)`
+  );
+
+  const overFined = balanceOf([row("PAYOUT", 140, "lesson-payout-e2e-3"), row("PENALTY", 100, null), row("PENALTY", -90, null)]);
+  const waived = balanceOf([row("PAYOUT", 180, "lesson-payout-e2e-4"), row("PENALTY", 27, null), row("ADJUSTMENT", 27, "appeal-waive-e2e")]);
+  record(
+    "L3.Finance",
+    "Payroll: floor + appeal waiver",
+    overFined?.balanceIls === 0 && waived?.penaltyIls === 0 && waived.balanceIls === 180,
+    `fines over pay → ₪${overFined?.balanceIls} (expect 0); waived fine → net ₪${waived?.balanceIls} (expect 180)`
+  );
+
+  const serviceSource = fs.readFileSync(path.join(process.cwd(), "lib", "teacher-payouts.ts"), "utf8");
+  record(
+    "L3.Finance",
+    "Payroll: ledger query",
+    serviceSource.includes("entryType: BALANCE_ENTRY_FILTER") && !serviceSource.includes('entryType: "PAYOUT" }'),
+    "listTeacherBalances + settleTeacherBalance read PAYOUT, PENALTY and waiver rows"
+  );
+}
+
+function layer3FinanceStudentFile() {
+  const keys = STUDENT_TABS.map((tab) => tab.key).join(",");
+  const legacyOk = ["standing-orders", "subscriptions", "recurring"].every(isLegacyBillingTab);
+  record(
+    "L3.Finance",
+    "Student file: five tabs",
+    keys === "profile,meetings,communication,courses,billing" && legacyOk,
+    `tabs=${keys}; legacy standing-order keys → billing: ${legacyOk}`
+  );
+
+  const plan: SubscriptionRow = {
+    id: "e2e-plan",
+    decidedAt: new Date().toISOString(),
+    subscriptionType: "WEEKLY",
+    teacherId: "e2e-teacher",
+    teacherName: E2E_TEACHER.name,
+    subject: "מתמטיקה",
+    slots: [{ weekday: 0, time: "17:00" }],
+    startDate: "2026-09-06",
+    extraPrivateLessons: 0,
+    lessonsCreated: 4,
+  };
+  const summary = summarizeSubscription(
+    { status: "ACTIVE", lessonCredits: 3, card: { state: "FOUND", brand: "visa", last4: "4242" }, charges: [] },
+    [plan]
+  );
+  const none = summarizeSubscription(null, []);
+  record(
+    "L3.Finance",
+    "Student file: plan + standing order",
+    summary.planLabel === "חד שבועי" &&
+      summary.recurringStatus === "ACTIVE" &&
+      summary.nextChargeDate !== null &&
+      none.planLabel === "ללא מנוי שבועי" &&
+      none.recurringStatus === "NOT_SET",
+    `plan=${summary.planLabel}, standing order=${summary.recurringStatus}, next charge=${summary.nextChargeDate}; empty → ${none.recurringStatus}`
+  );
+
+  const tabsSource = fs.readFileSync(path.join(process.cwd(), "components", "portal", "student", "StudentPortalTabs.tsx"), "utf8");
+  const pageSource = fs.readFileSync(path.join(process.cwd(), "app", "portal", "students", "[id]", "page.tsx"), "utf8");
+  const wired =
+    !tabsSource.includes("StandingOrdersTab") &&
+    tabsSource.includes("standingOrders={data.standingOrders}") &&
+    pageSource.includes("?tab=billing") &&
+    !fs.existsSync(path.join(process.cwd(), "components", "portal", "student", "StandingOrdersTab.tsx"));
+  record(
+    "L3.Finance",
+    "Student file: unified כספים tab",
+    wired,
+    wired ? "BillingTab gets the standing order; legacy tab removed; ?tab redirect in place" : "standing-orders tab still wired"
+  );
+}
+
 function summarize() {
   console.clear();
   console.log("=== PROJECT 8 — CLOSED-LOOP E2E DRY-RUN ===");
@@ -297,6 +405,8 @@ async function main() {
     await layer3MappingLessonStage();
     await layer4Desks();
     layer3Fintech();
+    layer3FinancePayroll();
+    layer3FinanceStudentFile();
   } catch (err) {
     record("E2E", "Unexpected error", false, err instanceof Error ? err.message : String(err));
   } finally {

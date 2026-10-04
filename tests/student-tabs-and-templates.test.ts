@@ -475,7 +475,7 @@ describe("GET /api/portal/students/[id]/communication", () => {
 
 describe("student screen tabs", () => {
   it("defines the tabs in order", () => {
-    expect(STUDENT_TABS.map((t) => t.label)).toEqual(["פרופיל", "קורסים", "מפגשים", "תקשורת", "הוראות קבע", "כספים"]);
+    expect(STUDENT_TABS.map((t) => t.label)).toEqual(["סקירה כללית", "מפגשים", "תקשורת", "קורסים", "כספים"]);
   });
 
   it("loads profile, courses, meetings, communication and standing orders for a representative", async () => {
@@ -614,6 +614,12 @@ describe("student screen tabs", () => {
     expect(data.meetings).toHaveLength(LESSONS.length);
     expect(Array.isArray(data.communication)).toBe(true);
     expect(data.standingOrders).not.toBeNull();
+
+    for (const legacy of ["standing-orders", "subscriptions", "recurring"]) {
+      await expect(StudentPortalPage(props(STUDENT_ID, legacy))).rejects.toThrow(
+        `NEXT_REDIRECT:/portal/students/${STUDENT_ID}?tab=billing`
+      );
+    }
   });
 });
 

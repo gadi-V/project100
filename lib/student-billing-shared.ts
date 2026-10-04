@@ -1,4 +1,6 @@
 import type { Role } from "@prisma/client";
+import { RECURRING_WEEKS, SUBSCRIPTION_TYPE_LABELS, type SubscriptionRow } from "./pedagogic-decision";
+import { israelDateKey, type CardLookup, type StandingOrderData } from "./student-portal-shared";
 
 /** Client-safe types and rules of the student billing tab (`/api/portal/students/[id]/billing`). */
 
@@ -168,6 +170,81 @@ export function describePayment(packageType: string, transactionId: string): {
     methodLabel: transactionId.startsWith("mock_") ? "תשלום ניסיון (סביבת פיתוח)" : "כרטיס אשראי באתר",
     packageLabel: ONLINE_PACKAGE_LABELS[packageType] ?? packageType,
     isManual: false,
+  };
+}
+
+export type RecurringStatus = "ACTIVE" | "PENDING" | "CANCELLED" | "NOT_SET";
+
+export const RECURRING_STATUS_LABELS: Record<RecurringStatus, string> = {
+  ACTIVE: "פעיל",
+  PENDING: "ממתין",
+  CANCELLED: "בוטל",
+  NOT_SET: "לא הוגדר",
+};
+
+export const NO_WEEKLY_PLAN_LABEL = "ללא מנוי שבועי";
+
+export type SubscriptionSummary = {
+  /** "חד שבועי" / "דו שבועי" / "ללא מנוי שבועי". */
+  planLabel: string;
+  subject: string | null;
+  teacherName: string | null;
+  /** YYYY-MM-DD (Israel): start of the next four-week batch; null without an active plan. */
+  nextChargeDate: string | null;
+  recurringStatus: RecurringStatus;
+  cardLabel: string;
+};
+
+export function describeCard(card: CardLookup | null): string {
+  switch (card?.state) {
+    case "FOUND":
+      return `${card.brand.toUpperCase()} •••• ${card.last4}`;
+    case "NOT_CONFIGURED":
+      return "החיבור לסליקה לא הוגדר";
+    case "UNAVAILABLE":
+      return "לא הצלחנו לטעון את פרטי הכרטיס";
+    default:
+      return "אין כרטיס מקושר";
+  }
+}
+
+function addDaysToDateKey(dateKey: string, days: number): string {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day + days)).toISOString().slice(0, 10);
+}
+
+/** First four-week batch boundary of a plan that is today or later. */
+export function nextBatchDate(startDate: string, now: Date = new Date()): string {
+  const today = israelDateKey(now);
+  if (startDate >= today) return startDate;
+  const cycleDays = RECURRING_WEEKS * 7;
+  const elapsed = Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${startDate}T00:00:00Z`)) / 86_400_000);
+  return addDaysToDateKey(startDate, Math.ceil(elapsed / cycleDays) * cycleDays);
+}
+
+/**
+ * Header of the כספים tab. The latest pedagogic decision is the weekly plan (`subscriptions` come newest first).
+ * The standing order is active when a plan has a card on file, pending when the plan has no card yet, and
+ * cancelled when the student carries the "ביטול מנוי" status.
+ */
+export function summarizeSubscription(
+  standingOrders: StandingOrderData | null,
+  subscriptions: readonly SubscriptionRow[],
+  now: Date = new Date()
+): SubscriptionSummary {
+  const plan = subscriptions[0] ?? null;
+  const cancelled = standingOrders?.status === "CANCELLED";
+  let recurringStatus: RecurringStatus = "NOT_SET";
+  if (cancelled) recurringStatus = "CANCELLED";
+  else if (plan) recurringStatus = standingOrders?.card.state === "FOUND" ? "ACTIVE" : "PENDING";
+
+  return {
+    planLabel: plan ? SUBSCRIPTION_TYPE_LABELS[plan.subscriptionType] : NO_WEEKLY_PLAN_LABEL,
+    subject: plan?.subject ?? null,
+    teacherName: plan?.teacherName ?? null,
+    nextChargeDate: plan && !cancelled ? nextBatchDate(plan.startDate, now) : null,
+    recurringStatus,
+    cardLabel: describeCard(standingOrders?.card ?? null),
   };
 }
 

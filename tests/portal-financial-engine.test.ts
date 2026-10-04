@@ -347,15 +347,24 @@ describe("GET /api/portal/students/[id]/billing", () => {
 });
 
 describe("GET /api/admin/payouts", () => {
-  it("nets each teacher's PAYOUT rows against payout-paid- settlements, positive or negative", async () => {
+  it("nets each teacher's PAYOUT rows against PENALTY rows and payout-paid- settlements, positive or negative", async () => {
     session.getCurrentUser.mockResolvedValue(sessionUser("ADMIN"));
     const summary = await payoutsSummary();
-    expect(summary.teachers.map((t) => ({ id: t.teacherId, earned: t.earnedIls, paid: t.paidIls, balance: t.balanceIls, lessons: t.completedLessons }))).toEqual([
-      { id: "t-dana", earned: 490, paid: 140, balance: 350, lessons: 3 },
-      { id: "t-noam", earned: 210, paid: 0, balance: 210, lessons: 2 },
-      { id: "t-omer", earned: 140, paid: 140, balance: 0, lessons: 1 },
+    expect(
+      summary.teachers.map((t) => ({
+        id: t.teacherId,
+        earned: t.earnedAmount,
+        penalty: t.penaltyAmount,
+        paid: t.paidAmount,
+        balance: t.balance,
+        lessons: t.completedLessons,
+      }))
+    ).toEqual([
+      { id: "t-dana", earned: 490, penalty: 50, paid: 140, balance: 300, lessons: 3 },
+      { id: "t-noam", earned: 210, penalty: 0, paid: 0, balance: 210, lessons: 2 },
+      { id: "t-omer", earned: 140, penalty: 0, paid: 140, balance: 0, lessons: 1 },
     ]);
-    expect(summary.totalOpenIls).toBe(560);
+    expect(summary.totalOpenIls).toBe(510);
     expect(summary.teachersWithBalance).toBe(2);
     expect(summary.teachers[0].lastPaidAt).toBe(day(15).toISOString());
     expect(summary.teachers[0].bank).toEqual({ bankName: "לאומי", bankBranch: "800", accountNumber: "12345", accountHolderName: "דנה" });
@@ -368,21 +377,21 @@ describe("GET /api/admin/payouts", () => {
       { userId: "t", amount: -40, transactionId: "payout-paid-x", createdAt: NOW },
       { userId: "t", amount: 25, transactionId: "payout-paid-legacy", createdAt: NOW },
     ]);
-    expect(totals.get("t")).toEqual({ earnedIls: 100, paidIls: 65, balanceIls: 35, lastPaidAt: NOW });
+    expect(totals.get("t")).toEqual({ earnedIls: 100, penaltyIls: 0, paidIls: 65, balanceIls: 35, lastPaidAt: NOW });
   });
 });
 
 describe("POST /api/admin/payouts", () => {
-  it("zeroes the balance with a negative payout-paid- offset and closes the open payouts", async () => {
+  it("zeroes the net balance with a negative payout-paid- offset and closes the open payouts", async () => {
     session.getCurrentUser.mockResolvedValue(sessionUser("MANAGER", "mgr-1"));
-    const res = await postPayouts(postJson("https://project100.test/api/admin/payouts", { teacherId: "t-dana", amount: 350 }));
+    const res = await postPayouts(postJson("https://project100.test/api/admin/payouts", { teacherId: "t-dana", amount: 300 }));
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body).toMatchObject({ success: true, teacherId: "t-dana", amountPaid: 350, balanceBefore: 350, balanceAfter: 0, payoutsMarkedPaid: 2 });
+    expect(body).toMatchObject({ success: true, teacherId: "t-dana", amountPaid: 300, penaltyAmount: 50, balanceBefore: 300, balanceAfter: 0, payoutsMarkedPaid: 2 });
     expect(body.transactionId).toMatch(/^payout-paid-[0-9a-f-]{36}$/);
 
     const offset = store.ledger.find((row) => row.transactionId === body.transactionId);
-    expect(offset).toMatchObject({ userId: "t-dana", entryType: "PAYOUT", amount: -350 });
+    expect(offset).toMatchObject({ userId: "t-dana", entryType: "PAYOUT", amount: -300 });
     expect(store.payouts.filter((p) => p.teacherId === "t-dana").map((p) => p.status)).toEqual(["PAID", "PAID", "PAID"]);
     expect(store.payouts.find((p) => p.id === "p4")?.status).toBe("SCHEDULED");
     expect(store.audits).toEqual([
@@ -392,7 +401,7 @@ describe("POST /api/admin/payouts", () => {
 
     const summary = await payoutsSummary();
     const dana = summary.teachers.find((t) => t.teacherId === "t-dana");
-    expect(dana).toMatchObject({ balanceIls: 0, paidIls: 490, earnedIls: 490 });
+    expect(dana).toMatchObject({ balance: 0, paidAmount: 440, penaltyAmount: 50, earnedAmount: 490 });
     expect(summary.totalOpenIls).toBe(210);
     expect(summary.payouts.map((p) => p.id)).toEqual(["p4"]);
 
@@ -406,9 +415,9 @@ describe("POST /api/admin/payouts", () => {
   it("refuses a second settlement and an amount that does not match the open balance", async () => {
     session.getCurrentUser.mockResolvedValue(sessionUser("ADMIN"));
     const url = "https://project100.test/api/admin/payouts";
-    expect((await postPayouts(postJson(url, { teacherId: "t-dana", amount: 350 }))).status).toBe(200);
+    expect((await postPayouts(postJson(url, { teacherId: "t-dana", amount: 300 }))).status).toBe(200);
 
-    const again = await postPayouts(postJson(url, { teacherId: "t-dana", amount: 350 }));
+    const again = await postPayouts(postJson(url, { teacherId: "t-dana", amount: 300 }));
     expect(again.status).toBe(409);
     expect((await again.json()).currentBalance).toBe(0);
 
@@ -514,7 +523,7 @@ describe("finance UI", () => {
     expect(html).toContain("bg-emerald-600");
     expect(html).toContain("שולם במלואו");
     expect(html).toContain("2 מורים ממתינים לתשלום");
-    expect(html).toContain("₪560");
+    expect(html).toContain("₪510");
   });
 
   it("uses relative imports only in the sprint files", () => {

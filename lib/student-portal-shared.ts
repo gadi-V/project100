@@ -5,18 +5,24 @@ import type { RescheduleBlock } from "./lesson-lifecycle";
 /** Client-safe types and parsers for the staff student screen (`/portal/students/[id]`). */
 
 export const STUDENT_TABS = [
-  { key: "profile", label: "פרופיל" },
-  { key: "courses", label: "קורסים" },
+  { key: "profile", label: "סקירה כללית" },
   { key: "meetings", label: "מפגשים" },
   { key: "communication", label: "תקשורת" },
-  { key: "standing-orders", label: "הוראות קבע" },
+  { key: "courses", label: "קורסים" },
   { key: "billing", label: "כספים" },
 ] as const;
 
 export type StudentTabKey = (typeof STUDENT_TABS)[number]["key"];
 
+/** Old `?tab=` values of the standing-orders tab, now part of כספים. */
+export const LEGACY_BILLING_TAB_KEYS: readonly string[] = ["standing-orders", "subscriptions", "recurring"];
+
 export function isStudentTabKey(value: unknown): value is StudentTabKey {
   return typeof value === "string" && STUDENT_TABS.some((tab) => tab.key === value);
+}
+
+export function isLegacyBillingTab(value: unknown): boolean {
+  return typeof value === "string" && LEGACY_BILLING_TAB_KEYS.includes(value);
 }
 
 export const STUDENT_STATUS_OPTIONS = [
@@ -115,7 +121,7 @@ export type StudentPortalViewer = {
   role: string;
   /** Profile fields and status checkboxes (REPRESENTATIVE / ADMIN / MANAGER). */
   canEditProfile: boolean;
-  /** Invoice details and the standing-order tab (REPRESENTATIVE / ADMIN / MANAGER). */
+  /** Invoice details and the כספים tab (REPRESENTATIVE / ADMIN / MANAGER). */
   canViewBilling: boolean;
 };
 

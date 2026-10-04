@@ -6,6 +6,7 @@ import {
   PAYOUT_SETTLEMENT_PREFIX,
   roundIls,
   summarizePayoutLedger,
+  TEACHER_BALANCE_ENTRY_TYPES,
   type SettlePayoutInput,
   type TeacherBalanceRow,
   type TeacherBalancesSummary,
@@ -14,10 +15,11 @@ import {
 /** Server-only teacher balances and settlement behind `/api/admin/payouts`. */
 
 const OPEN_PAYOUT_STATUSES = [PayoutStatus.SCHEDULED, PayoutStatus.PROCESSING];
-const PAYOUT_ROW_SELECT = { userId: true, amount: true, transactionId: true, createdAt: true } as const;
+const PAYOUT_ROW_SELECT = { userId: true, entryType: true, amount: true, transactionId: true, createdAt: true } as const;
+const BALANCE_ENTRY_FILTER = { in: [...TEACHER_BALANCE_ENTRY_TYPES] };
 
 export async function listTeacherBalances(): Promise<TeacherBalancesSummary> {
-  const rows = await prisma.billingLedger.findMany({ where: { entryType: "PAYOUT" }, select: PAYOUT_ROW_SELECT });
+  const rows = await prisma.billingLedger.findMany({ where: { entryType: BALANCE_ENTRY_FILTER }, select: PAYOUT_ROW_SELECT });
   const totals = summarizePayoutLedger(rows);
   const teacherIds = [...totals.keys()];
   if (teacherIds.length === 0) return { teachers: [], totalOpenIls: 0, teachersWithBalance: 0 };
@@ -50,18 +52,19 @@ export async function listTeacherBalances(): Promise<TeacherBalancesSummary> {
       email: teacher.email,
       bank: teacher.teacherProfile ?? null,
       completedLessons: completedByTeacher.get(teacher.id) ?? 0,
-      earnedIls: total.earnedIls,
-      paidIls: total.paidIls,
-      balanceIls: total.balanceIls,
+      earnedAmount: total.earnedIls,
+      penaltyAmount: total.penaltyIls,
+      paidAmount: total.paidIls,
+      balance: total.balanceIls,
       lastPaidAt: total.lastPaidAt?.toISOString() ?? null,
     };
   });
-  rowsOut.sort((a, b) => b.balanceIls - a.balanceIls || a.name.localeCompare(b.name, "he"));
+  rowsOut.sort((a, b) => b.balance - a.balance || a.name.localeCompare(b.name, "he"));
 
-  const open = rowsOut.filter((row) => row.balanceIls > 0);
+  const open = rowsOut.filter((row) => row.balance > 0);
   return {
     teachers: rowsOut,
-    totalOpenIls: roundIls(open.reduce((sum, row) => sum + row.balanceIls, 0)),
+    totalOpenIls: roundIls(open.reduce((sum, row) => sum + row.balance, 0)),
     teachersWithBalance: open.length,
   };
 }
@@ -69,6 +72,7 @@ export async function listTeacherBalances(): Promise<TeacherBalancesSummary> {
 export type SettleResult =
   | {
       ok: true;
+      penaltyAmount: number;
       balanceBefore: number;
       balanceAfter: number;
       transactionId: string;
@@ -77,8 +81,8 @@ export type SettleResult =
   | { ok: false; status: 404 | 409; error: string; currentBalance?: number };
 
 /**
- * Pays a teacher's whole open balance. The amount must match the balance to the agora, which also rejects a
- * stale screen or a second click. One serializable transaction: a negative PAYOUT ledger offset with
+ * Pays a teacher's whole open balance, net of fines. The amount must match the net balance to the agora, which
+ * also rejects a stale screen or a second click. One serializable transaction: a negative PAYOUT ledger offset with
  * `transactionId` `payout-paid-{uuid}`, open TeacherPayout rows → PAID (so the per-payout settle cannot pay
  * them again), and the audit entry.
  */
@@ -95,10 +99,12 @@ export async function settleTeacherBalance(
   return prisma.$transaction(
     async (tx): Promise<SettleResult> => {
       const rows = await tx.billingLedger.findMany({
-        where: { userId: teacher.id, entryType: "PAYOUT" },
+        where: { userId: teacher.id, entryType: BALANCE_ENTRY_FILTER },
         select: PAYOUT_ROW_SELECT,
       });
-      const balanceBefore = summarizePayoutLedger(rows).get(teacher.id)?.balanceIls ?? 0;
+      const totals = summarizePayoutLedger(rows).get(teacher.id);
+      const balanceBefore = totals?.balanceIls ?? 0;
+      const penaltyAmount = totals?.penaltyIls ?? 0;
       if (balanceBefore <= 0) {
         return { ok: false, status: 409, error: "אין למורה יתרה פתוחה לתשלום", currentBalance: balanceBefore };
       }
@@ -132,6 +138,7 @@ export async function settleTeacherBalance(
           metadata: {
             kind: "TEACHER_BALANCE_SETTLEMENT",
             balanceBefore,
+            penaltyAmount,
             settledById: actor.id,
             settledByRole: actor.role,
             note: input.note,
@@ -150,6 +157,7 @@ export async function settleTeacherBalance(
           metadata: {
             amount: input.amount,
             balanceBefore,
+            penaltyAmount,
             transactionId,
             ledgerEntryId: entry.id,
             payoutsMarkedPaid: payoutIds.length,
@@ -160,6 +168,7 @@ export async function settleTeacherBalance(
 
       return {
         ok: true,
+        penaltyAmount,
         balanceBefore,
         balanceAfter: roundIls(balanceBefore - input.amount),
         transactionId,

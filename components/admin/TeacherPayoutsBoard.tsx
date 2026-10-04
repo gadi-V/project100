@@ -17,10 +17,10 @@ type TeacherPayoutsBoardProps = {
 };
 
 function summarize(teachers: TeacherBalanceRow[]): TeacherBalancesSummary {
-  const open = teachers.filter((row) => row.balanceIls > 0);
+  const open = teachers.filter((row) => row.balance > 0);
   return {
     teachers,
-    totalOpenIls: Math.round(open.reduce((sum, row) => sum + row.balanceIls, 0) * 100) / 100,
+    totalOpenIls: Math.round(open.reduce((sum, row) => sum + row.balance, 0) * 100) / 100,
     teachersWithBalance: open.length,
   };
 }
@@ -35,7 +35,7 @@ function exportBankCsv(rows: TeacherBalanceRow[]) {
       row.bank?.bankBranch ?? "",
       row.bank?.accountNumber ?? "",
       row.bank?.accountHolderName ?? "",
-      row.balanceIls.toFixed(2),
+      row.balance.toFixed(2),
     ]
       .map((cell) => `"${String(cell).replace(/"/g, '""')}"`)
       .join(",")
@@ -80,10 +80,11 @@ export default function TeacherPayoutsBoard({ initialData = null }: TeacherPayou
   }, [initialData, load]);
 
   const markPaid = async (row: TeacherBalanceRow) => {
-    if (!window.confirm(`לסמן שהועבר ל${row.name} תשלום של ${formatIls(row.balanceIls)}?`)) return;
+    const fines = row.penaltyAmount > 0 ? ` (אחרי קיזוז קנסות של ${formatIls(row.penaltyAmount)})` : "";
+    if (!window.confirm(`לסמן שהועבר ל${row.name} תשלום של ${formatIls(row.balance)}${fines}?`)) return;
     setSettlingId(row.teacherId);
     try {
-      const result = await submitSettlePayout({ teacherId: row.teacherId, amount: row.balanceIls, note: null });
+      const result = await submitSettlePayout({ teacherId: row.teacherId, amount: row.balance, note: null });
       setData((current) =>
         current
           ? summarize(
@@ -91,8 +92,8 @@ export default function TeacherPayoutsBoard({ initialData = null }: TeacherPayou
                 teacher.teacherId === row.teacherId
                   ? {
                       ...teacher,
-                      paidIls: Math.round((teacher.paidIls + result.amountPaid) * 100) / 100,
-                      balanceIls: result.balanceAfter,
+                      paidAmount: Math.round((teacher.paidAmount + result.amountPaid) * 100) / 100,
+                      balance: result.balanceAfter,
                       lastPaidAt: new Date().toISOString(),
                     }
                   : teacher
@@ -110,7 +111,7 @@ export default function TeacherPayoutsBoard({ initialData = null }: TeacherPayou
   };
 
   const teachers = data?.teachers ?? [];
-  const payable = teachers.filter((row) => row.balanceIls > 0);
+  const payable = teachers.filter((row) => row.balance > 0);
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
@@ -144,13 +145,14 @@ export default function TeacherPayoutsBoard({ initialData = null }: TeacherPayou
       )}
 
       <div className={`${frostCard} overflow-x-auto`} aria-busy={loading}>
-        <table className="w-full min-w-[880px] text-sm text-start">
+        <table className="w-full min-w-[980px] text-sm text-start">
           <thead>
             <tr className="border-b border-neutral-100 bg-neutral-50/80 text-xs font-medium text-neutral-500">
               <th scope="col" className="px-5 py-4 text-start">מורה</th>
               <th scope="col" className="px-5 py-4 text-start">פרטי בנק</th>
               <th scope="col" className="px-5 py-4 text-start">שיעורים שהושלמו</th>
               <th scope="col" className="px-5 py-4 text-start">נצבר</th>
+              <th scope="col" className="px-5 py-4 text-start">קנסות/קיזוזים (₪)</th>
               <th scope="col" className="px-5 py-4 text-start">שולם</th>
               <th scope="col" className="px-5 py-4 text-start">יתרה לתשלום</th>
               <th scope="col" className="px-5 py-4 text-start">פעולה</th>
@@ -159,7 +161,7 @@ export default function TeacherPayoutsBoard({ initialData = null }: TeacherPayou
           <tbody>
             {teachers.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-5 py-6">
+                <td colSpan={8} className="px-5 py-6">
                   <div className={emptyState}>
                     <p className="text-sm text-neutral-600">
                       {loading ? "טוענים את יתרות המורים..." : "עדיין לא נרשם שכר למורים"}
@@ -194,16 +196,23 @@ export default function TeacherPayoutsBoard({ initialData = null }: TeacherPayou
                     )}
                   </td>
                   <td className="px-5 py-4 tabular-nums text-neutral-800">{row.completedLessons}</td>
-                  <td className="px-5 py-4 tabular-nums text-neutral-800">{formatIls(row.earnedIls)}</td>
+                  <td className="px-5 py-4 tabular-nums text-neutral-800">{formatIls(row.earnedAmount)}</td>
+                  <td className="px-5 py-4 tabular-nums" data-penalty={row.penaltyAmount}>
+                    {row.penaltyAmount > 0 ? (
+                      <span className="font-medium text-red-700">−{formatIls(row.penaltyAmount)}</span>
+                    ) : (
+                      <span className="text-neutral-400">—</span>
+                    )}
+                  </td>
                   <td className="px-5 py-4 tabular-nums text-neutral-600">
-                    {formatIls(row.paidIls)}
+                    {formatIls(row.paidAmount)}
                     {row.lastPaidAt && <span className="block text-xs text-neutral-400">לאחרונה {formatIsraelDay(row.lastPaidAt)}</span>}
                   </td>
-                  <td className="px-5 py-4 font-semibold tabular-nums text-neutral-900" data-balance={row.balanceIls}>
-                    {formatIls(row.balanceIls)}
+                  <td className="px-5 py-4 font-semibold tabular-nums text-neutral-900" data-balance={row.balance}>
+                    {formatIls(row.balance)}
                   </td>
                   <td className="px-5 py-4">
-                    {row.balanceIls > 0 ? (
+                    {row.balance > 0 ? (
                       <button
                         type="button"
                         disabled={settlingId === row.teacherId}
@@ -212,6 +221,8 @@ export default function TeacherPayoutsBoard({ initialData = null }: TeacherPayou
                       >
                         {settlingId === row.teacherId ? "מעדכן..." : "סמן תשלום כבוצע"}
                       </button>
+                    ) : row.earnedAmount - row.paidAmount > 0 ? (
+                      <span className={badgeWarning}>קוזז בקנסות</span>
                     ) : (
                       <span className={badgeSuccess}>שולם במלואו</span>
                     )}
@@ -223,8 +234,8 @@ export default function TeacherPayoutsBoard({ initialData = null }: TeacherPayou
         </table>
       </div>
       <p className="text-xs text-neutral-500">
-        היתרה מחושבת מספר החשבונות: כל השכר שנרשם למורה פחות התשלומים שכבר סומנו כמבוצעים. סימון תשלום מאפס את היתרה
-        ומסמן את פריטי השכר הפתוחים של המורה כשולמו.
+        היתרה לתשלום היא השכר שנצבר פחות קנסות ופחות תשלומים שכבר סומנו. קנס שבוטל בערעור לא מקוזז, והיתרה לא יורדת
+        מתחת לאפס. סימון תשלום מאפס את היתרה ומסמן את פריטי השכר הפתוחים של המורה כשולמו.
       </p>
     </div>
   );

@@ -9,13 +9,20 @@ export const PAYOUT_ADMIN_ROLES: Role[] = ["ADMIN", "MANAGER"];
  * of `POST /api/admin/payouts` writes one negative offset. Either way they count by absolute value.
  */
 export const PAYOUT_SETTLEMENT_PREFIX = "payout-paid-";
+/** ADJUSTMENT rows written by `/api/admin/appeals` when an approved appeal cancels a teacher PENALTY. */
+export const PENALTY_WAIVER_PREFIX = "appeal-waive-";
 export const PAYOUT_SETTLED_AUDIT_ACTION = "TEACHER_BALANCE_SETTLED";
 export const SETTLEMENT_NOTE_MAX = 300;
+
+/** Ledger entry types that move a teacher's balance: pay, fines, and fine waivers. */
+export const TEACHER_BALANCE_ENTRY_TYPES = ["PAYOUT", "PENALTY", "ADJUSTMENT"] as const;
 
 type AmountLike = number | string | { toString(): string };
 
 export type PayoutLedgerRow = {
   userId: string;
+  /** Omitted rows count as PAYOUT. */
+  entryType?: string;
   amount: AmountLike;
   transactionId: string | null;
   createdAt: Date;
@@ -24,9 +31,11 @@ export type PayoutLedgerRow = {
 export type TeacherLedgerTotals = {
   /** PAYOUT rows owed to the teacher (lesson pay, late-cancel shares). */
   earnedIls: number;
+  /** PENALTY rows by absolute value, less waived fines; never below 0. */
+  penaltyIls: number;
   /** Settlement rows, by absolute value. */
   paidIls: number;
-  /** earned − paid; what the platform still owes. */
+  /** earned − penalties − paid, never below 0; what the platform still owes. */
   balanceIls: number;
   lastPaidAt: Date | null;
 };
@@ -38,9 +47,14 @@ export type TeacherBalanceRow = {
   email: string | null;
   bank: { bankName: string | null; bankBranch: string | null; accountNumber: string | null; accountHolderName: string | null } | null;
   completedLessons: number;
-  earnedIls: number;
-  paidIls: number;
-  balanceIls: number;
+  /** Gross pay (PAYOUT rows without `payout-paid-`). */
+  earnedAmount: number;
+  /** Net fines (PENALTY less appeal waivers). */
+  penaltyAmount: number;
+  /** Settlements already paid (`payout-paid-` rows). */
+  paidAmount: number;
+  /** earnedAmount − penaltyAmount − paidAmount, never below 0. */
+  balance: number;
   lastPaidAt: string | null;
 };
 
@@ -57,6 +71,8 @@ export type SettlePayoutResponse =
       success: true;
       teacherId: string;
       amountPaid: number;
+      /** Net fines already deducted from `balanceBefore`. */
+      penaltyAmount: number;
       balanceBefore: number;
       balanceAfter: number;
       transactionId: string;
@@ -72,13 +88,28 @@ export function isSettlementRow(transactionId: string | null): boolean {
   return Boolean(transactionId?.startsWith(PAYOUT_SETTLEMENT_PREFIX));
 }
 
-/** Per-teacher totals of PAYOUT ledger rows. */
+export function isPenaltyWaiverRow(transactionId: string | null): boolean {
+  return Boolean(transactionId?.startsWith(PENALTY_WAIVER_PREFIX));
+}
+
+/**
+ * Per-teacher totals of PAYOUT, PENALTY and penalty-waiver ADJUSTMENT rows; other ADJUSTMENT rows are ignored.
+ * Fines are written positive by the cancel route and negative elsewhere, so they count by absolute value.
+ */
 export function summarizePayoutLedger(rows: readonly PayoutLedgerRow[]): Map<string, TeacherLedgerTotals> {
   const totals = new Map<string, TeacherLedgerTotals>();
   for (const row of rows) {
-    const current = totals.get(row.userId) ?? { earnedIls: 0, paidIls: 0, balanceIls: 0, lastPaidAt: null };
+    const entryType = row.entryType ?? "PAYOUT";
+    const waiver = entryType === "ADJUSTMENT" && isPenaltyWaiverRow(row.transactionId);
+    if (entryType !== "PAYOUT" && entryType !== "PENALTY" && !waiver) continue;
+
+    const current = totals.get(row.userId) ?? { earnedIls: 0, penaltyIls: 0, paidIls: 0, balanceIls: 0, lastPaidAt: null };
     const amount = Number(row.amount.toString());
-    if (isSettlementRow(row.transactionId)) {
+    if (entryType === "PENALTY") {
+      current.penaltyIls += Math.abs(amount);
+    } else if (waiver) {
+      current.penaltyIls -= Math.abs(amount);
+    } else if (isSettlementRow(row.transactionId)) {
       current.paidIls += Math.abs(amount);
       if (!current.lastPaidAt || row.createdAt > current.lastPaidAt) current.lastPaidAt = row.createdAt;
     } else {
@@ -88,8 +119,9 @@ export function summarizePayoutLedger(rows: readonly PayoutLedgerRow[]): Map<str
   }
   for (const value of totals.values()) {
     value.earnedIls = roundIls(value.earnedIls);
+    value.penaltyIls = roundIls(Math.max(0, value.penaltyIls));
     value.paidIls = roundIls(value.paidIls);
-    value.balanceIls = roundIls(value.earnedIls - value.paidIls);
+    value.balanceIls = roundIls(Math.max(0, value.earnedIls - value.penaltyIls - value.paidIls));
   }
   return totals;
 }
