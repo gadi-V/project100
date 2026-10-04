@@ -388,7 +388,8 @@ describe("staff routing", () => {
   it("sends representatives to the staff dashboard after sign-in and away from /dashboard", async () => {
     const { staffPortalHome } = await import("../lib/auth/staff-roles");
     expect(staffPortalHome("REPRESENTATIVE")).toBe("/portal/dashboard");
-    expect(staffPortalHome("TEACHER")).toBe("/dashboard");
+    expect(staffPortalHome("TEACHER")).toBe("/portal/dashboard");
+    expect(staffPortalHome("TEACHER", false)).toBe("/dashboard");
     expect(staffPortalHome("MANAGER")).toBe("/admin");
     expect(readSource("app/dashboard/page.tsx")).toMatch(
       /role === "REPRESENTATIVE"\)\s*\{[\s\S]{0,80}router\.replace\("\/portal\/dashboard"\)/

@@ -7,6 +7,7 @@ import CoursesTab from "./CoursesTab";
 import MeetingsTab, { type SummaryRequest } from "./MeetingsTab";
 import CommunicationTab from "./CommunicationTab";
 import StandingOrdersTab from "./StandingOrdersTab";
+import BillingTab from "./BillingTab";
 
 type StudentPortalTabsProps = {
   data: StudentPortalData;
@@ -126,6 +127,9 @@ export default function StudentPortalTabs({ data, initialTab, initialSummaryRequ
             />
           )}
           {tab.key === "standing-orders" && <StandingOrdersTab standingOrders={data.standingOrders} />}
+          {tab.key === "billing" && activeTab === "billing" && (
+            <BillingTab studentId={data.header.id} canViewBilling={data.viewer.canViewBilling} />
+          )}
         </section>
       ))}
     </div>

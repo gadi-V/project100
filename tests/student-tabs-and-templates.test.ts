@@ -473,9 +473,9 @@ describe("GET /api/portal/students/[id]/communication", () => {
   });
 });
 
-describe("student screen: five tabs", () => {
-  it("defines the five tabs in order", () => {
-    expect(STUDENT_TABS.map((t) => t.label)).toEqual(["פרופיל", "קורסים", "מפגשים", "תקשורת", "הוראות קבע"]);
+describe("student screen tabs", () => {
+  it("defines the tabs in order", () => {
+    expect(STUDENT_TABS.map((t) => t.label)).toEqual(["פרופיל", "קורסים", "מפגשים", "תקשורת", "הוראות קבע", "כספים"]);
   });
 
   it("loads profile, courses, meetings, communication and standing orders for a representative", async () => {

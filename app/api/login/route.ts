@@ -47,6 +47,7 @@ export async function POST(request: Request) {
       user: {
         name: user.name,
         role: user.role,
+        isApproved: user.isApproved,
       },
     });
 

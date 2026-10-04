@@ -10,6 +10,7 @@ export const STUDENT_TABS = [
   { key: "meetings", label: "מפגשים" },
   { key: "communication", label: "תקשורת" },
   { key: "standing-orders", label: "הוראות קבע" },
+  { key: "billing", label: "כספים" },
 ] as const;
 
 export type StudentTabKey = (typeof STUDENT_TABS)[number]["key"];

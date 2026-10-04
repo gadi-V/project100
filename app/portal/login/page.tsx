@@ -9,11 +9,11 @@ import { isStaffPortalRole, staffPortalHome } from "../../../lib/auth/staff-role
 
 type LoginResponse = {
   error?: string;
-  user?: { name: string; role: string };
+  user?: { name: string; role: string; isApproved?: boolean };
 };
 
 type MeResponse = {
-  user?: { role: string };
+  user?: { role: string; isApproved?: boolean };
 };
 
 export default function StaffPortalLoginPage() {
@@ -33,7 +33,7 @@ export default function StaffPortalLoginPage() {
         if (!res.ok || cancelled) return;
         const me = (await res.json()) as MeResponse;
         if (me.user && isStaffPortalRole(me.user.role)) {
-          router.replace(staffPortalHome(me.user.role));
+          router.replace(staffPortalHome(me.user.role, me.user.isApproved ?? false));
         }
       } catch {
         // stay on the staff gate
@@ -65,7 +65,7 @@ export default function StaffPortalLoginPage() {
       }
 
       toast.success(`שלום, ${data.user.name}`);
-      router.replace(staffPortalHome(data.user.role));
+      router.replace(staffPortalHome(data.user.role, data.user.isApproved ?? false));
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "שגיאה בהתחברות");
     } finally {

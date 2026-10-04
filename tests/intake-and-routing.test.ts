@@ -303,7 +303,8 @@ describe("staff portal login gate", () => {
     expect(isStaffPortalRole(undefined)).toBe(false);
     expect(staffPortalHome("ADMIN")).toBe("/admin");
     expect(staffPortalHome("REPRESENTATIVE")).toBe("/portal/dashboard");
-    expect(staffPortalHome("TEACHER")).toBe("/dashboard");
+    expect(staffPortalHome("TEACHER")).toBe("/portal/dashboard");
+    expect(staffPortalHome("TEACHER", false)).toBe("/dashboard");
   });
 
   it("refuses a student through the staff portal without issuing a session cookie", async () => {

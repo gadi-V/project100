@@ -22,9 +22,13 @@ export function isIntakeRecorderRole(role: string | null | undefined): boolean {
   return (INTAKE_RECORDER_ROLES as readonly string[]).includes(role ?? "");
 }
 
-/** Landing page after a successful staff sign-in. `/admin` only admits ADMIN / MANAGER. */
-export function staffPortalHome(role: string): string {
+/**
+ * Landing page after a successful staff sign-in. `/admin` only admits ADMIN / MANAGER; approved teachers
+ * land on their cockpit, teachers still in onboarding on `/dashboard`.
+ */
+export function staffPortalHome(role: string, isApproved = true): string {
   if (role === "ADMIN" || role === "MANAGER") return "/admin";
   if (role === "REPRESENTATIVE") return "/portal/dashboard";
+  if (role === "TEACHER" && isApproved) return "/portal/dashboard";
   return "/dashboard";
 }

@@ -4,18 +4,9 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "react-hot-toast";
 import { fieldClass, frostCard, pageCanvas, primaryCta } from "../../lib/ui";
+import { loginLandingPath } from "../../lib/auth/login-redirect";
 
-function getSafeRedirectTarget(from: string | null): string {
-  if (!from) return "/dashboard";
-  if (!from.startsWith("/")) return "/dashboard";
-  if (from.startsWith("//")) return "/dashboard";
-  if (from === "/login" || from.startsWith("/login?")) return "/dashboard";
-  if (from === "/register" || from.startsWith("/register?")) return "/dashboard";
-  if (from === "/forgot-password" || from.startsWith("/forgot-password?")) {
-    return "/dashboard";
-  }
-  return from;
-}
+type SessionUser = { name?: string; role: string; isApproved?: boolean };
 
 function LoginForm() {
   const router = useRouter();
@@ -33,7 +24,9 @@ function LoginForm() {
       try {
         const res = await fetch("/api/me");
         if (!res.ok || cancelled) return;
-        router.replace(getSafeRedirectTarget(searchParams.get("from")));
+        const me = (await res.json().catch(() => null)) as { user?: SessionUser } | null;
+        if (cancelled) return;
+        router.replace(loginLandingPath(me?.user, searchParams.get("from")));
       } catch {
         // stay on login
       }
@@ -64,7 +57,7 @@ function LoginForm() {
       }
 
       toast.success(`ברוך הבא, ${data.user.name}!`, { id: loginToast });
-      router.replace(getSafeRedirectTarget(searchParams.get("from")));
+      router.replace(loginLandingPath(data.user as SessionUser, searchParams.get("from")));
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "שגיאה בהתחברות";
       toast.error(message, { id: loginToast });

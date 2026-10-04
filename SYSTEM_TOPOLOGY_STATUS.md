@@ -25,7 +25,7 @@
 | 3 | **Head of Desk (quiet)** | `agents_hive/head_of_desk.py` | `GET /api/cron/head-of-desk` (`*/15 * * * *`) | ✅ Live |
 | 4 | **Teacher Vetting** | `lib/teacher-vetting.ts` + `app/admin/teachers/*` | `GET/POST /api/admin/teachers/[id]/vetting` | ✅ Live |
 | 5 | **WhatsApp Closer** | `lib/whatsapp.ts` (`dispatchWhatsAppCloser`) | `POST /api/whatsapp/closer` + teaser hook | ✅ Live |
-| 6 | **Fintech / Override** | `lib/services/LedgerService.ts` + `PayoutService.ts` | `POST /api/admin/override/compensation`, `POST /api/admin/payouts/settle` | ✅ Live |
+| 6 | **Fintech / Override** | `lib/services/LedgerService.ts` + `PayoutService.ts` + `lib/teacher-payouts.ts` + `lib/student-billing.ts` | `POST /api/admin/override/compensation`, `POST /api/admin/payouts/settle`, `GET/POST /api/admin/payouts`, `GET/POST /api/portal/students/[id]/billing` | ✅ Live |
 
 ---
 
@@ -39,7 +39,8 @@
 - `POST /api/register` — students/parents only; `role: "TEACHER"` → `403` (Sprint 10). `/register/teacher` redirects to `/careers`.
 
 ### Staff & intake
-- `POST /api/login` with `portal: "staff"` — staff gate used by `/portal/login`; non-staff roles get `403` and no cookie (Sprint 9).
+- `POST /api/login` with `portal: "staff"` — staff gate used by `/portal/login`; non-staff roles get `403` and no cookie (Sprint 9). The response includes `user.isApproved`; approved teachers land on `/portal/dashboard` from both login pages (Sprint 20).
+- `GET/POST /api/portal/students/[id]/billing` — student payments + ledger rows; manual payment and credit top-up (`amount`, `paymentMethod`, `creditsToAdd`, `notes`, `requestId`): Payment + CHARGE ledger row + `lessonCredits` + AuditLog `MANUAL_PAYMENT_AND_CREDITS_ADDED` in one transaction. ADMIN / MANAGER / REPRESENTATIVE only (Sprint 20).
 - `GET/POST /api/admin/intake` — mapping-call questionnaire (`IntakeAssessment`), REPRESENTATIVE / ADMIN / MANAGER only (Sprint 9).
 - Pages `/portal/dashboard` (staff dashboard) and `/portal/intake` (mapping-call workspace) — server-side role gate (Sprint 10). `/portal/dashboard` is the teacher cockpit for approved teachers and offers ADMIN / MANAGER a teacher view (`?view=teacher&teacherId=`) (Sprint 19).
 - `GET /api/portal/teacher/dashboard` — teacher cockpit: upcoming lessons (7 days), completed lessons missing a summary (14 days), monthly lessons / hours / accrued PAYOUT ledger total. TEACHER (own data) / ADMIN / MANAGER (`?teacherId=`) only (Sprint 19).
@@ -77,7 +78,8 @@
 - `GET /api/admin/audit/risk-events` — Head-of-Desk risk surface.
 - `POST /api/admin/override/compensation` — make-up lesson + PLATFORM_COMPENSATION.
 - `GET/POST/PUT/DELETE /api/admin/curriculum` — curriculum tree + syllabus agent.
-- `GET /api/admin/payouts`, `POST /api/admin/payouts/settle`, `GET/POST /api/admin/appeals`.
+- `GET /api/admin/payouts` (per-teacher open balance from the PAYOUT ledger + the per-payout queue), `POST /api/admin/payouts` (mark a teacher's whole balance as paid: negative `payout-paid-{uuid}` ledger offset, open payouts → PAID; Sprint 20), `POST /api/admin/payouts/settle` (single payout), `GET/POST /api/admin/appeals`.
+- Page `/admin/payouts` — teacher payroll: balances, bank details, bank-transfer CSV, "סמן תשלום כבוצע" (Sprint 20).
 
 ### Cron / Webhooks
 - `GET /api/cron/lesson-reminders` (`*/5`), `GET /api/cron/head-of-desk` (`*/15`).
@@ -206,6 +208,39 @@ Fresh databases apply all migrations normally with `npx prisma migrate deploy`.
 | 17 | Credit symmetry on cancellation (credit returned only if it was taken at booking), lesson completion and attendance report from inside the Daily room (call closed, teacher sent to the summary form), and no-show retention alert (CRM "חיסור לא מוצדק" flag + quad WhatsApp notice) | ✅ Completed |
 | 18 | Lesson summary API hardening (session + assigned teacher / management only, IDOR closed), legacy `PostLessonSummaryModal` removed, and absence retention workflow: directory "חיסור לא מוצדק" quick filter, absence follow-up modal with make-up lesson, attendance metrics on the meetings tab | ✅ Completed |
 | 19 | Teacher cockpit on `/portal/dashboard` (today / week lessons, room entry, completion with attendance, summaries waiting to be written, hours and accrued monthly pay), `GET /api/portal/teacher/dashboard`, management "תצוגת מורה" switch, and student-directory isolation for teachers (own lessons or referral only) | ✅ Completed |
+| 20 | Financial loop closed: "כספים" tab in the student file (payment history, ledger, manual payment with credit top-up), teacher payroll at `/admin/payouts` (open balance per teacher, "סמן תשלום כבוצע" with a `payout-paid-` ledger offset), and approved teachers routed to `/portal/dashboard` after sign-in | ✅ Completed |
+
+### Financial engine: student billing, teacher payouts, teacher sign-in routing (Sprint 20)
+
+- **"כספים" tab** (`components/portal/student/BillingTab.tsx`, key `billing`, after "הוראות קבע"): balance and total
+  paid, payment history (date, amount, method, package, lessons, status), ledger rows, and "+ הזן תשלום והטען חבילה"
+  (`ManualPaymentModal`: amount in whole shekels, method `BANK_TRANSFER` / `CREDIT_CARD` / `BIT` / `CASH` / `CHECK`,
+  lessons to add, notes). Teachers see a notice; the tab fetches only when opened.
+- **`GET/POST /api/portal/students/[id]/billing`** (ADMIN / MANAGER / REPRESENTATIVE; `403` for TEACHER / STUDENT,
+  `404` when the id is not a student). `lib/student-billing.ts` + `lib/student-billing-shared.ts`. POST, one
+  transaction: `Payment` (`packageType` `MANUAL_{method}`, `status` COMPLETED, `transactionId` `manual-payment-{requestId}`),
+  a `CHARGE` ledger row for the income (`LedgerEntryType` has no PAYMENT value; online payments already use CHARGE),
+  `lessonCredits` increment and AuditLog `MANUAL_PAYMENT_AND_CREDITS_ADDED`. The form sends a per-form `requestId`;
+  the ledger `transactionId` is unique, so a replay answers `409` and rolls back. Response `201`
+  `{ success, payment, lessonCredits, ledgerEntryId }`.
+- **Teacher balances** (`lib/teacher-payouts.ts` + `-shared.ts`): per teacher, earned = PAYOUT ledger rows that are
+  not settlements; paid = `payout-paid-…` rows by absolute value (`markPayoutPaid` writes them positive, the bulk
+  settlement negative); balance = earned − paid. `GET /api/admin/payouts` (ADMIN / MANAGER) returns `teachers`
+  (balance, earned, paid, completed lessons, last payment, bank details), `totalOpenIls`, `teachersWithBalance`, and
+  still `payouts` (the per-payout queue the `/admin` payouts tab reads).
+- **`POST /api/admin/payouts`** `{ teacherId, amount, note? }`: `amount` must equal the open balance to the agora
+  (`409` with `currentBalance` otherwise, also for a second click). Serializable transaction: PAYOUT ledger row of
+  `-amount` with `transactionId` `payout-paid-{uuid}`, the teacher's SCHEDULED / PROCESSING `TeacherPayout` rows →
+  PAID (so the per-payout settle cannot pay them again) and AuditLog `TEACHER_BALANCE_SETTLED`. A serialization
+  conflict answers `409`. The teacher cockpit's accrued pay ignores settlement rows, so it is unchanged.
+- **`/admin/payouts`** (`components/admin/TeacherPayoutsBoard.tsx`): table of teachers with balance, green
+  "סמן תשלום כבוצע" (with confirmation) for balances above 0, "שולם במלואו" otherwise, bank-transfer CSV of open balances.
+- **Sign-in routing:** `staffPortalHome(role, isApproved)` sends approved teachers to `/portal/dashboard` (teachers in
+  onboarding keep `/dashboard`); `/api/login` returns `isApproved`. `/login` uses `loginLandingPath`
+  (`lib/auth/login-redirect.ts`): an explicit deep link wins, but the generic `?from=/dashboard` no longer keeps an
+  approved teacher on the old board; representatives land on `/portal/dashboard`.
+- Tests: `tests/portal-financial-engine.test.ts` (24); `intake-and-routing`, `staff-intake-portal` and
+  `student-tabs-and-templates` updated for the teacher landing and the sixth tab.
 
 ### Teacher cockpit and role isolation (Sprint 19)
 
