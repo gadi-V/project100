@@ -4,6 +4,7 @@
 > `scripts/test-live-db-pipeline.ts` (Live-DB), `agents_hive/test_hive_mcp_tools.py`
 > (9 FastMCP tools), `scripts/verify-closed-loop-e2e.ts` (25 dry-run checks) and
 > `scripts/e2e-dry-run-verification.ts` (13 live-server checks). Readiness probe: `GET /api/health`.
+> Release pre-flight: `scripts/verify-production-readiness.ts`. Current release: **v1.0.0** (tag on `f028afc`, see §8).
 
 ---
 
@@ -142,6 +143,7 @@ Verified by `test_hive_mcp_tools.py`:
 | Script | Purpose | Status |
 |---|---|---|
 | `scripts/test-live-db-pipeline.ts` | 6-station live-DB integration + teardown | ✅ (run) |
+| `scripts/verify-production-readiness.ts` | Release pre-flight: env keys (masked), Neon `SELECT 1` latency, WhatsApp gateway reachability, `GET /api/health`; `--url=` for the target server | ✅ 0 fail (v1.0.0) |
 | `scripts/verify-closed-loop-e2e.ts` | 25 dry-run checks (4 layers + 6 desks + WhatsApp group lifecycle + teacher payroll penalties + unified כספים tab), no DB writes | ✅ 25/25 |
 | `scripts/e2e-dry-run-verification.ts` | 8-station funnel against a running server (`APP_URL`), self-cleaning fixtures | ✅ 13/13 |
 | `agents_hive/test_hive_mcp_tools.py` | 9 FastMCP tools | ✅ PASS |
@@ -993,3 +995,34 @@ Fresh databases apply all migrations normally with `npx prisma migrate deploy`.
 On push / PR to `main` (Node 22): `npm ci` → `prisma generate` + `prisma validate` → `tsc --noEmit` → `npm test`.
 
 Vercel runs `npm run build`, which itself runs `prisma generate` before `next build` (Sprint 11b).
+
+---
+
+## 8. Production Release v1.0.0
+
+Annotated tag `v1.0.0` ("Release v1.0.0: Fully integrated educational management operating system with 21 sprints")
+on `f028afc` (Sprint 21), pushed to `origin` (GitHub). It is the first tag on the remote; the older local-only
+`v1.0.0-prod` (on `aeeb737`) was never pushed.
+
+**Pre-flight** — `npx tsx scripts/verify-production-readiness.ts --url=http://localhost:3100` against `next start` of
+the release build, with the local `.env`: **READY WITH WARNINGS, 5 ok / 4 warn / 0 fail, exit 0**.
+
+| Check | Result |
+|---|---|
+| `DATABASE_URL` | OK — Neon host, `sslmode=require` |
+| `AUTH_SECRET` | OK — 64 characters (custom JWT; `NEXTAUTH_SECRET` is not read by the app) |
+| `DAILY_API_KEY` | OK — 64 characters |
+| `WHATSAPP_API_URL` / `WHATSAPP_API_KEY` / `WHATSAPP_ADMIN_PHONE` | WARN — not set in the local `.env` (the app reads `WHATSAPP_API_URL`, not `WHATSAPP_GATEWAY_URL`) |
+| Neon `SELECT 1` | OK — ~5 s cold (compute wake-up + connect), ~525 ms warm average |
+| WhatsApp gateway | WARN — skipped, no gateway URL locally |
+| `GET /api/health` | OK — `200 UP`, server-side DB ping 472 ms |
+
+The script checks the environment it runs in. The Vercel production env was not inspected from this machine
+(no Vercel CLI / project link), so run the script there, or with production values, before relying on WhatsApp.
+
+**Known issue:** the first `/api/health` call after a cold start answered `503 DOWN` ("DB ping timed out"):
+the first Prisma connection to a suspended Neon compute takes ~5 s, the same as `DB_PING_TIMEOUT_MS`. Later calls
+answer `200 UP`. An uptime monitor may report one false outage per cold start.
+
+**Smoke:** `scripts/verify-closed-loop-e2e.ts` 25/25 (exit 0); `npm run build` exit 0 with no warnings;
+`npx tsc --noEmit` exit 0; Vitest 28 files / 624 tests (Sprint 21).
