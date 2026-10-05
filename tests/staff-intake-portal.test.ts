@@ -109,14 +109,14 @@ afterEach(() => {
 });
 
 describe("public registration is for students and parents only", () => {
-  it("the /register hub has no teacher option and points teachers to /careers", () => {
+  it("the /register hub has no teacher option and leaves the careers link to the footer", () => {
     const src = readSource("app/register/page.tsx");
     expect(src).not.toContain("/register/teacher");
     expect(src).not.toMatch(/מורה \/ מרצה|הרשמת מורה/);
     expect(src).toContain('href="/register/student"');
-    expect(src).toContain('href="/careers"');
+    expect(src).not.toContain("/careers");
     expect(src).toContain("הרשמה ל-PROJECT100");
-    expect(src).toContain("הגש מועמדות");
+    expect(readSource("components/Footer.tsx").match(/href="\/careers"/g)).toHaveLength(1);
   });
 
   it("/register/teacher redirects to /careers and no longer renders a sign-up form", async () => {

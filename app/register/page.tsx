@@ -87,22 +87,6 @@ export default function RegisterHubPage() {
             התחברות
           </Link>
         </p>
-
-        <aside className="space-y-3 rounded-2xl border border-slate-200/70 bg-white/60 px-5 py-4 text-start backdrop-blur-md">
-          <div className="space-y-0.5">
-            <p className="text-sm font-semibold text-slate-900">
-              נבחרת המורים של <BrandLogo />
-            </p>
-            <p className="text-xs text-slate-500">מחפשים אנשי חינוך מהשורה הראשונה</p>
-          </div>
-          <Link
-            href="/careers"
-            className="group inline-flex items-center text-sm font-semibold text-[#0070F3] transition-colors hover:text-[#0B1B3D]"
-          >
-            הגש מועמדות לנבחרת
-            <ForwardArrow className="ms-1.5 inline-block h-3.5 w-3.5 transition-transform duration-300 group-hover:-translate-x-0.5" />
-          </Link>
-        </aside>
       </div>
     </div>
   );
