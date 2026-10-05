@@ -13,6 +13,12 @@ const BUILD_FALLBACK_AUTH_SECRET =
 
 export type SessionPayload = {
   userId: string;
+  /**
+   * Role at sign-in time. A routing hint for the proxy only (e.g. keeping students off the
+   * teachers subdomain); authorization must still re-read the role from the database.
+   * Absent on tokens issued before Sprint 22.
+   */
+  role?: string;
 };
 
 export function getSecretKey() {
@@ -21,8 +27,8 @@ export function getSecretKey() {
   return new TextEncoder().encode(secret);
 }
 
-export async function signSession(userId: string): Promise<string> {
-  return new SignJWT({ userId })
+export async function signSession(userId: string, role?: string): Promise<string> {
+  return new SignJWT(role ? { userId, role } : { userId })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime(`${SESSION_MAX_AGE}s`)
@@ -33,10 +39,26 @@ export async function verifySession(token: string): Promise<SessionPayload | nul
   try {
     const { payload } = await jwtVerify(token, getSecretKey());
     if (typeof payload.userId !== "string") return null;
-    return { userId: payload.userId };
+    return typeof payload.role === "string"
+      ? { userId: payload.userId, role: payload.role }
+      : { userId: payload.userId };
   } catch {
     return null;
   }
+}
+
+/**
+ * Parent domain shared by the main site and the teachers subdomain (e.g. ".project100.co.il"),
+ * so one sign-in is recognized on both. Unset means a host-only cookie (local dev, previews).
+ */
+export function sessionCookieDomain(): string | undefined {
+  const domain = process.env.SESSION_COOKIE_DOMAIN?.trim();
+  return domain ? domain : undefined;
+}
+
+function domainOption(): { domain?: string } {
+  const domain = sessionCookieDomain();
+  return domain ? { domain } : {};
 }
 
 export function sessionCookieOptions(token: string) {
@@ -48,6 +70,7 @@ export function sessionCookieOptions(token: string) {
     sameSite: "lax" as const,
     maxAge: SESSION_MAX_AGE,
     path: "/",
+    ...domainOption(),
   };
 }
 
@@ -60,5 +83,6 @@ export function clearSessionCookieOptions() {
     sameSite: "lax" as const,
     maxAge: 0,
     path: "/",
+    ...domainOption(),
   };
 }

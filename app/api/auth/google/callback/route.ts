@@ -61,7 +61,7 @@ export async function GET(request: NextRequest) {
         await prisma.user.update({ where: { id: existing.id }, data: { googleSub: identity.sub } });
       }
       response.cookies.set(clearPendingCookieOptions());
-      response.cookies.set(sessionCookieOptions(await signSession(existing.id)));
+      response.cookies.set(sessionCookieOptions(await signSession(existing.id, existing.role)));
       return response;
     }
 

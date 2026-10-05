@@ -34,7 +34,7 @@ export async function POST(request: Request) {
       { success: true, data: { name: result.user.name, redirectTo: "/dashboard" } },
       { status: 201 }
     );
-    response.cookies.set(sessionCookieOptions(await signSession(result.user.id)));
+    response.cookies.set(sessionCookieOptions(await signSession(result.user.id, "STUDENT")));
     return response;
   } catch (error: unknown) {
     console.error("STUDENT REGISTER ERROR:", error);

@@ -3,6 +3,12 @@ import type { NextRequest } from "next/server";
 import { SESSION_COOKIE, verifySession } from "./lib/auth";
 import { isHiveMonitorBearer } from "./lib/hive-m2m-auth";
 import {
+  isPublicLandingPath,
+  isTeachersHost,
+  mainSiteOrigin,
+  resolveTeachersHostRoute,
+} from "./lib/routing/teacher-subdomain";
+import {
   checkRateLimit,
   isRateLimitExempt,
   type RateLimitType,
@@ -54,13 +60,21 @@ const AUTH_PAGES = new Set(["/login", "/register", "/forgot-password"]);
  */
 const TRUSTED_USER_ID_HEADER = "x-user-id";
 
-function forward(request: NextRequest, verifiedUserId: string | null = null) {
+function trustedHeaders(request: NextRequest, verifiedUserId: string | null): Headers {
   const headers = new Headers(request.headers);
   headers.delete(TRUSTED_USER_ID_HEADER);
   if (verifiedUserId) {
     headers.set(TRUSTED_USER_ID_HEADER, verifiedUserId);
   }
-  return NextResponse.next({ request: { headers } });
+  return headers;
+}
+
+function forward(request: NextRequest, verifiedUserId: string | null = null) {
+  return NextResponse.next({ request: { headers: trustedHeaders(request, verifiedUserId) } });
+}
+
+function requestHost(request: NextRequest): string {
+  return request.headers.get("host") || request.nextUrl.host;
 }
 
 function isPublicApiPath(pathname: string): boolean {
@@ -93,14 +107,47 @@ export async function proxy(request: NextRequest) {
     }
   }
 
-  // Never run redirect logic on auth pages themselves (hard stop for loops)
-  if (AUTH_PAGES.has(pathname)) {
-    return forward(request);
+  const host = requestHost(request);
+  const onTeachersHost = isTeachersHost(host);
+
+  if (!onTeachersHost) {
+    // Never run redirect logic on auth pages themselves (hard stop for loops)
+    if (AUTH_PAGES.has(pathname) || isPublicLandingPath(pathname)) {
+      return forward(request);
+    }
   }
 
   const token = request.cookies.get(SESSION_COOKIE)?.value;
   const session = token ? await verifySession(token) : null;
   const verifiedUserId = session?.userId ?? null;
+
+  if (onTeachersHost) {
+    const decision = resolveTeachersHostRoute({
+      pathname,
+      hasSession: Boolean(session),
+      role: session?.role,
+    });
+    switch (decision.action) {
+      case "rewrite":
+        return NextResponse.rewrite(new URL(decision.pathname, request.url), {
+          request: { headers: trustedHeaders(request, verifiedUserId) },
+        });
+      case "redirect":
+        return NextResponse.redirect(new URL(decision.pathname, request.url));
+      case "redirect-main-site":
+        return NextResponse.redirect(
+          new URL(decision.pathname, mainSiteOrigin(host, request.nextUrl.protocol))
+        );
+      case "forbidden":
+        return NextResponse.json(
+          { success: false, error: "אזור זה מיועד לצוות ההוראה בלבד" },
+          { status: 403 }
+        );
+      case "pass":
+        if (AUTH_PAGES.has(pathname)) return forward(request);
+        break;
+    }
+  }
 
   const isProtectedPage =
     pathname === "/dashboard" ||
@@ -140,6 +187,19 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
+    "/",
+    "/portal",
+    "/portal/:path*",
+    "/pricing",
+    "/pricing/:path*",
+    "/diagnostic",
+    "/diagnostic/:path*",
+    "/onboarding/:path*",
+    "/register/:path*",
+    "/careers",
+    "/careers/:path*",
+    "/packages",
+    "/packages/:path*",
     "/dashboard",
     "/dashboard/:path*",
     "/lessons",

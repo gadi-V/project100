@@ -108,7 +108,7 @@ export async function POST(request: NextRequest) {
       { status: 201 }
     );
     response.cookies.set(clearPendingCookieOptions());
-    response.cookies.set(sessionCookieOptions(await signSession(result.user.id)));
+    response.cookies.set(sessionCookieOptions(await signSession(result.user.id, "STUDENT")));
     return response;
   } catch (error: unknown) {
     console.error("GOOGLE SIGNUP COMPLETE ERROR:", error);

@@ -40,7 +40,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const token = await signSession(user.id);
+    const token = await signSession(user.id, user.role);
 
     const response = NextResponse.json({
       message: "התחברת בהצלחה",

@@ -70,7 +70,7 @@ export async function POST(request: Request) {
       },
     });
 
-    const token = await signSession(newUser.id);
+    const token = await signSession(newUser.id, newUser.role);
 
     const response = NextResponse.json(
       {

@@ -115,6 +115,7 @@ Verified by `test_hive_mcp_tools.py`:
 |---|---|
 | `DATABASE_URL` | Neon/Postgres |
 | `AUTH_SECRET` | JWT session signer |
+| `SESSION_COOKIE_DOMAIN` | Shared parent domain for the session cookie (e.g. `.project100.co.il`) so the main site and `teachers.` subdomain share one sign-in; empty = host-only cookie (Sprint 22) |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Student Google sign-in (custom OAuth, no NextAuth); redirect URI `<APP_URL>/api/auth/google/callback` |
 | `DAILY_API_KEY` / `DAILY_WEBHOOK_SECRET` | Daily.co rooms + webhook |
 | `NEXT_PUBLIC_STREAM_API_KEY`, `STREAM_API_KEY`, `STREAM_API_SECRET` | Stream Chat |
@@ -214,6 +215,36 @@ Fresh databases apply all migrations normally with `npx prisma migrate deploy`.
 | 19 | Teacher cockpit on `/portal/dashboard` (today / week lessons, room entry, completion with attendance, summaries waiting to be written, hours and accrued monthly pay), `GET /api/portal/teacher/dashboard`, management "תצוגת מורה" switch, and student-directory isolation for teachers (own lessons or referral only) | ✅ Completed |
 | 20 | Financial loop closed: "כספים" tab in the student file (payment history, ledger, manual payment with credit top-up), teacher payroll at `/admin/payouts` (open balance per teacher, "סמן תשלום כבוצע" with a `payout-paid-` ledger offset), and approved teachers routed to `/portal/dashboard` after sign-in | ✅ Completed |
 | 21 | Financial consolidation: teacher fines (PENALTY, less appeal waivers) deducted from the payroll net balance with a "קנסות/קיזוזים (₪)" column, the "הוראות קבע" tab merged into "כספים" (weekly plan, next charge, standing order, card, credits, payments, ledger) with five tabs left and legacy `?tab=` redirects, and full verification (624 Vitest, 25/25 closed-loop E2E, clean build) | ✅ Completed |
+| 22 | Teacher cockpit isolated on the `teachers.` subdomain (proxy host routing: `/` → `/portal/dashboard` or `/login` → staff gate, marketing paths bounced to the portal, students redirected to the main-site `/dashboard` or `403` on API), cross-subdomain session (`SESSION_COOKIE_DOMAIN`, `role` claim in the JWT), public landing verified free of staff login links (only the footer `/careers` link remains) and of heavy portal bundles; 694 Vitest, 25/25 closed-loop E2E, clean build | ✅ Completed |
+
+### Teacher subdomain routing and public landing decoupling (Sprint 22)
+
+- **Host routing** (`lib/routing/teacher-subdomain.ts`, pure functions; wired in `proxy.ts`): a host whose name starts
+  with `teachers.` (`teachers.localhost:3000`, `teachers.project100.co.il`) is the teacher cockpit.
+  - `/` with a session → **rewrite** to `/portal/dashboard` (URL stays `/`); without a session → redirect to `/login`.
+  - `/login` → rewrite to the staff gate `/portal/login`.
+  - Marketing paths (`/pricing`, `/diagnostic`, `/onboarding/*`, `/register/*`, `/careers`, `/packages/*`) → redirect to `/`.
+  - `/portal/*`, `/dashboard` (teachers still in onboarding), `/lessons/*`, `/admin/*`, `/teachers/*`, `/forgot-password` pass through.
+  - The main host is unchanged: `/` and marketing paths skip session work; protected pages keep the `/login?from=` guard.
+  - Matcher gained `/`, `/portal`, `/portal/:path*` and the marketing paths. Rewrites carry the verified `x-user-id`.
+- **Students on the teachers host**: a session whose `role` claim is `STUDENT` is redirected to
+  `<main-site>/dashboard` (`teachers.` stripped from the host); API calls answer `403` except `/api/login` and
+  `/api/logout`. Tokens issued before Sprint 22 have no `role` claim; for them the portal pages' own guards
+  (`isIntakeRecorderRole` / `isStaffPortalRole` → `/portal/login`) still keep students out.
+- **Session** (`lib/auth.ts`): `signSession(userId, role?)` adds an optional `role` claim (a routing hint only; every
+  route still re-reads the role from the database). All sign-in paths pass it: `/api/login`, `/api/register`,
+  `/api/register/student`, Google callback and Google complete. `sessionCookieOptions` / `clearSessionCookieOptions`
+  add `domain` from `SESSION_COOKIE_DOMAIN` when set. Production should set it to `.project100.co.il`; on localhost the
+  cookie stays host-only, so sign in on `teachers.localhost` itself.
+- **Public landing**: `app/page.tsx`, `components/Navbar.tsx` and the registration hub `app/register/page.tsx` contain
+  no staff or teacher login link (`/portal/*`, "כניסת צוות", `/teachers/*`, `/careers`). The navbar's "אזור אישי"
+  goes to the student `/login`. The only teacher-facing entry stays the footer link "הצטרפות לנבחרת ההוראה" → `/careers`.
+- **Bundle isolation**: the import graph of `app/page.tsx` reaches only `components/landing/*` plus `next/link`,
+  `react-hot-toast` and `lucide-react`; no `@daily-co/*`, Stripe, Stream Chat, Prisma, `components/portal/*`, ledger,
+  billing or classroom modules. The built client chunks of `/` contain no Daily / Stripe / ledger / portal code.
+- Tests: `tests/portal-subdomain-routing.test.ts` (33): host detection, route decisions, the real `proxy` with
+  teacher / student / legacy JWTs on local and production hosts, cookie domain, rendered `Navbar` / `Footer` /
+  registration hub, the landing import graph and relative imports. Totals: 30 files, 694 tests.
 
 ### Financial consolidation: teacher penalties and unified billing tab (Sprint 21)
 
