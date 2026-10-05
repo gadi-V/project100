@@ -8,6 +8,7 @@ import {
   parseOnboardingAnswers,
   type OnboardingAnswers,
 } from "../lib/student-onboarding";
+import { orangeCta } from "../lib/ui";
 
 const readSource = (rel: string) => readFileSync(path.join(process.cwd(), rel), "utf8");
 
@@ -428,7 +429,8 @@ describe("wizard step 4 source", () => {
     expect(wizard).toContain("sessionStorage.setItem(ONBOARDING_STORAGE_KEY");
     expect(ONBOARDING_STORAGE_KEY).toBe("onboarding_answers");
     expect(wizard.indexOf("המשך עם Google")).toBeLessThan(wizard.indexOf("סיום הרשמה וכניסה לחשבון"));
-    expect(wizard).toContain("bg-orange-500 hover:bg-orange-600 text-white font-bold py-3.5 px-6 rounded-xl shadow-lg shadow-orange-500/25");
+    expect(orangeCta).toContain("bg-orange-500 hover:bg-orange-600 text-white font-bold shadow-lg shadow-orange-500/25");
+    expect(wizard).toContain("className={`w-full ${orangeCta} py-3.5 px-6 rounded-xl text-center`}");
     expect(wizard).toContain('fetch("/api/register/student"');
     expect(wizard).not.toContain("/portal/dashboard");
   });

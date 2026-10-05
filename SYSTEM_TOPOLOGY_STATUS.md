@@ -4,7 +4,8 @@
 > `scripts/test-live-db-pipeline.ts` (Live-DB), `agents_hive/test_hive_mcp_tools.py`
 > (9 FastMCP tools), `scripts/verify-closed-loop-e2e.ts` (25 dry-run checks) and
 > `scripts/e2e-dry-run-verification.ts` (13 live-server checks). Readiness probe: `GET /api/health`.
-> Release pre-flight: `scripts/verify-production-readiness.ts`. Current release: **v1.0.0** (tag on `f028afc`, see §8).
+> Release pre-flight: `scripts/verify-production-readiness.ts`. Current release: **v1.1.0 — Production Launch Ready**
+> (Sprint 23, see §8). The earlier `v1.0.0` tag stays on `f028afc` (Sprint 21).
 
 ---
 
@@ -145,7 +146,7 @@ Verified by `test_hive_mcp_tools.py`:
 | Script | Purpose | Status |
 |---|---|---|
 | `scripts/test-live-db-pipeline.ts` | 6-station live-DB integration + teardown | ✅ (run) |
-| `scripts/verify-production-readiness.ts` | Release pre-flight: env keys (masked), Neon `SELECT 1` latency, WhatsApp gateway reachability, `GET /api/health`; `--url=` for the target server | ✅ 0 fail (v1.0.0) |
+| `scripts/verify-production-readiness.ts` | Release pre-flight: env keys (masked, incl. `SESSION_COOKIE_DOMAIN` against the app host), Neon `SELECT 1` latency, schema integrity (every Prisma model / scalar column / enum present, every local migration applied), import scan (no `@/` aliases, relative imports resolve, package imports declared, unused runtime deps), WhatsApp gateway reachability, `GET /api/health`; `--url=` for the target server; ends with a summary table | ✅ 0 fail (v1.1.0) |
 | `scripts/verify-closed-loop-e2e.ts` | 25 dry-run checks (4 layers + 6 desks + WhatsApp group lifecycle + teacher payroll penalties + unified כספים tab), no DB writes | ✅ 25/25 |
 | `scripts/e2e-dry-run-verification.ts` | 8-station funnel against a running server (`APP_URL`), self-cleaning fixtures | ✅ 13/13 |
 | `agents_hive/test_hive_mcp_tools.py` | 9 FastMCP tools | ✅ PASS |
@@ -216,6 +217,7 @@ Fresh databases apply all migrations normally with `npx prisma migrate deploy`.
 | 20 | Financial loop closed: "כספים" tab in the student file (payment history, ledger, manual payment with credit top-up), teacher payroll at `/admin/payouts` (open balance per teacher, "סמן תשלום כבוצע" with a `payout-paid-` ledger offset), and approved teachers routed to `/portal/dashboard` after sign-in | ✅ Completed |
 | 21 | Financial consolidation: teacher fines (PENALTY, less appeal waivers) deducted from the payroll net balance with a "קנסות/קיזוזים (₪)" column, the "הוראות קבע" tab merged into "כספים" (weekly plan, next charge, standing order, card, credits, payments, ledger) with five tabs left and legacy `?tab=` redirects, and full verification (624 Vitest, 25/25 closed-loop E2E, clean build) | ✅ Completed |
 | 22 | Teacher cockpit isolated on the `teachers.` subdomain (proxy host routing: `/` → `/portal/dashboard` or `/login` → staff gate, marketing paths bounced to the portal, students redirected to the main-site `/dashboard` or `403` on API), cross-subdomain session (`SESSION_COOKIE_DOMAIN`, `role` claim in the JWT), public landing verified free of staff login links (only the footer `/careers` link remains) and of heavy portal bundles; 694 Vitest, 25/25 closed-loop E2E, clean build | ✅ Completed |
+| 23 | UI reconciliation verified (RTL registration flows and orange lead / registration CTAs from `0d0a9e0`: shared `orangeCta` / `orangeOutlineCta` / `orangeOptionSelected` tokens in `lib/ui.ts`; no staff login links on the landing or `Navbar`), wizard test aligned with the `orangeCta` token, pre-flight extended (cookie domain, schema integrity, migrations, import scan) and the phantom `nanoid` dependency declared in `package.json`; 694 Vitest, 25/25 closed-loop E2E, clean build. **Release v1.1.0 — Production Launch Ready** | ✅ Completed |
 
 ### Teacher subdomain routing and public landing decoupling (Sprint 22)
 
@@ -1031,7 +1033,30 @@ Vercel runs `npm run build`, which itself runs `prisma generate` before `next bu
 
 ---
 
-## 8. Production Release v1.0.0
+## 8. Production Releases
+
+### v1.1.0 — Production Launch Ready (Sprint 23)
+
+Annotated tag `v1.1.0` on the Sprint 23 release commit, pushed to `origin`; `package.json` version `1.1.0`.
+`v1.0.0` was already published on `f028afc` and was left in place rather than moved.
+
+**Pre-flight** — `npx tsx scripts/verify-production-readiness.ts` against `next start` of the release build on
+`http://localhost:3000`, with the local `.env`: **READY WITH WARNINGS, 11 ok / 5 warn / 0 fail, exit 0**.
+
+| Check | Result |
+|---|---|
+| `DATABASE_URL` / `AUTH_SECRET` / `DAILY_API_KEY` | OK — Neon host with `sslmode=require`; 64-character secret and key |
+| `SESSION_COOKIE_DOMAIN` | OK locally (host-only cookie). Production must set `.project100.co.il`, or the check warns that `teachers.` will not share the sign-in |
+| `WHATSAPP_API_URL` / `WHATSAPP_API_KEY` / `WHATSAPP_ADMIN_PHONE` + gateway | WARN — not set in the local `.env` (the app reads `WHATSAPP_API_URL`, not `WHATSAPP_GATEWAY_URL`) |
+| Neon `SELECT 1` | OK — ~4.9 s cold (compute wake-up), ~524 ms warm average |
+| Schema integrity | OK — 22 models, 311 scalar columns, 9 enums present; 9/9 migrations applied |
+| Imports | OK — no `@/` aliases in 316 shipped files, all relative imports resolve, every package declared (after adding `nanoid`) |
+| Unused dependencies | WARN — `playwright` (npm) is never imported; the Python Scanner Desk uses its own pip package |
+| `GET /api/health` | OK — `200 UP`, server-side DB ping ~930 ms |
+
+**Smoke:** `npm run build` exit 0; `npx tsc --noEmit` exit 0; Vitest 30 files / 694 tests; `scripts/verify-closed-loop-e2e.ts` 25/25.
+
+### v1.0.0 (Sprint 21)
 
 Annotated tag `v1.0.0` ("Release v1.0.0: Fully integrated educational management operating system with 21 sprints")
 on `f028afc` (Sprint 21), pushed to `origin` (GitHub). It is the first tag on the remote; the older local-only
