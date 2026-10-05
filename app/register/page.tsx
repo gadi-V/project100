@@ -1,6 +1,6 @@
 import Link from "next/link";
-import { frostCard, pageCanvas } from "../../lib/ui";
-import BrandWordmark from "../../components/BrandWordmark";
+import { pageCanvas } from "../../lib/ui";
+import BrandLogo from "../../components/BrandLogo";
 
 /** RTL back: arrow points right */
 function BackArrow({ className = "ms-1.5 inline-block h-3.5 w-3.5" }: { className?: string }) {
@@ -34,49 +34,75 @@ function ForwardArrow({ className = "me-1.5 inline-block h-3.5 w-3.5" }: { class
 
 export default function RegisterHubPage() {
   return (
-    <div className={`${pageCanvas} font-sans antialiased py-16 px-6`} dir="rtl">
-      <div className="max-w-md mx-auto space-y-10">
-        <div className="text-center space-y-2">
+    <div
+      className={`${pageCanvas} relative overflow-hidden bg-gradient-to-b from-slate-50 via-white to-blue-50/60 px-5 py-14 font-sans antialiased sm:px-6 sm:py-20`}
+      dir="rtl"
+    >
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 -top-40 mx-auto h-80 w-80 rounded-full bg-[#0070F3]/10 blur-3xl"
+      />
+
+      <div className="relative mx-auto w-full max-w-md space-y-8 sm:space-y-10">
+        <header className="space-y-4 text-center">
           <Link
             href="/"
-            className="inline-flex items-center text-xs font-medium tracking-wide text-neutral-500 hover:text-neutral-900 transition-colors"
+            className="inline-flex items-center text-xs font-medium tracking-wide text-slate-500 transition-colors hover:text-slate-900"
           >
-            חזרה לעמוד הבית של&nbsp;<BrandWordmark />
+            חזרה לעמוד הבית של&nbsp;<BrandLogo />
             <BackArrow />
           </Link>
-          <h1 className="text-4xl font-semibold text-neutral-900 tracking-tight pt-4">
-            הרשמה ל-PROJECT100
+          <h1
+            aria-label="הרשמה ל-PROJECT100"
+            className="text-3xl font-semibold tracking-tight text-slate-900 sm:text-4xl"
+          >
+            הרשמה{" "}
+            <span className="whitespace-nowrap">
+              ל-<BrandLogo />
+            </span>
           </h1>
-        </div>
+        </header>
 
-        <Link href="/register/student" className={`${frostCard} block p-6 text-start space-y-3`}>
-          <h2 className="text-xl font-semibold text-neutral-900">תלמיד/סטודנט</h2>
-          <p className="text-sm text-neutral-500 leading-relaxed">
-            הרשמה מהירה ופתיחת חשבון
+        <Link
+          href="/register/student"
+          className="group block rounded-3xl border border-slate-200/60 bg-white/80 p-6 text-start shadow-2xl shadow-blue-900/5 backdrop-blur-xl transition-all duration-300 ease-out hover:-translate-y-0.5 hover:border-slate-300/70 hover:shadow-blue-900/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0070F3]/40 sm:p-8"
+        >
+          <h2 className="text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">
+            הרשמת תלמידים
+          </h2>
+          <p className="mt-2 text-sm leading-relaxed text-slate-500 sm:text-base">
+            פותחים חשבון בכמה דקות ומתחילים ללמוד.
           </p>
-          <span className="inline-flex items-center text-sm font-medium text-neutral-900 pt-2">
-            <ForwardArrow />
+          <span className="mt-6 inline-flex items-center gap-3 text-sm font-semibold text-[#0B1B3D]">
             להרשמה
+            <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-slate-900 text-white transition-all duration-300 ease-out group-hover:-translate-x-1 group-hover:bg-[#0070F3]">
+              <ForwardArrow className="h-4 w-4" />
+            </span>
           </span>
         </Link>
 
-        <div className="text-center space-y-3">
-          <p className="text-sm text-neutral-500">
-            כבר יש חשבון?{" "}
-            <Link href="/login" className="font-medium text-neutral-900 hover:underline">
-              התחברות
-            </Link>
-          </p>
-          <p className="text-xs text-neutral-400">
-            מעוניין ללמד אצלנו?{" "}
-            <Link
-              href="/careers"
-              className="inline-block bg-[#0071e3] hover:bg-[#0077ed] text-white font-bold py-1.5 px-4 rounded-full transition-all"
-            >
-              הגש מועמדות
-            </Link>
-          </p>
-        </div>
+        <p className="text-center text-sm text-slate-500">
+          כבר יש חשבון?{" "}
+          <Link href="/login" className="font-medium text-slate-900 hover:underline">
+            התחברות
+          </Link>
+        </p>
+
+        <aside className="space-y-3 rounded-2xl border border-slate-200/70 bg-white/60 px-5 py-4 text-start backdrop-blur-md">
+          <div className="space-y-0.5">
+            <p className="text-sm font-semibold text-slate-900">
+              נבחרת המורים של <BrandLogo />
+            </p>
+            <p className="text-xs text-slate-500">מחפשים אנשי חינוך מהשורה הראשונה</p>
+          </div>
+          <Link
+            href="/careers"
+            className="group inline-flex items-center text-sm font-semibold text-[#0070F3] transition-colors hover:text-[#0B1B3D]"
+          >
+            הגש מועמדות לנבחרת
+            <ForwardArrow className="ms-1.5 inline-block h-3.5 w-3.5 transition-transform duration-300 group-hover:-translate-x-0.5" />
+          </Link>
+        </aside>
       </div>
     </div>
   );
