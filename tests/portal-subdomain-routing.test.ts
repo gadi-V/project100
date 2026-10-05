@@ -272,8 +272,8 @@ describe("public landing has no teacher login entry points", () => {
     expect(html).not.toContain('href="/careers"');
   });
 
-  it("keeps the landing page source free of staff entry links", () => {
-    const source = readSource("app/page.tsx");
+  it.each(["app/page.tsx", "components/landing/HomeLanding.tsx"])("keeps the landing source %s free of staff entry links", (file) => {
+    const source = readSource(file);
     for (const marker of STAFF_ENTRY_MARKERS) expect(source, marker).not.toContain(marker);
     expect(source).not.toContain("/careers");
     expect(source).not.toContain("/teachers");

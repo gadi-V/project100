@@ -247,6 +247,33 @@ describe("POST /api/register/student", () => {
     expect(res.status).toBe(409);
     expect(db.userCreate).not.toHaveBeenCalled();
   });
+
+  it("saves the campaign attribution on the new student profile", async () => {
+    const POST = await registerStudent();
+    const res = await POST(
+      postJson("https://project100.test/api/register/student", {
+        ...SIGNUP,
+        utm: { utmSource: " facebook ", utmMedium: "cpc", utmCampaign: "bagrut_winter_2026" },
+      })
+    );
+    expect(res.status).toBe(201);
+    expect(createdWith().data.studentProfile.create).toMatchObject({
+      utmSource: "facebook",
+      utmMedium: "cpc",
+      utmCampaign: "bagrut_winter_2026",
+    });
+  });
+
+  it.each([
+    ["no attribution", undefined],
+    ["a malformed attribution", "utm_source=facebook"],
+    ["empty fields", { utmSource: " ", utmMedium: 7 }],
+  ])("signs up with %s and leaves the UTM columns unset", async (_label, utm) => {
+    const POST = await registerStudent();
+    const res = await POST(postJson("https://project100.test/api/register/student", { ...SIGNUP, utm }));
+    expect(res.status).toBe(201);
+    expect(createdWith().data.studentProfile.create).not.toHaveProperty("utmSource");
+  });
 });
 
 describe("Google sign-in", () => {
@@ -360,6 +387,30 @@ describe("Google sign-in", () => {
       expect(data.diagnosticQuizzes?.create.subject).toBe("אינפי 1");
     });
 
+    it("saves the campaign attribution for a new Google student", async () => {
+      const POST = await complete();
+      const res = await POST(
+        postJson(
+          "https://project100.test/api/auth/google/complete",
+          {
+            firstName: "דנה",
+            lastName: "לוי",
+            phone: "052-765-4321",
+            acceptTerms: true,
+            answers: ACADEMIC_ANSWERS,
+            utm: { utmSource: "google", utmMedium: "cpc", utmCampaign: null },
+          },
+          await pendingCookie()
+        )
+      );
+      expect(res.status).toBe(201);
+      expect(createdWith().data.studentProfile.create).toMatchObject({
+        utmSource: "google",
+        utmMedium: "cpc",
+        utmCampaign: null,
+      });
+    });
+
     it("requires the terms checkbox for a new Google student", async () => {
       const POST = await complete();
       const res = await POST(
@@ -433,6 +484,14 @@ describe("wizard step 4 source", () => {
     expect(wizard).toContain("className={`w-full ${orangeCta} py-3.5 px-6 rounded-xl text-center`}");
     expect(wizard).toContain('fetch("/api/register/student"');
     expect(wizard).not.toContain("/portal/dashboard");
+  });
+
+  it("sends the stored UTM attribution from the orange form and the Google callback, then clears it", () => {
+    const callback = readSource("app/auth/callback/page.tsx");
+    for (const source of [wizard, callback]) {
+      expect(source).toContain("utm: readStoredUTM()");
+      expect(source).toContain("clearStoredUTM()");
+    }
   });
 
   it("keeps terms and WhatsApp consent as separate checkboxes", () => {

@@ -110,6 +110,11 @@ model StudentProfile {
   statusUpdatedAt   DateTime?
   statusUpdatedById String?
 
+  /// Campaign attribution captured from utm_* query parameters at sign-up (last touch in the browser session).
+  utmSource   String?
+  utmMedium   String?
+  utmCampaign String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }

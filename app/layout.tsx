@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { Toaster } from "react-hot-toast";
 import AmbientCanvas from "../components/AmbientCanvas";
 import AppShell from "../components/AppShell";
+import UTMTracker from "../components/UTMTracker";
 
 export const metadata: Metadata = {
   title: "PROJECT100 - פלטפורמת למידה",
@@ -20,6 +21,7 @@ export default function RootLayout({
       <body className="min-h-screen text-neutral-900 antialiased font-sans flex flex-col">
         {/* Scroll-aware ambient mesh — colors shift with landing sections */}
         <AmbientCanvas />
+        <UTMTracker />
 
         <div className="relative z-10 flex flex-col flex-grow min-h-screen">
           <Toaster

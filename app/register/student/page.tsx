@@ -18,6 +18,7 @@ import {
   parseOnboardingAnswers,
   type OnboardingAnswers,
 } from "../../../lib/student-onboarding";
+import { clearStoredUTM, readStoredUTM } from "../../../lib/hooks/useUTMTracking";
 
 function BackArrow({ className = "ms-1.5 inline-block h-3.5 w-3.5" }: { className?: string }) {
   return (
@@ -242,6 +243,7 @@ export default function StudentRegisterPage() {
           acceptTerms: formData.acceptTerms,
           whatsappUpdates: formData.whatsappUpdates,
           answers: answers.value,
+          utm: readStoredUTM(),
         }),
       });
       const result = (await response.json()) as {
@@ -255,6 +257,7 @@ export default function StudentRegisterPage() {
 
       clearQuizLocalStorageRemnants();
       sessionStorage.removeItem(ONBOARDING_STORAGE_KEY);
+      clearStoredUTM();
       toast.success(`ברוך הבא, ${result.data.name}!`, { id: progressToast });
       router.push(result.data.redirectTo);
     } catch (err: unknown) {

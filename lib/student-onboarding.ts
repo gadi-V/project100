@@ -1,4 +1,5 @@
 import { InvalidPhoneNumberError, normalizeToE164 } from "./utils/phone";
+import { parseUTMAttribution, type UTMAttribution } from "./utm";
 
 /** sessionStorage key that carries wizard steps 1-3 across the Google OAuth round trip. */
 export const ONBOARDING_STORAGE_KEY = "onboarding_answers";
@@ -141,6 +142,7 @@ export type StudentSignupInput = {
   password: string;
   whatsappUpdates: boolean;
   answers: OnboardingAnswers;
+  utm: UTMAttribution | null;
 };
 
 /** Validates the manual sign-up form (step 4) together with the step 1-3 answers. */
@@ -180,6 +182,7 @@ export function parseStudentSignup(raw: unknown): ParseResult<StudentSignupInput
       password,
       whatsappUpdates: b.whatsappUpdates === true,
       answers: answers.value,
+      utm: parseUTMAttribution(b.utm),
     },
   };
 }

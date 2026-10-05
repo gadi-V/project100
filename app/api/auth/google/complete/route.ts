@@ -15,6 +15,7 @@ import {
   type OnboardingAnswers,
 } from "../../../../../lib/student-onboarding";
 import { applyOnboardingAnswers, createStudentAccount } from "../../../../../lib/student-registration";
+import { parseUTMAttribution } from "../../../../../lib/utm";
 
 type CompletionStatus =
   | { status: "signed_in" }
@@ -98,6 +99,7 @@ export async function POST(request: NextRequest) {
       whatsappUpdates: body.whatsappUpdates === true,
       googleSub: pending.sub,
       answers,
+      utm: parseUTMAttribution(body.utm),
     });
     if (!result.ok) {
       return NextResponse.json({ success: false, error: result.error }, { status: result.status });

@@ -170,8 +170,9 @@ Verified by `test_hive_mcp_tools.py`:
 | `20260929200238_add_student_tabs_and_communication` | `StudentProfile` (1:1 `User`, cascade) + `StudentCommunicationLog` (FK `User`, cascade, index `studentId, createdAt`) + nullable `Lesson.attendanceStatus / attendanceMarkedAt / attendanceMarkedById` (Sprint 10b) |
 | `20260929220000_lesson_type_and_whatsapp_group` | `Lesson.lessonType TEXT NOT NULL DEFAULT 'REGULAR'` + nullable `Lesson.whatsappGroupId` (`ADD COLUMN IF NOT EXISTS`) (Sprint 12) |
 | `20261005120000_student_signup_google_and_consent` | Nullable `User.googleSub` (unique), `User.termsAcceptedAt`, `User.whatsappUpdatesConsentAt` for the student sign-up wizard step 4. Applied to Neon on 2026-10-05 |
+| `20261005174500_add_utm_tracking_fields` | Nullable `StudentProfile.utmSource / utmMedium / utmCampaign` (campaign attribution at sign-up). Additive only; applied to Neon with `prisma migrate deploy` on 2026-10-05 (Sprint 24) |
 
-Replaying all nine migrations reproduces `prisma/schema.prisma` exactly.
+Replaying all ten migrations reproduces `prisma/schema.prisma` exactly.
 
 **Existing databases that were synced with `db push`** already contain these objects. Mark the sync
 migration as applied instead of executing it (running it would fail with "already exists"):
@@ -218,6 +219,27 @@ Fresh databases apply all migrations normally with `npx prisma migrate deploy`.
 | 21 | Financial consolidation: teacher fines (PENALTY, less appeal waivers) deducted from the payroll net balance with a "קנסות/קיזוזים (₪)" column, the "הוראות קבע" tab merged into "כספים" (weekly plan, next charge, standing order, card, credits, payments, ledger) with five tabs left and legacy `?tab=` redirects, and full verification (624 Vitest, 25/25 closed-loop E2E, clean build) | ✅ Completed |
 | 22 | Teacher cockpit isolated on the `teachers.` subdomain (proxy host routing: `/` → `/portal/dashboard` or `/login` → staff gate, marketing paths bounced to the portal, students redirected to the main-site `/dashboard` or `403` on API), cross-subdomain session (`SESSION_COOKIE_DOMAIN`, `role` claim in the JWT), public landing verified free of staff login links (only the footer `/careers` link remains) and of heavy portal bundles; 694 Vitest, 25/25 closed-loop E2E, clean build | ✅ Completed |
 | 23 | UI reconciliation verified (RTL registration flows and orange lead / registration CTAs from `0d0a9e0`: shared `orangeCta` / `orangeOutlineCta` / `orangeOptionSelected` tokens in `lib/ui.ts`; no staff login links on the landing or `Navbar`), wizard test aligned with the `orangeCta` token, pre-flight extended (cookie domain, schema integrity, migrations, import scan) and the phantom `nanoid` dependency declared in `package.json`; 694 Vitest, 25/25 closed-loop E2E, clean build. **Release v1.1.0 — Production Launch Ready** | ✅ Completed |
+| 24 | Growth phase: social proof reviews section on the landing page (52 reviews from `lib/reviews.json`, `next/image` with `loading="lazy"` and a placeholder, glass card; students' full surnames stay on the server) and UTM attribution pipeline (`utm_source` / `utm_medium` / `utm_campaign` captured into sessionStorage on every page, sent by the orange form and the Google callback, stored on the new `StudentProfile.utm*` columns); `@/*` alias from `979c936` removed; 717 Vitest, 25/25 closed-loop E2E, clean build | ✅ Completed |
+
+### Social proof and UTM attribution (Sprint 24)
+
+- **Reviews**: `app/page.tsx` is now a server component that renders `components/landing/HomeLanding.tsx` (the former
+  client page body) with a `reviews` slot. `components/landing/ReviewsSection.tsx` (server) reads `lib/reviews.json`
+  and passes only `id`, `displayName`, `achievement`, `meta`, `text` and `imagePath` to the client
+  `components/landing/ReviewsCarousel.tsx`, so `fullName` never reaches the browser bundle, the prerendered HTML or
+  the RSC payload. Avatars use `next/image` (110 px, `sizes`, `loading="lazy"`, flat SVG placeholder); only the active
+  and next review mount an image. Photos live in `public/images/reviews/` (one per review, checked by the tests).
+- **UTM capture**: `lib/utm.ts` (pure: `utmFromSearchParams`, `parseUTMAttribution`, trims, strips control characters,
+  caps values at 100 characters) and `lib/hooks/useUTMTracking.ts` (client: `useUTMTracking`, `readStoredUTM`,
+  `clearStoredUTM`, sessionStorage key `utm_attribution`). `components/UTMTracker.tsx` runs the hook from
+  `app/layout.tsx`, so a campaign link to any page is captured. A later campaign link in the same tab replaces the
+  stored one (last touch); pages without `utm_*` keep it.
+- **Sign-up**: `app/register/student/page.tsx` and `app/auth/callback/page.tsx` send `utm: readStoredUTM()` and clear it
+  after success. `POST /api/register/student` (via `parseStudentSignup`) and `POST /api/auth/google/complete` validate
+  it with `parseUTMAttribution` and `createStudentAccount` writes it to `StudentProfile` on account creation only;
+  existing accounts that sign in with Google keep their original attribution. Malformed input is ignored, never a `400`.
+- Tests: `tests/growth-social-proof-utm.test.ts` (16) plus UTM cases in `tests/student-register-wizard.test.ts`.
+  Totals: 31 files, 717 tests.
 
 ### Teacher subdomain routing and public landing decoupling (Sprint 22)
 
@@ -241,7 +263,8 @@ Fresh databases apply all migrations normally with `npx prisma migrate deploy`.
 - **Public landing**: `app/page.tsx`, `components/Navbar.tsx` and the registration hub `app/register/page.tsx` contain
   no staff or teacher login link (`/portal/*`, "כניסת צוות", `/teachers/*`, `/careers`). The navbar's "אזור אישי"
   goes to the student `/login`. The only teacher-facing entry stays the footer link "הצטרפות לנבחרת ההוראה" → `/careers`.
-- **Bundle isolation**: the import graph of `app/page.tsx` reaches only `components/landing/*` plus `next/link`,
+- **Bundle isolation**: the import graph of `app/page.tsx` reaches only `components/landing/*` (plus `lib/ui.ts` and,
+  since Sprint 24, `lib/reviews.json` on the server side) and `next/link`, `next/image`,
   `react-hot-toast` and `lucide-react`; no `@daily-co/*`, Stripe, Stream Chat, Prisma, `components/portal/*`, ledger,
   billing or classroom modules. The built client chunks of `/` contain no Daily / Stripe / ledger / portal code.
 - Tests: `tests/portal-subdomain-routing.test.ts` (33): host detection, route decisions, the real `proxy` with

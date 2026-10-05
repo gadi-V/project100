@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "./prisma";
 import { buildStudentRecords, type OnboardingAnswers } from "./student-onboarding";
+import type { UTMAttribution } from "./utm";
 
 export type NewStudentAccount = {
   firstName: string;
@@ -12,6 +13,7 @@ export type NewStudentAccount = {
   googleSub?: string;
   /** Null only for a Google sign-up whose step 1-3 answers were lost (e.g. a new tab). */
   answers: OnboardingAnswers | null;
+  utm?: UTMAttribution | null;
 };
 
 export type CreateStudentResult =
@@ -73,6 +75,7 @@ export async function createStudentAccount(input: NewStudentAccount): Promise<Cr
               firstName: input.firstName,
               lastName: input.lastName,
               ...(records?.profile ?? {}),
+              ...(input.utm ?? {}),
             },
           },
           ...(records ? { diagnosticQuizzes: { create: records.diagnostic } } : {}),

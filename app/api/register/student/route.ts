@@ -25,6 +25,7 @@ export async function POST(request: Request) {
       passwordHash: await bcrypt.hash(input.password, 10),
       whatsappUpdates: input.whatsappUpdates,
       answers: input.answers,
+      utm: input.utm,
     });
     if (!result.ok) {
       return NextResponse.json({ success: false, error: result.error }, { status: result.status });

@@ -3,11 +3,10 @@
 import { useEffect, useState } from "react";
 import Image from "next/image";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import reviewsData from "@/lib/reviews.json";
+import { liquidGlass } from "../../lib/ui";
 
-type Review = {
+export type PublicReview = {
   id: number;
-  fullName: string;
   displayName: string;
   achievement: string;
   meta: string;
@@ -15,9 +14,12 @@ type Review = {
   imagePath: string;
 };
 
-const REVIEWS: Review[] = reviewsData;
 const AUTOPLAY_MS = 5000;
 const VISIBLE_DOTS = 5;
+const AVATAR_SIZE = 110;
+/** Same tone as the avatar ring, shown until the photo has loaded. */
+const AVATAR_PLACEHOLDER =
+  "data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='110' height='110'%3E%3Crect width='110' height='110' fill='%23e2e8f0'/%3E%3C/svg%3E";
 
 function dotWindow(activeIndex: number, total: number): number[] {
   const count = Math.min(VISIBLE_DOTS, total);
@@ -25,10 +27,10 @@ function dotWindow(activeIndex: number, total: number): number[] {
   return Array.from({ length: count }, (_, i) => start + i);
 }
 
-export default function ReviewsCarousel() {
+export default function ReviewsCarousel({ reviews }: { reviews: PublicReview[] }) {
   const [activeIndex, setActiveIndex] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
-  const total = REVIEWS.length;
+  const total = reviews.length;
 
   useEffect(() => {
     if (total < 2 || isPaused) return;
@@ -45,9 +47,12 @@ export default function ReviewsCarousel() {
     "absolute top-1/2 z-10 flex size-10 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full text-[#94a3b8] opacity-0 transition-opacity duration-200 hover:text-[#1890ff] focus-visible:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100";
 
   return (
-    <section id="reviews" className="px-6 py-20" dir="rtl" aria-label="ביקורות סטודנטים מאומתות">
+    <section id="reviews" className="px-6 py-20" dir="rtl" aria-labelledby="reviews-heading">
+      <h2 id="reviews-heading" className="mb-10 text-center text-3xl font-black tracking-tight text-[#1d1d1f] md:text-4xl">
+        מה מספרים התלמידים שלנו
+      </h2>
       <div
-        className="group relative mx-auto max-w-[680px]"
+        className={`group relative mx-auto max-w-[720px] px-4 py-10 sm:px-8 sm:py-12 ${liquidGlass}`}
         onMouseEnter={() => setIsPaused(true)}
         onMouseLeave={() => setIsPaused(false)}
       >
@@ -59,7 +64,7 @@ export default function ReviewsCarousel() {
         </button>
 
         <div className="mx-auto grid max-w-[580px] px-8" aria-live="polite">
-          {REVIEWS.map((review, index) => {
+          {reviews.map((review, index) => {
             const isActive = index === activeIndex;
             const shouldLoadImage = isActive || index === (activeIndex + 1) % total;
             return (
@@ -89,8 +94,11 @@ export default function ReviewsCarousel() {
                       <Image
                         src={review.imagePath}
                         alt={review.displayName}
-                        width={110}
-                        height={110}
+                        width={AVATAR_SIZE}
+                        height={AVATAR_SIZE}
+                        sizes={`${AVATAR_SIZE}px`}
+                        loading="lazy"
+                        placeholder={AVATAR_PLACEHOLDER}
                         draggable={false}
                         className="block size-full object-cover"
                       />

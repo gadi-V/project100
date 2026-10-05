@@ -9,6 +9,7 @@ import {
   ONBOARDING_STORAGE_KEY,
   normalizeIsraeliMobile,
 } from "../../../lib/student-onboarding";
+import { clearStoredUTM, readStoredUTM } from "../../../lib/hooks/useUTMTracking";
 
 type CompletionStatus =
   | { status: "loading" }
@@ -113,9 +114,11 @@ export default function GoogleCallbackPage() {
         acceptTerms,
         whatsappUpdates,
         answers: readStoredAnswers(),
+        utm: readStoredUTM(),
       });
       if (!result.ok) throw new Error(result.error || "לא הצלחנו לסיים את ההרשמה");
       sessionStorage.removeItem(ONBOARDING_STORAGE_KEY);
+      clearStoredUTM();
       toast.success(`ברוך הבא, ${firstName.trim()}!`);
       router.replace(result.data?.redirectTo ?? "/dashboard");
     } catch (err: unknown) {

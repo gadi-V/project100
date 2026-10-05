@@ -490,6 +490,7 @@ describe("public UI separation", () => {
   it("keeps staff and teacher-recruitment entries out of the navbar and the home page", () => {
     expect(readSource("components/Navbar.tsx")).not.toMatch(STAFF_ENTRY);
     expect(readSource("app/page.tsx")).not.toMatch(STAFF_ENTRY);
+    expect(readSource("components/landing/HomeLanding.tsx")).not.toMatch(STAFF_ENTRY);
   });
 
   it("has exactly one discreet careers link, in the footer", () => {
