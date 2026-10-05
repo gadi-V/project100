@@ -6,6 +6,7 @@ import BenefitsBar from "../components/landing/BenefitsBar";
 import AboutSection from "../components/landing/AboutSection";
 import SubjectsMarquee from "../components/landing/SubjectsMarquee";
 import MethodFlipCards from "../components/landing/MethodFlipCards";
+import { orangeCta } from "../lib/ui";
 
 export default function HomePage() {
   const [activeFaq, setActiveFaq] = useState<number | null>(null);
@@ -62,7 +63,7 @@ export default function HomePage() {
             פלטפורמת למידה מרחוק למקצועות וקורסים מתיכון ועד אקדמיה
           </h2>
           <div className="pt-4 flex flex-col sm:flex-row gap-4">
-            <Link href="/register" className="inline-block text-center bg-[#1d1d1f] hover:bg-[#2d2d2f] text-white font-black text-xs py-3.5 px-8 rounded-full transition-all shadow-md">
+            <Link href="/register" className={`inline-block text-center ${orangeCta} text-xs py-3.5 px-8 rounded-full`}>
               הרשמה לפלטפורמה
             </Link>
             <Link href="/onboarding/diagnostic" className="inline-block text-center bg-white/50 backdrop-blur-md hover:bg-white/70 text-[#1d1d1f] font-black text-xs py-3.5 px-8 rounded-full transition-all border border-white/80">
@@ -194,7 +195,7 @@ export default function HomePage() {
           <h2 className="text-3xl sm:text-4xl font-black text-[#1d1d1f] tracking-tight">כרטיסיית מפגשים. בלי אותיות קטנות.</h2>
           <p className="text-xs font-bold text-[#6e6e73] max-w-xl mx-auto leading-relaxed">
             רכישת החבילות מתבצעת ככרטיסיית מפגשים דיגיטלית שקופה. ניכוי שעות מבוצע אך ורק לאחר קיום המפגש בפועל.
-            <span className="text-[#0071e3] block sm:inline sm:mr-1 font-black">קיימות אופציות ומסלולי ליווי מורחבים בהתאמה אישית.</span>
+            <span className="text-[#0071e3] block sm:inline sm:ms-1 font-black">קיימות אופציות ומסלולי ליווי מורחבים בהתאמה אישית.</span>
           </p>
           <div className="pt-2">
             <Link
@@ -274,7 +275,7 @@ export default function HomePage() {
               <button
                 type="submit"
                 disabled={leadLoading}
-                className="w-full bg-[#0071e3] hover:bg-[#0077ed] text-white font-black py-3.5 rounded-xl text-xs transition-all shadow-md disabled:opacity-50"
+                className={`w-full ${orangeCta} py-3.5 rounded-xl text-xs`}
               >
                 {leadLoading ? "שולח..." : "שליחת פרטים להתאמה קבועה"}
               </button>

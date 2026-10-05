@@ -3,16 +3,17 @@
 import React, { useState } from "react";
 import Link from "next/link";
 import { PayoutType } from "@prisma/client";
+import { orangeCta, orangeOptionSelected } from "../../../lib/ui";
 
 const TOPIC_OPTIONS = [
-  { id: "math_581", label: "Math exam 581 (5 units)" },
-  { id: "math_582", label: "Math exam 582 (5 units)" },
-  { id: "math_481", label: "Math exam 481 (4 units)" },
-  { id: "math_482", label: "Math exam 482 (4 units)" },
-  { id: "math_381", label: "Math exam 381 (3 units)" },
-  { id: "middle_school", label: "Middle school math" },
-  { id: "linear_algebra", label: "Linear algebra (academic)" },
-  { id: "calculus", label: "Calculus / Infinitesimal (academic)" },
+  { id: "math_581", label: "בגרות במתמטיקה 581 (5 יחידות)" },
+  { id: "math_582", label: "בגרות במתמטיקה 582 (5 יחידות)" },
+  { id: "math_481", label: "בגרות במתמטיקה 481 (4 יחידות)" },
+  { id: "math_482", label: "בגרות במתמטיקה 482 (4 יחידות)" },
+  { id: "math_381", label: "בגרות במתמטיקה 381 (3 יחידות)" },
+  { id: "middle_school", label: "מתמטיקה לחטיבת ביניים" },
+  { id: "linear_algebra", label: "אלגברה ליניארית (אקדמיה)" },
+  { id: "calculus", label: "חשבון אינפיניטסימלי (אקדמיה)" },
 ];
 
 export default function TeacherApplyPage() {
@@ -38,12 +39,12 @@ export default function TeacherApplyPage() {
     setErrorMsg(null);
 
     if (!cvUrl.trim()) {
-      setErrorMsg("Please provide a CV link");
+      setErrorMsg("יש להוסיף קישור לקורות החיים");
       return;
     }
 
     if (selectedTopics.length === 0) {
-      setErrorMsg("Please select at least one teaching area");
+      setErrorMsg("יש לבחור לפחות תחום הוראה אחד");
       return;
     }
 
@@ -64,12 +65,12 @@ export default function TeacherApplyPage() {
 
       if (!res.ok) {
         const errJson = await res.json().catch(() => ({}));
-        throw new Error(errJson.error || "Failed to submit application");
+        throw new Error(errJson.error || "שליחת המועמדות נכשלה");
       }
 
       setIsSuccess(true);
     } catch (err: unknown) {
-      setErrorMsg(err instanceof Error ? err.message : "Submission failed");
+      setErrorMsg(err instanceof Error ? err.message : "השליחה נכשלה");
     } finally {
       setLoading(false);
     }
@@ -82,16 +83,16 @@ export default function TeacherApplyPage() {
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-2xl text-emerald-600">
             {"\u2713"}
           </div>
-          <h2 className="text-xl font-bold text-slate-900">Application received!</h2>
+          <h2 className="text-xl font-bold text-slate-900">המועמדות התקבלה!</h2>
           <p className="text-xs text-slate-600 leading-relaxed">
-            Thank you for applying. Step 1 of the vetting funnel is complete and the pedagogical team will contact you.
+            תודה שהגשת מועמדות. השלב הראשון בתהליך הקבלה הושלם, והצוות הפדגוגי יחזור אליך.
           </p>
           <div className="pt-2">
             <Link
               href="/teachers/onboarding/status"
-              className="inline-block w-full rounded-xl bg-slate-900 py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-slate-800 transition text-center"
+              className={`inline-block w-full rounded-xl py-2.5 text-xs text-center ${orangeCta}`}
             >
-              Track application status
+              מעקב אחר סטטוס המועמדות
             </Link>
           </div>
         </div>
@@ -104,9 +105,9 @@ export default function TeacherApplyPage() {
       <div className="mx-auto max-w-2xl space-y-6">
         <div className="rounded-2xl bg-white p-8 shadow-sm border border-slate-200">
           <div className="border-b border-slate-100 pb-5">
-            <h1 className="text-2xl font-bold text-slate-900">Join the teacher team</h1>
+            <h1 className="text-2xl font-bold text-slate-900">הצטרפות לצוות המורים</h1>
             <p className="text-xs text-slate-500 mt-1">
-              Complete your profile and submit your CV to start the 6-step vetting process.
+              ממלאים את הפרופיל ומצרפים קורות חיים כדי להתחיל את תהליך הקבלה בן 6 השלבים.
             </p>
           </div>
 
@@ -119,24 +120,25 @@ export default function TeacherApplyPage() {
           <form onSubmit={handleSubmit} className="mt-6 space-y-6">
             <div>
               <label className="block text-xs font-bold text-slate-800 mb-1.5">
-                CV link (Google Drive / Dropbox / PDF) *
+                קישור לקורות חיים (Google Drive / Dropbox / PDF) *
               </label>
               <input
                 type="url"
                 required
+                dir="ltr"
                 value={cvUrl}
                 onChange={(e) => setCvUrl(e.target.value)}
                 placeholder="https://drive.google.com/file/d/..."
-                className="w-full rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-800 outline-none focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600 transition"
+                className="w-full rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-800 text-right outline-none focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600 transition"
               />
               <span className="text-[14px] text-slate-400 mt-1 block">
-                Make sure the link is public for anyone with the link.
+                ודאו שהקישור פתוח לצפייה לכל מי שמחזיק בו.
               </span>
             </div>
 
             <div>
               <label className="block text-xs font-bold text-slate-800 mb-1.5">
-                Teaching areas and relevant exams *
+                תחומי הוראה ובחינות רלוונטיות *
               </label>
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 {TOPIC_OPTIONS.map((topic) => {
@@ -146,16 +148,16 @@ export default function TeacherApplyPage() {
                       key={topic.id}
                       type="button"
                       onClick={() => toggleTopic(topic.id)}
-                      className={`flex items-center gap-2 rounded-xl border p-3 text-end text-xs font-medium transition ${
+                      className={`flex items-center gap-2 rounded-xl border p-3 text-start text-xs font-medium transition ${
                         isChecked
-                          ? "border-indigo-600 bg-indigo-50/60 text-indigo-900"
-                          : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                          ? orangeOptionSelected
+                          : "border-orange-200 bg-white text-slate-700 hover:border-orange-400"
                       }`}
                     >
                       <span
                         className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
                           isChecked
-                            ? "border-indigo-600 bg-indigo-600 text-[13px] text-white"
+                            ? "border-orange-500 bg-orange-500 text-[13px] text-white"
                             : "border-slate-300 bg-white"
                         }`}
                       >
@@ -170,7 +172,7 @@ export default function TeacherApplyPage() {
 
             <div>
               <label className="block text-xs font-bold text-slate-800 mb-1.5">
-                Employment and payout model
+                מודל העסקה ותשלום
               </label>
               <div className="grid grid-cols-2 gap-3">
                 <button
@@ -178,22 +180,22 @@ export default function TeacherApplyPage() {
                   onClick={() => setPayoutType(PayoutType.SLIP)}
                   className={`rounded-xl border p-3 text-center text-xs font-medium transition ${
                     payoutType === PayoutType.SLIP
-                      ? "border-indigo-600 bg-indigo-50/60 text-indigo-900 font-bold"
-                      : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                      ? `${orangeOptionSelected} font-bold`
+                      : "border-orange-200 bg-white text-slate-600 hover:border-orange-400"
                   }`}
                 >
-                  Pay slip (employee)
+                  תלוש שכר (שכיר/ה)
                 </button>
                 <button
                   type="button"
                   onClick={() => setPayoutType(PayoutType.INVOICE)}
                   className={`rounded-xl border p-3 text-center text-xs font-medium transition ${
                     payoutType === PayoutType.INVOICE
-                      ? "border-indigo-600 bg-indigo-50/60 text-indigo-900 font-bold"
-                      : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                      ? `${orangeOptionSelected} font-bold`
+                      : "border-orange-200 bg-white text-slate-600 hover:border-orange-400"
                   }`}
                 >
-                  Tax invoice (freelancer)
+                  חשבונית מס (עצמאי/ת)
                 </button>
               </div>
             </div>
@@ -201,25 +203,25 @@ export default function TeacherApplyPage() {
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <label className="block text-xs font-bold text-slate-800 mb-1.5">
-                  Bank name
+                  שם הבנק
                 </label>
                 <input
                   type="text"
                   value={bankName}
                   onChange={(e) => setBankName(e.target.value)}
-                  placeholder="e.g. Bank Leumi"
+                  placeholder="למשל: בנק לאומי"
                   className="w-full rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-800 outline-none focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600 transition"
                 />
               </div>
               <div>
                 <label className="block text-xs font-bold text-slate-800 mb-1.5">
-                  Bank account number
+                  מספר חשבון בנק
                 </label>
                 <input
                   type="text"
                   value={accountNumber}
                   onChange={(e) => setAccountNumber(e.target.value)}
-                  placeholder="Account and branch"
+                  placeholder="מספר חשבון וסניף"
                   className="w-full rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-800 outline-none focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600 transition"
                 />
               </div>
@@ -227,13 +229,13 @@ export default function TeacherApplyPage() {
 
             <div>
               <label className="block text-xs font-bold text-slate-800 mb-1.5">
-                Teaching background and experience (optional)
+                רקע וניסיון בהוראה (לא חובה)
               </label>
               <textarea
                 rows={3}
                 value={bio}
                 onChange={(e) => setBio(e.target.value)}
-                placeholder="Tell us briefly about your experience, years of teaching, and style..."
+                placeholder="ספרו לנו בקצרה על הניסיון שלכם, שנות ההוראה וסגנון ההוראה..."
                 className="w-full rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-800 outline-none focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600 transition"
               />
             </div>
@@ -241,9 +243,9 @@ export default function TeacherApplyPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full rounded-xl bg-indigo-600 py-3 text-xs font-bold text-white shadow-sm hover:bg-indigo-700 disabled:opacity-50 transition"
+              className={`w-full rounded-xl py-3 text-xs ${orangeCta}`}
             >
-              {loading ? "Submitting..." : "Submit application and start vetting"}
+              {loading ? "שולחים..." : "שליחת מועמדות ותחילת תהליך הקבלה"}
             </button>
           </form>
         </div>

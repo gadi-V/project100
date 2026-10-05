@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Menu, X } from "lucide-react";
 import BrandWordmark from "./BrandWordmark";
+import { orangeCta } from "../lib/ui";
 
 type NavItem = {
   label: string;
@@ -218,7 +219,7 @@ export default function Navbar() {
           </nav>
           <Link
             href="/register"
-            className="bg-[#0071e3] hover:bg-[#0077ed] text-white text-xs font-bold py-1.5 px-4 rounded-full transition-all"
+            className={`${orangeCta} text-xs py-1.5 px-4 rounded-full`}
           >
             הצטרפות
           </Link>

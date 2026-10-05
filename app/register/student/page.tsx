@@ -6,9 +6,10 @@ import { toast } from "react-hot-toast";
 import {
   fieldClass,
   frostCard,
+  orangeCta,
+  orangeOptionSelected,
+  orangeOutlineCta,
   pageCanvas,
-  primaryCta,
-  secondaryCta,
 } from "../../../lib/ui";
 import {
   INVALID_PHONE_ERROR,
@@ -295,17 +296,17 @@ export default function StudentRegisterPage() {
         <div className={`${frostCard} p-8 space-y-8`}>
           {step === 1 && (
             <div className="space-y-6 animate-fadeIn">
-              <h3 className="text-xl font-black text-[#1d1d1f] text-end">
+              <h3 className="text-xl font-black text-[#1d1d1f] text-start">
                 בחר את מסלול הלימודים הנוכחי שלך:
               </h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <button
                   type="button"
                   onClick={() => setFormData({ ...formData, path: "school" })}
-                  className={`p-6 rounded-2xl border text-end transition-all ${
+                  className={`p-6 rounded-2xl border text-start transition-all ${
                     formData.path === "school"
-                      ? "border-neutral-900 bg-neutral-900/5 shadow-sm"
-                      : "border-neutral-200 hover:border-neutral-400"
+                      ? orangeOptionSelected
+                      : "border-orange-200 hover:border-orange-400"
                   }`}
                 >
                   <div className="text-md font-black text-[#1d1d1f]">חטיבה ותיכון</div>
@@ -317,10 +318,10 @@ export default function StudentRegisterPage() {
                 <button
                   type="button"
                   onClick={() => setFormData({ ...formData, path: "academia" })}
-                  className={`p-6 rounded-2xl border text-end transition-all ${
+                  className={`p-6 rounded-2xl border text-start transition-all ${
                     formData.path === "academia"
-                      ? "border-neutral-900 bg-neutral-900/5 shadow-sm"
-                      : "border-neutral-200 hover:border-neutral-400"
+                      ? orangeOptionSelected
+                      : "border-orange-200 hover:border-orange-400"
                   }`}
                 >
                   <div className="text-md font-black text-[#1d1d1f]">השכלה גבוהה / אקדמיה</div>
@@ -333,7 +334,7 @@ export default function StudentRegisterPage() {
           )}
 
           {step === 2 && (
-            <div className="space-y-4 animate-fadeIn text-end">
+            <div className="space-y-4 animate-fadeIn text-start">
               <h3 className="text-xl font-black text-[#1d1d1f]">פרטי הרקע הלימודי שלך:</h3>
 
               {formData.path === "school" ? (
@@ -431,7 +432,7 @@ export default function StudentRegisterPage() {
           )}
 
           {step === 3 && (
-            <div className="space-y-6 animate-fadeIn text-end">
+            <div className="space-y-6 animate-fadeIn text-start">
               <h3 className="text-xl font-black text-[#1d1d1f]">
                 מהו האתגר המרכזי ויעד הלימודים שלך?
               </h3>
@@ -466,10 +467,10 @@ export default function StudentRegisterPage() {
                   <button
                     type="button"
                     onClick={() => setFormData({ ...formData, goalType: "marathon" })}
-                    className={`p-4 rounded-xl border text-end transition-all ${
+                    className={`p-4 rounded-xl border text-start transition-all ${
                       formData.goalType === "marathon"
-                        ? "border-neutral-900 bg-neutral-900/5 font-semibold"
-                        : "border-[#e5e5e7]"
+                        ? `${orangeOptionSelected} font-semibold`
+                        : "border-orange-200 hover:border-orange-400"
                     }`}
                   >
                     <div className="text-xs font-black text-[#1d1d1f]">
@@ -483,10 +484,10 @@ export default function StudentRegisterPage() {
                   <button
                     type="button"
                     onClick={() => setFormData({ ...formData, goalType: "semester" })}
-                    className={`p-4 rounded-xl border text-end transition-all ${
+                    className={`p-4 rounded-xl border text-start transition-all ${
                       formData.goalType === "semester"
-                        ? "border-neutral-900 bg-neutral-900/5 font-semibold"
-                        : "border-[#e5e5e7]"
+                        ? `${orangeOptionSelected} font-semibold`
+                        : "border-orange-200 hover:border-orange-400"
                     }`}
                   >
                     <div className="text-xs font-black text-[#1d1d1f]">
@@ -514,7 +515,7 @@ export default function StudentRegisterPage() {
                 type="button"
                 onClick={handleGoogle}
                 disabled={loading}
-                className="w-full inline-flex items-center justify-center gap-3 rounded-xl border border-neutral-200 bg-white py-3.5 px-6 text-sm font-semibold text-neutral-800 shadow-sm transition-all hover:bg-neutral-50 hover:border-neutral-300 disabled:opacity-50"
+                className={`w-full inline-flex items-center justify-center gap-3 rounded-xl py-3.5 px-6 text-sm ${orangeOutlineCta}`}
               >
                 <GoogleIcon />
                 המשך עם Google
@@ -563,7 +564,7 @@ export default function StudentRegisterPage() {
                     value={formData.phone}
                     onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                     placeholder="050-1234567"
-                    className={`${orangeField} text-start`}
+                    className={`${orangeField} text-right!`}
                   />
                 </div>
 
@@ -576,7 +577,7 @@ export default function StudentRegisterPage() {
                     dir="ltr"
                     value={formData.email}
                     onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    className={`${orangeField} text-start`}
+                    className={`${orangeField} text-right!`}
                   />
                 </div>
 
@@ -586,11 +587,10 @@ export default function StudentRegisterPage() {
                     id="password"
                     type="password"
                     autoComplete="new-password"
-                    dir="ltr"
                     value={formData.password}
                     onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                     placeholder="לפחות 6 תווים"
-                    className={`${orangeField} text-start`}
+                    className={orangeField}
                   />
                 </div>
 
@@ -624,7 +624,7 @@ export default function StudentRegisterPage() {
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-3.5 px-6 rounded-xl shadow-lg shadow-orange-500/25 transition-all text-center disabled:opacity-60"
+                  className={`w-full ${orangeCta} py-3.5 px-6 rounded-xl text-center`}
                 >
                   {loading ? "פותחים את החשבון..." : "סיום הרשמה וכניסה לחשבון ←"}
                 </button>
@@ -638,7 +638,7 @@ export default function StudentRegisterPage() {
                 type="button"
                 onClick={handlePrevStep}
                 disabled={loading}
-                className={`inline-flex items-center ${secondaryCta} text-xs py-2.5 px-4 disabled:opacity-50`}
+                className={`inline-flex items-center rounded-full ${orangeOutlineCta} text-xs py-2.5 px-4`}
               >
                 חזור אחורה
                 <BackArrow />
@@ -651,7 +651,7 @@ export default function StudentRegisterPage() {
               <button
                 type="button"
                 onClick={handleNextStep}
-                className={`inline-flex items-center ${primaryCta} text-xs`}
+                className={`inline-flex items-center rounded-full py-3 px-6 ${orangeCta} text-xs`}
               >
                 <ForwardArrow />
                 המשך לשלב הבא

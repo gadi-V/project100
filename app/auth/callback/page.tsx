@@ -3,7 +3,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "react-hot-toast";
-import { fieldClass, frostCard, pageCanvas } from "../../../lib/ui";
+import { fieldClass, frostCard, orangeCta, pageCanvas } from "../../../lib/ui";
 import {
   INVALID_PHONE_ERROR,
   ONBOARDING_STORAGE_KEY,
@@ -188,7 +188,7 @@ export default function GoogleCallbackPage() {
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
                 placeholder="050-1234567"
-                className={`${orangeField} text-start`}
+                className={`${orangeField} text-right!`}
               />
             </div>
 
@@ -222,7 +222,7 @@ export default function GoogleCallbackPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-3.5 px-6 rounded-xl shadow-lg shadow-orange-500/25 transition-all text-center disabled:opacity-60"
+              className={`w-full ${orangeCta} py-3.5 px-6 rounded-xl text-center`}
             >
               {loading ? "פותחים את החשבון..." : "סיום הרשמה וכניסה לחשבון ←"}
             </button>

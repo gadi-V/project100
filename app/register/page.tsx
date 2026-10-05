@@ -65,7 +65,7 @@ export default function RegisterHubPage() {
 
         <Link
           href="/register/student"
-          className="group block rounded-3xl border border-slate-200/60 bg-white/80 p-6 text-start shadow-2xl shadow-blue-900/5 backdrop-blur-xl transition-all duration-300 ease-out hover:-translate-y-0.5 hover:border-slate-300/70 hover:shadow-blue-900/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0070F3]/40 sm:p-8"
+          className="group block rounded-3xl border border-slate-200/60 bg-white/80 p-6 text-start shadow-2xl shadow-blue-900/5 backdrop-blur-xl transition-all duration-300 ease-out hover:-translate-y-0.5 hover:border-orange-300 hover:shadow-orange-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/40 sm:p-8"
         >
           <h2 className="text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">
             הרשמת תלמידים
@@ -73,9 +73,9 @@ export default function RegisterHubPage() {
           <p className="mt-2 text-sm leading-relaxed text-slate-500 sm:text-base">
             פותחים חשבון בכמה דקות ומתחילים ללמוד.
           </p>
-          <span className="mt-6 inline-flex items-center gap-3 text-sm font-semibold text-[#0B1B3D]">
+          <span className="mt-6 inline-flex items-center gap-3 text-sm font-semibold text-orange-700">
             להרשמה
-            <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-slate-900 text-white transition-all duration-300 ease-out group-hover:-translate-x-1 group-hover:bg-[#0070F3]">
+            <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-orange-500 text-white shadow-lg shadow-orange-500/25 transition-all duration-300 ease-out group-hover:-translate-x-1 group-hover:bg-orange-600">
               <ForwardArrow className="h-4 w-4" />
             </span>
           </span>

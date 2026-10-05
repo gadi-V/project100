@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { toast } from "react-hot-toast";
-import { eyebrow, fieldClass, frostCard, pageCanvas, primaryCta } from "../../lib/ui";
+import { eyebrow, fieldClass, frostCard, orangeCta, orangeOptionSelected, pageCanvas } from "../../lib/ui";
 import { TEACHING_FRAMEWORKS, type TeachingFramework } from "../../lib/teacher-candidate";
 
 type CandidateForm = {
@@ -134,7 +134,7 @@ export default function CareersPage() {
                   required
                   autoComplete="email"
                   dir="ltr"
-                  className={fieldClass}
+                  className={`${fieldClass} text-right!`}
                   value={form.email}
                   onChange={(e) => update("email", e.target.value)}
                 />
@@ -192,8 +192,8 @@ export default function CareersPage() {
                       onClick={() => toggleFramework(value)}
                       className={`rounded-full px-4 py-1.5 text-xs font-medium border transition-colors ${
                         selected
-                          ? "bg-neutral-900 text-white border-neutral-900"
-                          : "bg-white/60 text-neutral-700 border-neutral-300 hover:border-neutral-500"
+                          ? orangeOptionSelected
+                          : "bg-white/60 text-neutral-700 border-orange-200 hover:border-orange-400"
                       }`}
                     >
                       {label}
@@ -220,7 +220,7 @@ export default function CareersPage() {
                 required
                 dir="ltr"
                 placeholder="https://drive.google.com/..."
-                className={fieldClass}
+                className={`${fieldClass} text-right!`}
                 value={form.cvUrl}
                 onChange={(e) => update("cvUrl", e.target.value)}
               />
@@ -229,7 +229,7 @@ export default function CareersPage() {
               </p>
             </div>
 
-            <button type="submit" disabled={loading} className={`w-full ${primaryCta}`}>
+            <button type="submit" disabled={loading} className={`w-full ${orangeCta} rounded-full py-3 px-6`}>
               {loading ? "שולחים..." : "שליחת מועמדות"}
             </button>
           </form>

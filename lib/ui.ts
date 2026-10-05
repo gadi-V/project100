@@ -33,6 +33,17 @@ export const primaryCta =
 export const secondaryCta =
   "border border-neutral-300/80 bg-white/45 backdrop-blur-md text-neutral-800 hover:bg-white/70 active:scale-[0.98] rounded-full py-3 px-6 font-medium transition-all duration-150 ease-out disabled:opacity-40";
 
+/** Lead capture & registration CTA — every sign-up / leave-details button is orange */
+export const orangeCta =
+  "bg-orange-500 hover:bg-orange-600 text-white font-bold shadow-lg shadow-orange-500/25 active:scale-[0.98] transition-all duration-150 ease-out disabled:opacity-60";
+
+/** Secondary action inside lead / registration flows (back, change step) */
+export const orangeOutlineCta =
+  "border border-orange-300 bg-white/60 text-orange-700 hover:bg-orange-50 hover:border-orange-400 active:scale-[0.98] font-medium transition-all duration-150 ease-out disabled:opacity-50";
+
+/** Selected option card / chip inside lead / registration flows */
+export const orangeOptionSelected = "border-orange-500 bg-orange-50 text-orange-900 shadow-sm";
+
 /** Destructive / caution outline pill */
 export const dangerCta =
   "border border-red-200 bg-white hover:bg-red-50 text-red-700 active:scale-[0.98] rounded-full py-3 px-6 font-medium transition-all duration-150 ease-out disabled:opacity-40";

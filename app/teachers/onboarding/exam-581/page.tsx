@@ -176,7 +176,7 @@ export default function TeacherExam581Page() {
         {startedAt === null ? (
           <section className="rounded-xl bg-white p-8 border border-slate-200 space-y-4 text-center">
             <h2 className="text-lg font-bold text-slate-800">הוראות המבחן</h2>
-            <ul className="mx-auto max-w-xl list-inside list-disc space-y-1 text-end text-sm text-slate-600">
+            <ul className="mx-auto max-w-xl list-inside list-disc space-y-1 text-start text-sm text-slate-600">
               <li>משך המבחן: שעתיים ממועד ההתחלה — בסיום הזמן המבחן ננעל אוטומטית.</li>
               <li>יש לפתור לפחות 3 שאלות מתוך גליון הבגרות הרשמי המופיע בהמשך.</li>
               <li>העלו צילום/סריקה של הפתרון לכל שאלה (תמונה או PDF, עד 8MB כל אחד).</li>

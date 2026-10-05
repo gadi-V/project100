@@ -42,7 +42,7 @@ export async function POST(request: NextRequest) {
 
     if (!cvUrl) {
       return NextResponse.json(
-        { error: "CV URL is required" },
+        { error: "יש להוסיף קישור לקורות החיים" },
         { status: 400 }
       );
     }
@@ -105,7 +105,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error("Failed to apply for teacher vetting:", error);
     return NextResponse.json(
-      { error: "Internal Server Error" },
+      { error: "שליחת המועמדות נכשלה. נסו שוב." },
       { status: 500 }
     );
   }
