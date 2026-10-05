@@ -6,6 +6,7 @@ import BenefitsBar from "../components/landing/BenefitsBar";
 import AboutSection from "../components/landing/AboutSection";
 import SubjectsMarquee from "../components/landing/SubjectsMarquee";
 import MethodFlipCards from "../components/landing/MethodFlipCards";
+import ReviewsCarousel from "../components/ReviewsCarousel";
 import { orangeCta } from "../lib/ui";
 
 export default function HomePage() {
@@ -207,6 +208,8 @@ export default function HomePage() {
           </div>
         </div>
       </section>
+
+      <ReviewsCarousel />
 
       <AboutSection />
 
