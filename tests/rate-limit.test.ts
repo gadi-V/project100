@@ -222,6 +222,8 @@ describe("middleware with Redis configured", () => {
   it.each([
     ["/api/login", "project8:ratelimit:auth"],
     ["/api/register", "project8:ratelimit:auth"],
+    ["/api/register/student", "project8:ratelimit:auth"],
+    ["/api/auth/google/callback", "project8:ratelimit:auth"],
     ["/api/auth/forgot-password", "project8:ratelimit:auth"],
     ["/api/auth/reset-password", "project8:ratelimit:auth"],
     ["/api/leads", "project8:ratelimit:api"],

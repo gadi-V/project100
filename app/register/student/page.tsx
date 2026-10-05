@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "react-hot-toast";
@@ -10,6 +10,13 @@ import {
   primaryCta,
   secondaryCta,
 } from "../../../lib/ui";
+import {
+  INVALID_PHONE_ERROR,
+  ONBOARDING_STORAGE_KEY,
+  normalizeIsraeliMobile,
+  parseOnboardingAnswers,
+  type OnboardingAnswers,
+} from "../../../lib/student-onboarding";
 
 function BackArrow({ className = "ms-1.5 inline-block h-3.5 w-3.5" }: { className?: string }) {
   return (
@@ -39,65 +46,61 @@ function ForwardArrow({ className = "me-1.5 inline-block h-3.5 w-3.5" }: { class
   );
 }
 
-type StudentFormData = {
-  name: string;
+function GoogleIcon({ className = "h-5 w-5" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 48 48" aria-hidden="true">
+      <path
+        fill="#FFC107"
+        d="M43.611 20.083H42V20H24v8h11.303c-1.649 4.657-6.08 8-11.303 8-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 12.955 4 4 12.955 4 24s8.955 20 20 20 20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z"
+      />
+      <path
+        fill="#FF3D00"
+        d="M6.306 14.691l6.571 4.819C14.655 15.108 18.961 12 24 12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 16.318 4 9.656 8.337 6.306 14.691z"
+      />
+      <path
+        fill="#4CAF50"
+        d="M24 44c5.166 0 9.86-1.977 13.409-5.192l-6.19-5.238A11.91 11.91 0 0 1 24 36c-5.202 0-9.619-3.317-11.283-7.946l-6.522 5.025C9.505 39.556 16.227 44 24 44z"
+      />
+      <path
+        fill="#1976D2"
+        d="M43.611 20.083H42V20H24v8h11.303a12.04 12.04 0 0 1-4.087 5.571l.003-.002 6.19 5.238C36.971 39.205 44 34 44 24c0-1.341-.138-2.65-.389-3.917z"
+      />
+    </svg>
+  );
+}
+
+type StudentFormData = Omit<OnboardingAnswers, "path"> & {
+  path: "" | OnboardingAnswers["path"];
+  firstName: string;
+  lastName: string;
   phone: string;
   email: string;
   password: string;
-  path: "" | "school" | "academia";
-  schoolGrade: string;
-  schoolUnits: string;
-  schoolSubject: string;
-  academicInstitution: string;
-  academicDegree: string;
-  academicCourse: string;
-  bottleneck: string;
-  goalType: string;
-  selectedCard: string;
+  acceptTerms: boolean;
+  whatsappUpdates: boolean;
 };
 
-const BOTTLENECK_LABELS: Record<string, string> = {
-  gaps: "פערי עבר קשים בבסיס של חומר הלימוד",
-  anxiety: 'חרדת בחינות, לחץ מנטלי בלייב או "בלקאאוט" במבחן',
-  discipline: "קושי בניהול זמן, חוסר משמעת עצמית או קושי בתרגול עצמאי",
+const orangeField = `${fieldClass} focus-visible:ring-orange-500/15 focus-visible:border-orange-500`;
+const fieldLabel = "text-xs font-black text-[#6e6e73]";
+
+const GOOGLE_RETURN_MESSAGES: Record<string, string> = {
+  unavailable: "ההרשמה עם Google עדיין לא זמינה. אפשר להירשם עם הטופס.",
+  failed: "ההתחברות עם Google לא הושלמה. נסו שוב או הירשמו עם הטופס.",
+  staff: "כתובת ה-Google הזו שייכת לחשבון צוות. יש להתחבר עם סיסמה.",
 };
 
-const GOAL_LABELS: Record<string, string> = {
-  marathon: "מרתון ממוקד בטווח הקצר",
-  semester: "ליווי סמסטריאלי / שנתי שוטף",
-};
-
-function buildDiagnosticPayload(formData: StudentFormData) {
-  const sharedMeta = {
+function answersFrom(formData: StudentFormData) {
+  return parseOnboardingAnswers({
     path: formData.path,
+    schoolGrade: formData.schoolGrade,
+    schoolUnits: formData.schoolUnits,
+    schoolSubject: formData.schoolSubject,
+    academicInstitution: formData.academicInstitution,
+    academicDegree: formData.academicDegree,
+    academicCourse: formData.academicCourse,
     bottleneck: formData.bottleneck,
-    bottleneckLabel: BOTTLENECK_LABELS[formData.bottleneck] ?? formData.bottleneck,
     goalType: formData.goalType,
-    goalLabel: GOAL_LABELS[formData.goalType] ?? formData.goalType,
-    selectedCard: formData.selectedCard,
-  };
-
-  if (formData.path === "school") {
-    return {
-      ageGroup: `בית ספר - ${formData.schoolGrade || "לא צוין"}`,
-      subject: formData.schoolSubject || "לא צוין",
-      challenge: JSON.stringify({
-        ...sharedMeta,
-        schoolGrade: formData.schoolGrade,
-        schoolUnits: formData.schoolUnits,
-      }),
-    };
-  }
-
-  return {
-    ageGroup: "אקדמיה / סטודנט",
-    subject: formData.academicCourse || "לא צוין",
-    challenge: JSON.stringify({
-      ...sharedMeta,
-      academicInstitution: formData.academicInstitution,
-      academicDegree: formData.academicDegree,
-    }),
-  };
+  });
 }
 
 function clearQuizLocalStorageRemnants() {
@@ -116,10 +119,6 @@ export default function StudentRegisterPage() {
   const [submitError, setSubmitError] = useState("");
 
   const [formData, setFormData] = useState<StudentFormData>({
-    name: "",
-    phone: "",
-    email: "",
-    password: "",
     path: "",
     schoolGrade: "",
     schoolUnits: "",
@@ -129,8 +128,34 @@ export default function StudentRegisterPage() {
     academicCourse: "",
     bottleneck: "",
     goalType: "",
-    selectedCard: "",
+    firstName: "",
+    lastName: "",
+    phone: "",
+    email: "",
+    password: "",
+    acceptTerms: false,
+    whatsappUpdates: false,
   });
+
+  // Back from an unfinished Google sign-in: restore steps 1-3 and reopen step 4.
+  useEffect(() => {
+    const reason = new URLSearchParams(window.location.search).get("google");
+    if (!reason) return;
+    window.history.replaceState(null, "", window.location.pathname);
+
+    let saved: unknown = null;
+    try {
+      saved = JSON.parse(sessionStorage.getItem(ONBOARDING_STORAGE_KEY) ?? "null");
+    } catch {
+      saved = null;
+    }
+    const restored = parseOnboardingAnswers(saved);
+    if (restored.ok) {
+      setFormData((prev) => ({ ...prev, ...restored.value }));
+      setStep(4);
+    }
+    toast.error(GOOGLE_RETURN_MESSAGES[reason] ?? GOOGLE_RETURN_MESSAGES.failed);
+  }, []);
 
   const handleNextStep = () => {
     if (step === 1 && !formData.path) {
@@ -160,104 +185,77 @@ export default function StudentRegisterPage() {
     setStep((prev) => prev - 1);
   };
 
-  const handleSubmit = async () => {
+  const handleGoogle = () => {
+    const answers = answersFrom(formData);
+    if (!answers.ok) {
+      toast.error(answers.error);
+      return;
+    }
+    sessionStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify(answers.value));
+    window.location.href = "/api/auth/google";
+  };
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
     setSubmitError("");
 
-    if (!formData.name.trim() || !formData.phone.trim()) {
-      toast.error("אנא מלאו שם מלא ומספר טלפון");
+    const answers = answersFrom(formData);
+    if (!answers.ok) {
+      toast.error(answers.error);
       return;
     }
-    if (!formData.password || formData.password.length < 6) {
-      toast.error("יש לבחור סיסמה של לפחות 6 תווים");
+    if (!formData.firstName.trim() || !formData.lastName.trim()) {
+      toast.error("יש למלא שם פרטי ושם משפחה");
       return;
     }
-    if (!formData.path || !formData.bottleneck || !formData.goalType) {
-      toast.error("יש להשלים את שלבי האבחון לפני הרישום");
+    if (!normalizeIsraeliMobile(formData.phone)) {
+      toast.error(INVALID_PHONE_ERROR);
+      return;
+    }
+    if (!formData.email.trim()) {
+      toast.error("יש למלא כתובת אימייל");
+      return;
+    }
+    if (formData.password.length < 6) {
+      toast.error("הסיסמה צריכה להכיל לפחות 6 תווים");
+      return;
+    }
+    if (!formData.acceptTerms) {
+      toast.error("יש לאשר את תנאי השימוש ומדיניות הפרטיות");
       return;
     }
 
     setLoading(true);
-    const progressToast = toast.loading("יוצר חשבון תלמיד ושומר את האבחון...");
+    const progressToast = toast.loading("פותחים את החשבון...");
 
     try {
-      const registerResponse = await fetch("/api/register", {
+      const response = await fetch("/api/register/student", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name: formData.name.trim(),
+          firstName: formData.firstName.trim(),
+          lastName: formData.lastName.trim(),
           phone: formData.phone.trim(),
-          email: formData.email.trim() || undefined,
+          email: formData.email.trim(),
           password: formData.password,
-          role: "STUDENT",
+          acceptTerms: formData.acceptTerms,
+          whatsappUpdates: formData.whatsappUpdates,
+          answers: answers.value,
         }),
       });
-
-      const registerData = await registerResponse.json();
-      if (!registerResponse.ok) {
-        throw new Error(registerData.error || "שגיאה ביצירת החשבון");
+      const result = (await response.json()) as {
+        success: boolean;
+        error?: string;
+        data?: { name: string; redirectTo: string };
+      };
+      if (!response.ok || !result.success || !result.data) {
+        throw new Error(result.error || "לא הצלחנו לפתוח את החשבון");
       }
 
       clearQuizLocalStorageRemnants();
-
-      const diagnosticResponse = await fetch("/api/diagnostic", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(buildDiagnosticPayload(formData)),
-      });
-
-      if (!diagnosticResponse.ok) {
-        const diagnosticData = await diagnosticResponse.json();
-        toast.error(
-          diagnosticData.error || "שמירת האבחון נכשלה — ניתן להשלים בדאשבורד",
-          { id: progressToast }
-        );
-        router.push("/dashboard");
-        return;
-      }
-
-      const cardToPackage: Record<string, "SINGLE" | "TRIO" | "MULTI"> = {
-        single: "SINGLE",
-        triple: "TRIO",
-        five: "MULTI",
-      };
-      const packageType = formData.selectedCard
-        ? cardToPackage[formData.selectedCard]
-        : undefined;
-
-      if (packageType) {
-        const paymentResponse = await fetch("/api/payments", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ packageType }),
-        });
-
-        const paymentData = (await paymentResponse.json()) as {
-          error?: string;
-          checkoutUrl?: string;
-        };
-
-        if (!paymentResponse.ok) {
-          toast.error(
-            paymentData.error ||
-              "החשבון נוצר אך טעינת החבילה נכשלה — ניתן לרכוש בדאשבורד",
-            { id: progressToast }
-          );
-          router.push("/dashboard");
-          return;
-        }
-
-        if (paymentData.checkoutUrl) {
-          toast.success("מעבירים לתשלום מאובטח...", { id: progressToast });
-          window.location.href = paymentData.checkoutUrl;
-          return;
-        }
-      }
-
-      toast.success(
-        `ברוך הבא, ${registerData.user.name}! הפרופיל נשמר בהצלחה.`,
-        { id: progressToast }
-      );
-      router.push("/dashboard");
+      sessionStorage.removeItem(ONBOARDING_STORAGE_KEY);
+      toast.success(`ברוך הבא, ${result.data.name}!`, { id: progressToast });
+      router.push(result.data.redirectTo);
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : "שגיאה בלתי צפויה במהלך הרישום";
@@ -283,7 +281,7 @@ export default function StudentRegisterPage() {
             הרשמת תלמיד / הורה
           </h1>
           <p className="text-sm text-neutral-500">
-            אבחון לימודי קצר ואז פתיחת חשבון STUDENT
+            אבחון לימודי קצר ואז פתיחת חשבון
           </p>
         </div>
 
@@ -504,94 +502,133 @@ export default function StudentRegisterPage() {
           )}
 
           {step === 4 && (
-            <div className="space-y-6 animate-fadeIn text-end">
-              <h3 className="text-xl font-black text-[#1d1d1f]">
-                סיום רישום ובחירת חבילה (אופציונלי):
-              </h3>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                {[
-                  {
-                    id: "single",
-                    title: "שיעור מיפוי בודד",
-                    desc: "מפגש ראשוני לאיתור פערים.",
-                  },
-                  {
-                    id: "triple",
-                    title: "כרטיסיית 3 מפגשים",
-                    desc: "חבילה ממוקדת לנושא או מבחן.",
-                  },
-                  {
-                    id: "five",
-                    title: "כרטיסיית 5 מפגשים",
-                    desc: "ליווי שוטף ויצירת עצמאות.",
-                  },
-                ].map((card) => (
-                  <button
-                    key={card.id}
-                    type="button"
-                    onClick={() =>
-                      setFormData({ ...formData, selectedCard: card.id })
-                    }
-                    className={`p-4 rounded-xl border text-end transition-all flex flex-col justify-between ${
-                      formData.selectedCard === card.id
-                        ? "border-neutral-900 bg-neutral-900/5 font-semibold"
-                        : "border-[#e5e5e7]"
-                    }`}
-                  >
-                    <div className="text-xs font-black text-[#1d1d1f]">{card.title}</div>
-                    <div className="text-[14px] text-[#6e6e73] mt-1">{card.desc}</div>
-                  </button>
-                ))}
-              </div>
-
-              <div className="space-y-4 pt-4 border-t border-slate-200">
-                <input
-                  type="text"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  placeholder="שם מלא *"
-                  className={fieldClass}
-                />
-                <input
-                  type="tel"
-                  value={formData.phone}
-                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                  placeholder="מספר טלפון *"
-                  className={`${fieldClass} text-start`}
-                  dir="ltr"
-                />
-                <input
-                  type="email"
-                  value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  placeholder="אימייל (אופציונלי)"
-                  className={`${fieldClass} text-start`}
-                  dir="ltr"
-                />
-                <div className="space-y-1">
-                  <label className="text-xs font-black text-[#6e6e73]">סיסמה לכניסה *</label>
-                  <input
-                    type="password"
-                    value={formData.password}
-                    onChange={(e) =>
-                      setFormData({ ...formData, password: e.target.value })
-                    }
-                    placeholder="לפחות 6 תווים"
-                    className={`${fieldClass} text-start`}
-                    dir="ltr"
-                  />
-                </div>
-                <p className="text-[14px] font-bold text-[#6e6e73] bg-[#f5f5f7] p-3 rounded-xl border border-slate-200">
-                  החשבון ייפתח כתלמיד/ה (STUDENT) ויועבר לדאשבורד התלמיד.
+            <div className="space-y-6 animate-fadeIn">
+              <div className="space-y-1 text-center">
+                <h3 className="text-xl font-black text-[#1d1d1f]">יצירת חשבון וסיום רישום</h3>
+                <p className="text-sm text-[#6e6e73]">
+                  הפרטים נשמרים ישירות לתיק התלמיד האישי שלך
                 </p>
               </div>
 
-              {submitError && (
-                <div className="bg-red-50 border border-red-200 text-red-700 text-xs font-bold p-3 rounded-xl text-end">
-                  {submitError}
+              <button
+                type="button"
+                onClick={handleGoogle}
+                disabled={loading}
+                className="w-full inline-flex items-center justify-center gap-3 rounded-xl border border-neutral-200 bg-white py-3.5 px-6 text-sm font-semibold text-neutral-800 shadow-sm transition-all hover:bg-neutral-50 hover:border-neutral-300 disabled:opacity-50"
+              >
+                <GoogleIcon />
+                המשך עם Google
+              </button>
+
+              <div className="flex items-center gap-3" role="separator">
+                <span className="h-px flex-1 bg-neutral-200" />
+                <span className="text-xs font-medium text-neutral-400">או</span>
+                <span className="h-px flex-1 bg-neutral-200" />
+              </div>
+
+              <form onSubmit={handleSubmit} noValidate className="space-y-4 text-start">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <label htmlFor="firstName" className={fieldLabel}>שם פרטי</label>
+                    <input
+                      id="firstName"
+                      type="text"
+                      autoComplete="given-name"
+                      value={formData.firstName}
+                      onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
+                      className={orangeField}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label htmlFor="lastName" className={fieldLabel}>שם משפחה</label>
+                    <input
+                      id="lastName"
+                      type="text"
+                      autoComplete="family-name"
+                      value={formData.lastName}
+                      onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
+                      className={orangeField}
+                    />
+                  </div>
                 </div>
-              )}
+
+                <div className="space-y-1">
+                  <label htmlFor="phone" className={fieldLabel}>מספר טלפון</label>
+                  <input
+                    id="phone"
+                    type="tel"
+                    inputMode="tel"
+                    autoComplete="tel"
+                    dir="ltr"
+                    value={formData.phone}
+                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                    placeholder="050-1234567"
+                    className={`${orangeField} text-start`}
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label htmlFor="email" className={fieldLabel}>אימייל</label>
+                  <input
+                    id="email"
+                    type="email"
+                    autoComplete="email"
+                    dir="ltr"
+                    value={formData.email}
+                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                    className={`${orangeField} text-start`}
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label htmlFor="password" className={fieldLabel}>סיסמה לכניסה</label>
+                  <input
+                    id="password"
+                    type="password"
+                    autoComplete="new-password"
+                    dir="ltr"
+                    value={formData.password}
+                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                    placeholder="לפחות 6 תווים"
+                    className={`${orangeField} text-start`}
+                  />
+                </div>
+
+                <div className="space-y-3 pt-1">
+                  <label className="flex items-start gap-3 text-sm text-neutral-700">
+                    <input
+                      type="checkbox"
+                      checked={formData.acceptTerms}
+                      onChange={(e) => setFormData({ ...formData, acceptTerms: e.target.checked })}
+                      className="mt-0.5 h-4 w-4 shrink-0 accent-orange-500"
+                    />
+                    אני מסכים/ה לתנאי השימוש ולמדיניות הפרטיות
+                  </label>
+                  <label className="flex items-start gap-3 text-sm text-neutral-700">
+                    <input
+                      type="checkbox"
+                      checked={formData.whatsappUpdates}
+                      onChange={(e) => setFormData({ ...formData, whatsappUpdates: e.target.checked })}
+                      className="mt-0.5 h-4 w-4 shrink-0 accent-orange-500"
+                    />
+                    אני מסכים/ה לקבל עדכונים בוואטסאפ
+                  </label>
+                </div>
+
+                {submitError && (
+                  <div className="bg-red-50 border border-red-200 text-red-700 text-xs font-bold p-3 rounded-xl">
+                    {submitError}
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-3.5 px-6 rounded-xl shadow-lg shadow-orange-500/25 transition-all text-center disabled:opacity-60"
+                >
+                  {loading ? "פותחים את החשבון..." : "סיום הרשמה וכניסה לחשבון ←"}
+                </button>
+              </form>
             </div>
           )}
 
@@ -610,7 +647,7 @@ export default function StudentRegisterPage() {
               <div />
             )}
 
-            {step < 4 ? (
+            {step < 4 && (
               <button
                 type="button"
                 onClick={handleNextStep}
@@ -618,15 +655,6 @@ export default function StudentRegisterPage() {
               >
                 <ForwardArrow />
                 המשך לשלב הבא
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={handleSubmit}
-                disabled={loading}
-                className={`${primaryCta} text-xs disabled:opacity-50`}
-              >
-                {loading ? "יוצר חשבון..." : "פתיחת חשבון תלמיד"}
               </button>
             )}
           </div>

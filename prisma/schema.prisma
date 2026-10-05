@@ -60,6 +60,12 @@ model User {
   /// Opt-in flag so the funnel only notifies via WhatsApp when a parent phone was supplied.
   notifyParentViaWhatsApp Boolean @default(false)
 
+  /// Google account `sub` claim, linked on the first Google sign-in.
+  googleSub                String?   @unique
+  termsAcceptedAt          DateTime?
+  /// Explicit, separate opt-in to WhatsApp updates; null means no consent.
+  whatsappUpdatesConsentAt DateTime?
+
   givenLessons               Lesson[]                  @relation("TeacherLessons")
   takenLessons               Lesson[]                  @relation("StudentLessons")
   availabilities             TeacherAvailability[]

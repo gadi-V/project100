@@ -15,7 +15,7 @@ export type SessionPayload = {
   userId: string;
 };
 
-function getSecretKey() {
+export function getSecretKey() {
   const secret =
     process.env.AUTH_SECRET?.trim() || BUILD_FALLBACK_AUTH_SECRET;
   return new TextEncoder().encode(secret);

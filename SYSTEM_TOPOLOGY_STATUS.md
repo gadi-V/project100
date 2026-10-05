@@ -115,6 +115,7 @@ Verified by `test_hive_mcp_tools.py`:
 |---|---|
 | `DATABASE_URL` | Neon/Postgres |
 | `AUTH_SECRET` | JWT session signer |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Student Google sign-in (custom OAuth, no NextAuth); redirect URI `<APP_URL>/api/auth/google/callback` |
 | `DAILY_API_KEY` / `DAILY_WEBHOOK_SECRET` | Daily.co rooms + webhook |
 | `NEXT_PUBLIC_STREAM_API_KEY`, `STREAM_API_KEY`, `STREAM_API_SECRET` | Stream Chat |
 | `APP_URL` | Public origin (WhatsApp deep-links) |
@@ -166,8 +167,9 @@ Verified by `test_hive_mcp_tools.py`:
 | `20260929194238_add_intake_assessment` | `Role.REPRESENTATIVE` enum value + `IntakeAssessment` table (FKs to `User` ×2 and `FallbackLead`, 3 indexes) (Sprint 9) |
 | `20260929200238_add_student_tabs_and_communication` | `StudentProfile` (1:1 `User`, cascade) + `StudentCommunicationLog` (FK `User`, cascade, index `studentId, createdAt`) + nullable `Lesson.attendanceStatus / attendanceMarkedAt / attendanceMarkedById` (Sprint 10b) |
 | `20260929220000_lesson_type_and_whatsapp_group` | `Lesson.lessonType TEXT NOT NULL DEFAULT 'REGULAR'` + nullable `Lesson.whatsappGroupId` (`ADD COLUMN IF NOT EXISTS`) (Sprint 12) |
+| `20261005120000_student_signup_google_and_consent` | Nullable `User.googleSub` (unique), `User.termsAcceptedAt`, `User.whatsappUpdatesConsentAt` for the student sign-up wizard step 4. Applied to Neon on 2026-10-05 |
 
-Replaying all eight migrations reproduces `prisma/schema.prisma` exactly.
+Replaying all nine migrations reproduces `prisma/schema.prisma` exactly.
 
 **Existing databases that were synced with `db push`** already contain these objects. Mark the sync
 migration as applied instead of executing it (running it would fail with "already exists"):

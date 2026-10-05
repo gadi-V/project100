@@ -8,7 +8,7 @@ import {
   type RateLimitType,
 } from "./lib/security/rate-limit";
 
-const AUTH_RATE_LIMITED_ROUTES = new Set(["/api/login", "/api/register"]);
+const AUTH_RATE_LIMITED_ROUTES = new Set(["/api/login", "/api/register", "/api/register/student"]);
 const API_RATE_LIMITED_ROUTES = new Set(["/api/leads", "/api/careers/apply"]);
 
 function rateLimitTypeForPath(pathname: string): RateLimitType | null {
@@ -23,12 +23,16 @@ function rateLimitTypeForPath(pathname: string): RateLimitType | null {
 const PUBLIC_API_ROUTES = new Set([
   "/api/login",
   "/api/register",
+  "/api/register/student",
   "/api/leads",
   "/api/careers/apply",
   "/api/logout",
   "/api/health",
   "/api/auth/forgot-password",
   "/api/auth/reset-password",
+  "/api/auth/google",
+  "/api/auth/google/callback",
+  "/api/auth/google/complete",
   "/api/webhooks/daily",
   "/api/webhooks/stripe",
   "/api/admin/audit/risk-events",
