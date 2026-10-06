@@ -220,6 +220,17 @@ Fresh databases apply all migrations normally with `npx prisma migrate deploy`.
 | 22 | Teacher cockpit isolated on the `teachers.` subdomain (proxy host routing: `/` → `/portal/dashboard` or `/login` → staff gate, marketing paths bounced to the portal, students redirected to the main-site `/dashboard` or `403` on API), cross-subdomain session (`SESSION_COOKIE_DOMAIN`, `role` claim in the JWT), public landing verified free of staff login links (only the footer `/careers` link remains) and of heavy portal bundles; 694 Vitest, 25/25 closed-loop E2E, clean build | ✅ Completed |
 | 23 | UI reconciliation verified (RTL registration flows and orange lead / registration CTAs from `0d0a9e0`: shared `orangeCta` / `orangeOutlineCta` / `orangeOptionSelected` tokens in `lib/ui.ts`; no staff login links on the landing or `Navbar`), wizard test aligned with the `orangeCta` token, pre-flight extended (cookie domain, schema integrity, migrations, import scan) and the phantom `nanoid` dependency declared in `package.json`; 694 Vitest, 25/25 closed-loop E2E, clean build. **Release v1.1.0 — Production Launch Ready** | ✅ Completed |
 | 24 | Growth phase: social proof reviews section on the landing page (52 reviews from `lib/reviews.json`, `next/image` with `loading="lazy"` and a placeholder, glass card; students' full surnames stay on the server) and UTM attribution pipeline (`utm_source` / `utm_medium` / `utm_campaign` captured into sessionStorage on every page, sent by the orange form and the Google callback, stored on the new `StudentProfile.utm*` columns); `@/*` alias from `979c936` removed; 717 Vitest, 25/25 closed-loop E2E, clean build | ✅ Completed |
+| 25 (P0-1) | Baseline stabilization: `tests/student-tabs-and-templates.test.ts` froze no clock, so its `l-future` fixture (`2026-10-06T14:00Z`) expired and CI went red on 2026-10-06. The file now pins `Date` to its `NOW` like the other portal suites. Whole suite re-run with the clock shifted to 2027-03 and 2028-07: no other date-dependent tests. Reviews author line stored pre-formatted in `lib/reviews.json` (`formatReviewMeta` removed); 721 Vitest, 25/25 closed-loop E2E, clean build | ✅ Completed |
+
+### Baseline stabilization (Sprint 25 / P0-1)
+
+- **Clock rule for tests**: a suite whose fixtures are "future" or "past" relative to now must pin the clock with
+  `vi.useFakeTimers({ toFake: ["Date"] })` + `vi.setSystemTime(NOW)` in `beforeEach` and `vi.useRealTimers()` in
+  `afterEach`. Only `Date` is faked, so timers and promises stay real.
+- **Reviews**: `meta` in `lib/reviews.json` is the finished author line ("institution/subject, course, grade", no `|`);
+  `ReviewsSection` passes it through unchanged. The test checks every line's format and three known values.
+- Baseline at the end of the sprint: HEAD `832b755` + working tree, 10 migrations, 31 Vitest files / 721 tests,
+  `tsc --noEmit` exit 0, `npm run build` exit 0, `verify-closed-loop-e2e.ts` 25/25.
 
 ### Social proof and UTM attribution (Sprint 24)
 

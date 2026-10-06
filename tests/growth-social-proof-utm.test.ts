@@ -3,7 +3,7 @@ import path from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import ReviewsSection, { formatReviewMeta } from "../components/landing/ReviewsSection";
+import ReviewsSection from "../components/landing/ReviewsSection";
 import { clearStoredUTM, readStoredUTM } from "../lib/hooks/useUTMTracking";
 import reviews from "../lib/reviews.json";
 import { UTM_STORAGE_KEY, parseUTMAttribution, utmFromSearchParams } from "../lib/utm";
@@ -125,11 +125,20 @@ describe("social proof reviews section", () => {
     expect(html).toContain("text-[#8C5A3C]");
   });
 
-  it("builds the author line from the name and the course or institution only", () => {
-    expect(formatReviewMeta("סטודנט להנדסה | אלגברה ליניארית")).toBe("סטודנט להנדסה, אלגברה ליניארית");
-    expect(formatReviewMeta("פיזיקה")).toBe("פיזיקה");
-    expect(html).toContain(` — ${formatReviewMeta(reviews[0].meta)}`);
+  it("renders the author line as the name followed by the stored meta line", () => {
+    expect(html).toContain(` — ${reviews[0].meta}`);
     expect(html).not.toContain(reviews[0].achievement);
+  });
+
+  it("writes every meta line in the agreed format", () => {
+    for (const { id, meta } of reviews) {
+      expect(meta.trim(), `#${id}`).not.toBe("");
+      expect(meta, `#${id}`).not.toContain("|");
+    }
+    const byId = new Map(reviews.map((r) => [r.id, r.meta]));
+    expect(byId.get(1)).toBe("הנדסה באוניברסיטת אריאל, אלגברה ליניארית, 82");
+    expect(byId.get(9)).toBe('מתמטיקה, 5 יח"ל, 100');
+    expect(byId.get(28)).toBe("פסיכומטרי, 756");
   });
 
   it("gives every student a distinct display name", () => {

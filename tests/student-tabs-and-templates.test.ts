@@ -186,6 +186,8 @@ async function postCommunication(body: unknown, id = STUDENT_ID) {
 
 beforeEach(() => {
   vi.resetModules();
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(NOW);
   vi.stubEnv("AUTH_SECRET", "vitest-auth-secret-at-least-32-characters");
   vi.stubEnv("STRIPE_SECRET_KEY", "");
   session.getCurrentUser.mockResolvedValue(null);
@@ -227,6 +229,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllEnvs();
   vi.clearAllMocks();
 });
