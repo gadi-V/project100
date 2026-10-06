@@ -3,7 +3,7 @@ import path from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import ReviewsSection from "../components/landing/ReviewsSection";
+import ReviewsSection, { formatReviewMeta } from "../components/landing/ReviewsSection";
 import { clearStoredUTM, readStoredUTM } from "../lib/hooks/useUTMTracking";
 import reviews from "../lib/reviews.json";
 import { UTM_STORAGE_KEY, parseUTMAttribution, utmFromSearchParams } from "../lib/utm";
@@ -108,13 +108,32 @@ describe("social proof reviews section", () => {
   });
 
   it("never sends a student's full surname to the browser", () => {
-    const publicText = reviews.map((r) => `${r.displayName} ${r.achievement} ${r.meta} ${r.text}`).join(" ");
+    const publicText = reviews.map((r) => `${r.displayName} ${r.meta} ${r.text}`).join(" ");
     const surnames = reviews
       .map((r) => r.fullName.split(" ").slice(1).join(" "))
       .filter((surname) => surname.length > 1 && !surname.endsWith(".") && !publicText.includes(surname));
     expect(surnames.length).toBeGreaterThan(0);
     for (const surname of surnames) expect(html, surname).not.toContain(surname.replaceAll("'", "&#x27;"));
     expect(html).not.toContain("fullName");
+  });
+
+  it("shows a frameless carousel with small brown quote marks", () => {
+    const carousel = readSource("components/landing/ReviewsCarousel.tsx");
+    expect(carousel).not.toContain("liquidGlass");
+    expect(html).not.toContain("liquid-glass");
+    expect(html).toContain('width="29" height="25"');
+    expect(html).toContain("text-[#8C5A3C]");
+  });
+
+  it("builds the author line from the name and the course or institution only", () => {
+    expect(formatReviewMeta("סטודנט להנדסה | אלגברה ליניארית")).toBe("סטודנט להנדסה, אלגברה ליניארית");
+    expect(formatReviewMeta("פיזיקה")).toBe("פיזיקה");
+    expect(html).toContain(` — ${formatReviewMeta(reviews[0].meta)}`);
+    expect(html).not.toContain(reviews[0].achievement);
+  });
+
+  it("gives every student a distinct display name", () => {
+    expect(new Set(reviews.map((r) => r.displayName)).size).toBe(reviews.length);
   });
 
   it("keeps the reviews JSON out of client components and uses relative imports only", () => {

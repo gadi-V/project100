@@ -3,12 +3,10 @@
 import { useEffect, useState } from "react";
 import Image from "next/image";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { liquidGlass } from "../../lib/ui";
 
 export type PublicReview = {
   id: number;
   displayName: string;
-  achievement: string;
   meta: string;
   text: string;
   imagePath: string;
@@ -17,6 +15,7 @@ export type PublicReview = {
 const AUTOPLAY_MS = 5000;
 const VISIBLE_DOTS = 5;
 const AVATAR_SIZE = 110;
+const LONG_REVIEW_CHARS = 220;
 /** Same tone as the avatar ring, shown until the photo has loaded. */
 const AVATAR_PLACEHOLDER =
   "data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='110' height='110'%3E%3Crect width='110' height='110' fill='%23e2e8f0'/%3E%3C/svg%3E";
@@ -52,7 +51,7 @@ export default function ReviewsCarousel({ reviews }: { reviews: PublicReview[] }
         מה מספרים התלמידים שלנו
       </h2>
       <div
-        className={`group relative mx-auto max-w-[720px] px-4 py-10 sm:px-8 sm:py-12 ${liquidGlass}`}
+        className="group relative mx-auto max-w-[720px] px-4 sm:px-8"
         onMouseEnter={() => setIsPaused(true)}
         onMouseLeave={() => setIsPaused(false)}
       >
@@ -77,12 +76,12 @@ export default function ReviewsCarousel({ reviews }: { reviews: PublicReview[] }
               >
                 <div className="relative mb-7">
                   <svg
-                    width="48"
-                    height="42"
+                    width="29"
+                    height="25"
                     viewBox="0 0 54 44"
-                    fill="#1890ff"
+                    fill="currentColor"
                     aria-hidden="true"
-                    className="absolute top-0 -start-16"
+                    className="absolute top-7 -start-12 text-[#8C5A3C]"
                   >
                     <path d="M14 0L0 44h18L28 0H14zm26 0L26 44h18L54 0H40z" />
                   </svg>
@@ -106,19 +105,22 @@ export default function ReviewsCarousel({ reviews }: { reviews: PublicReview[] }
                   </div>
                 </div>
 
-                <p className="mb-6 text-[1.2rem] font-medium leading-[1.6] text-[#1e293b]">{review.text}</p>
+                <p
+                  className={`mb-6 font-medium leading-relaxed text-slate-800 ${
+                    review.text.length > LONG_REVIEW_CHARS ? "text-lg" : "text-xl"
+                  }`}
+                >
+                  {review.text}
+                </p>
 
-                <p className="text-[0.95rem] text-[#334155]">
-                  <span className="inline-flex items-center gap-1 align-middle font-bold">
+                <p className="text-sm text-slate-600 md:text-base">
+                  <span className="inline-flex items-center gap-1 align-middle font-semibold text-slate-700">
                     {review.displayName}
                     <svg viewBox="0 0 24 24" className="size-[15px] fill-[#1890ff]" role="img" aria-label="משתמש מאומת">
                       <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm-1.9 14.7l-4.2-4.2 1.4-1.4 2.8 2.8 6.8-6.8 1.4 1.4-8.2 8.2z" />
                     </svg>
                   </span>
-                  <span className="align-middle">
-                    {" – "}
-                    {review.achievement ? `${review.achievement}, ${review.meta}` : review.meta}
-                  </span>
+                  <span className="align-middle">{` — ${review.meta}`}</span>
                 </p>
               </article>
             );
