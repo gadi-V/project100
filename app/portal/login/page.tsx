@@ -81,7 +81,7 @@ export default function StaffPortalLoginPage() {
       <div className={`max-w-md w-full space-y-8 ${frostCard} p-8`}>
         <div className="text-center space-y-2">
           <div className="text-lg">
-            <BrandWordmark />
+            <BrandWordmark withMark />
           </div>
           <h1 className="text-3xl font-semibold tracking-tight text-neutral-900">כניסת צוות</h1>
           <p className="text-sm text-neutral-500">למורים, נציגים ומנהלים.</p>

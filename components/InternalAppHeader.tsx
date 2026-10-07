@@ -84,7 +84,7 @@ export default function InternalAppHeader() {
             className="text-lg shrink-0"
             aria-label="PROJECT100 – דף הבית"
           >
-            <BrandWordmark />
+            <BrandWordmark withMark />
           </Link>
           <nav
             aria-label="פירורי לחם"

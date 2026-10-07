@@ -179,8 +179,8 @@ export default function Navbar() {
     <header
       className={`sticky top-0 z-50 border-b transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${
         scrolled
-          ? "bg-white/55 backdrop-blur-2xl saturate-[190%] shadow-sm border-white/70"
-          : "bg-white/35 backdrop-blur-xl saturate-[180%] border-white/50"
+          ? "bg-white/55 backdrop-blur-2xl backdrop-saturate-[190%] shadow-sm border-[#e7e7e7]"
+          : "bg-white/35 backdrop-blur-xl backdrop-saturate-[180%] border-[#e7e7e7]"
       }`}
       dir="rtl"
     >
@@ -199,8 +199,8 @@ export default function Navbar() {
           >
             {menuOpen ? <X size={20} aria-hidden="true" /> : <Menu size={20} aria-hidden="true" />}
           </button>
-          <Link href="/" className="text-lg" aria-label="PROJECT100 – דף הבית">
-            <BrandWordmark />
+          <Link href="/" className="text-[25px]" aria-label="PROJECT100 – דף הבית">
+            <BrandWordmark withMark />
           </Link>
           <nav className="hidden md:flex items-center gap-1" aria-label="ניווט עמוד">
             {SCROLL_NAV_ITEMS.map((item) =>

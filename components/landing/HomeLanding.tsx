@@ -6,6 +6,7 @@ import BenefitsBar from "./BenefitsBar";
 import AboutSection from "./AboutSection";
 import SubjectsMarquee from "./SubjectsMarquee";
 import MethodFlipCards from "./MethodFlipCards";
+import BrandWordmark from "../BrandWordmark";
 import { orangeCta } from "../../lib/ui";
 
 /** Interactive landing body; `reviews` is rendered on the server so review data stays out of this bundle. */
@@ -56,9 +57,8 @@ export default function HomeLanding({ reviews }: { reviews: ReactNode }) {
       <section id="hero" className="max-w-7xl mx-auto px-6 lg:px-10 pt-24 pb-16 grid grid-cols-1 md:grid-cols-12 gap-12 items-center">
         <div className="md:col-span-7 space-y-6 text-right">
           <span className="text-sm font-black tracking-widest text-[#0071e3] uppercase block">הסוף לחיפוש מורים</span>
-          <h1 dir="ltr" className="text-4xl sm:text-6xl font-black text-[#1d1d1f] tracking-tight leading-none text-right">
-            <span className="text-[34px] sm:text-[58px] text-blue-950">PROJECT</span>
-            <span className="text-[#3987ec]">100</span>
+          <h1 className="text-4xl sm:text-6xl">
+            <BrandWordmark withMark />
           </h1>
           <h2 className="text-[18px] sm:text-[24px] font-bold text-[#6e6e73] tracking-tight leading-tight">
             פלטפורמת למידה מרחוק למקצועות וקורסים מתיכון ועד אקדמיה

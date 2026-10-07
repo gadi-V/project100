@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { pageCanvas } from "../../lib/ui";
-import BrandLogo from "../../components/BrandLogo";
+import BrandWordmark from "../../components/BrandWordmark";
 
 /** RTL back: arrow points right */
 function BackArrow({ className = "ms-1.5 inline-block h-3.5 w-3.5" }: { className?: string }) {
@@ -49,7 +49,7 @@ export default function RegisterHubPage() {
             href="/"
             className="inline-flex items-center text-xs font-medium tracking-wide text-slate-500 transition-colors hover:text-slate-900"
           >
-            חזרה לעמוד הבית של&nbsp;<BrandLogo />
+            חזרה לעמוד הבית של&nbsp;<BrandWordmark />
             <BackArrow />
           </Link>
           <h1
@@ -58,7 +58,7 @@ export default function RegisterHubPage() {
           >
             הרשמה{" "}
             <span className="whitespace-nowrap">
-              ל-<BrandLogo />
+              ל-<BrandWordmark />
             </span>
           </h1>
         </header>

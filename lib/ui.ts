@@ -19,7 +19,7 @@ export const frostPanel =
 
 /** Sticky frosted app header / nav strip */
 export const frostHeader =
-  "bg-white/55 backdrop-blur-[24px] saturate-[190%] border-b border-white/70 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]";
+  "bg-white/55 backdrop-blur-[24px] backdrop-saturate-[190%] border-b border-white/70 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]";
 
 /** Selected / recommended card — crisp primary border on liquid glass */
 export const frostCardSelected =
