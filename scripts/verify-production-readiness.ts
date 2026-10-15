@@ -8,7 +8,7 @@
  *   3. CODE      — static scan of shipped sources: no `@/` alias imports, every relative import resolves,
  *                  every package import is declared in package.json, no unused runtime dependency.
  *   4. WHATSAPP  — the quad-group gateway answers HTTP (only when `WHATSAPP_API_URL` is set).
- *   5. HEALTH    — `GET {base}/api/health` answers `200` with `status: "UP"`.
+ *   5. HEALTH    — `GET {base}/api/health` answers `200` with `status: "healthy"` (or `"degraded"` when optional services are absent).
  *
  * Key names follow what the code reads: sessions are signed with `AUTH_SECRET` (custom JWT, `lib/auth.ts`;
  * `NEXTAUTH_SECRET` is not read) and the gateway is `WHATSAPP_API_URL` + `WHATSAPP_API_KEY` (`lib/whatsapp.ts`;
@@ -402,14 +402,23 @@ async function checkHealth() {
   try {
     const res = await withTimeout(fetch(url, { headers: { Accept: "application/json" }, cache: "no-store" }), "health request");
     const ms = Math.round(performance.now() - started);
-    const body = (await res.json().catch(() => null)) as { data?: { status?: string; database?: string; latencyMs?: number } } | null;
-    const up = res.status === 200 && body?.data?.status === "UP" && body.data.database === "UP";
-    record(
-      "HEALTH",
-      "GET /api/health",
-      up ? "OK" : "FAIL",
-      `${url} → HTTP ${res.status}, status=${body?.data?.status ?? "?"}, db=${body?.data?.database ?? "?"}, server db ping ${body?.data?.latencyMs ?? "?"} ms, round trip ${ms} ms`
-    );
+    const body = (await res.json().catch(() => null)) as {
+      status?: string;
+      latency?: { db?: string };
+      missing_services?: string[];
+      data?: { status?: string; database?: string; latencyMs?: number };
+    } | null;
+    const status = body?.status ?? body?.data?.status ?? "?";
+    const dbLatency = body?.latency?.db ?? (body?.data?.latencyMs != null ? `${body.data.latencyMs}ms` : "?");
+    const missing = Array.isArray(body?.missing_services) ? body.missing_services.join(", ") : "";
+    const detail = `${url} → HTTP ${res.status}, status=${status}, db=${dbLatency}, missing_services=${missing || "none"}, round trip ${ms} ms`;
+    if (res.status === 200 && (status === "healthy" || status === "UP")) {
+      record("HEALTH", "GET /api/health", "OK", detail);
+    } else if (res.status === 200 && status === "degraded") {
+      record("HEALTH", "GET /api/health", "WARN", detail);
+    } else {
+      record("HEALTH", "GET /api/health", "FAIL", detail);
+    }
   } catch (error: unknown) {
     record("HEALTH", "GET /api/health", "FAIL", `${url} unreachable: ${errorText(error)}`);
   }
