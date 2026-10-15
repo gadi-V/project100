@@ -182,7 +182,10 @@ describe("Daily token window", () => {
   });
 
   it("sends nbf/exp in the Daily meeting-token payload", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-01T14:00:00.000Z"));
     vi.stubEnv("DAILY_API_KEY", "daily-test-key");
+    vi.stubEnv("DAILY_ENABLE_CLOUD_RECORDING", "false");
     const fetchMock = vi.fn(
       async () => new Response(JSON.stringify({ token: "tok" }), { status: 200 })
     );
@@ -206,6 +209,66 @@ describe("Daily token window", () => {
       nbf: startSec - 15 * 60,
       exp: startSec + (45 + 30) * 60,
     });
+    expect(properties).not.toHaveProperty("start_cloud_recording");
+    expect(properties).not.toHaveProperty("enable_recording");
+  });
+
+  it("raises exp to now + duration + 30 minutes when the lesson window is already over", async () => {
+    const now = new Date("2026-10-15T12:00:00.000Z");
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    vi.stubEnv("DAILY_API_KEY", "daily-test-key");
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ token: "tok" }), { status: 200 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await generateDailyToken("lesson-abc", true, "teacher-1", {
+      scheduledAt,
+      durationMinutes: 60,
+    });
+
+    const nowSec = Math.floor(now.getTime() / 1000);
+    const { properties } = JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body)) as {
+      properties: { nbf: number; exp: number; start_cloud_recording?: boolean; enable_recording?: string };
+    };
+    expect(properties.nbf).toBe(startSec - 15 * 60);
+    expect(properties.exp).toBe(nowSec + 60 * 60 + 1800);
+    expect(properties.exp).toBeGreaterThan(nowSec);
+    expect(properties.start_cloud_recording).toBeUndefined();
+    expect(properties.enable_recording).toBeUndefined();
+  });
+
+  it("adds cloud recording to owner tokens only when DAILY_ENABLE_CLOUD_RECORDING is true", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-01T14:00:00.000Z"));
+    vi.stubEnv("DAILY_API_KEY", "daily-test-key");
+    vi.stubEnv("DAILY_ENABLE_CLOUD_RECORDING", "true");
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ token: "tok" }), { status: 200 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await generateDailyToken("lesson-abc", true, "teacher-1", {
+      scheduledAt,
+      durationMinutes: 60,
+    });
+    await generateDailyToken("lesson-abc", false, "student-1", {
+      scheduledAt,
+      durationMinutes: 60,
+    });
+
+    const bodies = fetchMock.mock.calls.map((call) => {
+      const init = (call as unknown as [string, RequestInit])[1];
+      return JSON.parse(String(init.body)) as { properties: Record<string, unknown> };
+    });
+    expect(bodies[0].properties).toMatchObject({
+      is_owner: true,
+      start_cloud_recording: true,
+      enable_recording: "cloud",
+    });
+    expect(bodies[1].properties).not.toHaveProperty("start_cloud_recording");
+    expect(bodies[1].properties).not.toHaveProperty("enable_recording");
   });
 });
 

@@ -25,6 +25,36 @@ const ACCEPTED_CHAT_FILES = [
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 ];
 
+const CHAT_UNAVAILABLE_MESSAGE =
+  "הצ'אט אינו זמין כרגע. אנא רענן את העמוד או פנה לתמיכה.";
+
+/**
+ * Server mock tokens (`mock-stream-token-…`) and blank strings are not JWTs.
+ * Sending them makes Stream throw "User token can not be empty" or
+ * "userToken does not have a user_id". A real token is three base64url segments
+ * and does not use the mock prefix (the signature can coincidentally contain
+ * the letters "mock", so the check is the prefix, not a substring of the JWT).
+ */
+function isUsableStreamUserToken(token: string): boolean {
+  const value = token.trim();
+  if (!value || value.toLowerCase().startsWith("mock")) return false;
+  return value.split(".").length === 3;
+}
+
+function ChatUnavailable() {
+  return (
+    <div
+      className="flex h-full min-h-[200px] items-center justify-center bg-white/80 backdrop-blur-md border border-neutral-200/80 rounded-2xl px-4"
+      role="status"
+      aria-disabled="true"
+    >
+      <span className="text-neutral-600 font-medium text-sm text-center">
+        {CHAT_UNAVAILABLE_MESSAGE}
+      </span>
+    </div>
+  );
+}
+
 export type ClassroomChatProps = {
   apiKey: string;
   userToken: string;
@@ -48,27 +78,32 @@ export default function ClassroomChat({
 }: ClassroomChatProps) {
   const [client, setClient] = useState<StreamChat | null>(null);
   const [channel, setChannel] = useState<StreamChannelType | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [unavailable, setUnavailable] = useState(false);
 
   const chatTitle = packageId ? "צ'אט כיתה · חומרי חבילה" : "צ'אט כיתה חכם";
+  const credentialsReady =
+    Boolean(apiKey && channelId && userId) && isUsableStreamUserToken(userToken);
 
   useEffect(() => {
-    let isMounted = true;
+    let cancelled = false;
 
-    if (!apiKey || !userToken || !channelId || !userId) {
-      setError("חסרים פרטי התחברות לצ'אט");
+    if (!credentialsReady) {
+      setUnavailable(true);
+      setClient(null);
+      setChannel(null);
       onChannelReady?.(null);
       return;
     }
 
-    const chatClient = StreamChat.getInstance(apiKey);
+    // Own client per mount. getInstance() is a singleton: StrictMode cleanup
+    // calls disconnectUser(), which wipes the token and the remount then throws
+    // "Both secret and user tokens are not set".
+    const chatClient = new StreamChat(apiKey);
 
     const initChat = async () => {
       try {
-        setError(null);
+        setUnavailable(false);
 
-        // Never pass an empty/partial user object — Stream's latest SDK requires
-        // a fully populated UserResponse. The token is the second argument.
         await chatClient.connectUser(
           {
             id: userId,
@@ -77,44 +112,48 @@ export default function ClassroomChat({
           userToken
         );
 
+        if (cancelled) return;
+
         const ch = chatClient.channel("messaging", channelId);
         await ch.watch();
 
-        // Restrict attachments to PDF, DOC, and images (.cursorrules)
+        if (cancelled) return;
+
         const attachmentManager = ch.messageComposer?.attachmentManager;
         if (attachmentManager) {
           attachmentManager.acceptedFiles = ACCEPTED_CHAT_FILES;
         }
 
-        if (isMounted) {
-          setClient(chatClient);
-          setChannel(ch);
-          onChannelReady?.(ch);
-        }
+        setClient(chatClient);
+        setChannel(ch);
+        onChannelReady?.(ch);
       } catch (err) {
         console.error("Stream Chat connection error:", err);
-        if (isMounted) {
-          setError("התחברות לצ'אט נכשלה. ודא ש־Stream מוגדר כראוי.");
+        if (!cancelled) {
+          setUnavailable(true);
+          setClient(null);
+          setChannel(null);
           onChannelReady?.(null);
         }
       }
     };
 
-    initChat();
+    void initChat();
 
     return () => {
-      isMounted = false;
+      cancelled = true;
       onChannelReady?.(null);
-      chatClient.disconnectUser().catch(() => undefined);
+      try {
+        const pending = chatClient.disconnectUser();
+        void Promise.resolve(pending).catch(() => undefined);
+      } catch {
+        // disconnectUser can throw once the token manager was already reset.
+      }
     };
-  }, [apiKey, userToken, userId, firstName, channelId, onChannelReady]);
+  }, [apiKey, userToken, userId, firstName, channelId, onChannelReady, credentialsReady]);
 
-  if (error) {
-    return (
-      <div className="flex h-full min-h-[200px] items-center justify-center bg-white/80 backdrop-blur-md border border-neutral-200/80 rounded-2xl px-4">
-        <span className="text-red-600 font-medium text-sm text-center">{error}</span>
-      </div>
-    );
+  if (!credentialsReady || unavailable) {
+    return <ChatUnavailable />;
   }
 
   if (!client || !channel) {

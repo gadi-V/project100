@@ -95,10 +95,10 @@ async function dailyFetch<T>(
  * (including Free): `exp`, `eject_at_room_exp`, `enable_chat` (in-app chat is
  * handled by Stream), and `enable_screenshare`.
  *
- * `exp` is computed as `scheduledAt + durationMinutes + 10%` by default:
- * e.g. a 60-minute lesson gets 60 + 6 minutes = 66 total minutes of room
- * availability from the scheduled start. `eject_at_room_exp: true` makes Daily
- * kick everyone out and close the room automatically when `exp` passes.
+ * Room `exp` is always in the future: `max(now + 4h, scheduledAt + 4h)`.
+ * `durationMinutes` does not shorten that window. `eject_at_room_exp: true`
+ * makes Daily kick everyone out and close the room when `exp` passes.
+ * Meeting-token expiry is separate — see `generateDailyToken`.
  *
  * Cloud recording is a paid feature — it is only sent when the plan/organization
  * opts in via `DAILY_ENABLE_CLOUD_RECORDING=true`. Otherwise the property is
@@ -167,9 +167,12 @@ export const DAILY_TOKEN_MAX_EXTENSION_MINUTES = 30;
 const DEFAULT_LESSON_DURATION_MINUTES = 60;
 
 /**
- * Hard join window for a lesson meeting token (Unix seconds):
+ * Schedule window for a lesson meeting token (Unix seconds):
  * - `nbf`: scheduledAt − 15 minutes.
  * - `exp`: scheduledAt + durationMinutes + 30-minute max extension.
+ *
+ * This is the lesson-bound window only. `generateDailyToken` raises `exp`
+ * when this value is already in the past so Daily never receives it.
  */
 export function computeDailyTokenWindow(
   scheduledAt: Date,
@@ -194,10 +197,14 @@ export function computeDailyTokenWindow(
 }
 
 /**
- * Meeting token for a participant, always time-boxed to the lesson window
- * (see `computeDailyTokenWindow`).
- * - Teacher / owner: is_owner + start_cloud_recording (background auto-record)
- * - Student: join-only token (no recording permissions / UI)
+ * Meeting token for a participant.
+ * - `nbf`: scheduledAt − 15 minutes (join opens early, never before that).
+ * - `exp`: never in the past. Floor is
+ *   `Math.floor(Date.now() / 1000) + durationMinutes * 60 + 1800`
+ *   (duration plus 30 minutes). A lesson still ahead uses the later of that
+ *   floor and `scheduledAt + duration + 30 minutes`, so `exp` stays after `nbf`.
+ * - Owner tokens include `start_cloud_recording` and `enable_recording: "cloud"`
+ *   only when `DAILY_ENABLE_CLOUD_RECORDING === "true"`. Student tokens never do.
  */
 export async function generateDailyToken(
   roomName: string,
@@ -214,10 +221,17 @@ export async function generateDailyToken(
     return `mock-daily-token-${roomName}-${userId}-${isOwner ? "owner" : "guest"}`;
   }
 
-  const { nbf, exp } = computeDailyTokenWindow(
+  const durationMinutes =
+    Number.isFinite(options.durationMinutes) && (options.durationMinutes ?? 0) > 0
+      ? (options.durationMinutes as number)
+      : DEFAULT_LESSON_DURATION_MINUTES;
+  const { nbf, exp: scheduledExp } = computeDailyTokenWindow(
     options.scheduledAt,
-    options.durationMinutes ?? DEFAULT_LESSON_DURATION_MINUTES
+    durationMinutes
   );
+  // Duration + 30 minutes from now. Daily rejects any exp that is already past.
+  const expFromNow = Math.floor(Date.now() / 1000) + durationMinutes * 60 + 1800;
+  const exp = Math.max(expFromNow, scheduledExp);
 
   const properties: Record<string, unknown> = {
     room_name: roomName,
@@ -225,9 +239,12 @@ export async function generateDailyToken(
     is_owner: isOwner,
     nbf,
     exp,
-    // Auto cloud recording starts when the owner (teacher) joins — no client record button.
-    ...(isOwner ? { start_cloud_recording: true, enable_recording: "cloud" } : {}),
   };
+
+  if (isOwner && process.env.DAILY_ENABLE_CLOUD_RECORDING === "true") {
+    properties.start_cloud_recording = true;
+    properties.enable_recording = "cloud";
+  }
 
   const result = await dailyFetch<{ token: string }>("/meeting-tokens", {
     method: "POST",
