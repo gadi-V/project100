@@ -1,8 +1,11 @@
 /**
  * Tiered production env checks.
  *
- * P0 (database + Upstash) hard-fail at process start so rate limiting cannot
- * fail open. P1 integrations warn and stay disabled so public pages still load.
+ * P0 (database + Upstash) hard-fail at process start so auth and booking
+ * rate limits are not missing Redis. If Redis errors at request time,
+ * auth/booking fail closed and public form posts fail open
+ * (lib/security/rate-limit.ts). P1 integrations warn and stay disabled so
+ * public pages still load.
  * Values are never returned or logged.
  */
 
@@ -106,7 +109,7 @@ export function assertProductionEnv(): void {
   if (missing.length === 0) return;
   throw new Error(
     `[env] FATAL: refusing to start in production. Missing required variables: ${missing.join(", ")}. ` +
-      "DATABASE_URL and Upstash Redis must be set so the database is reachable and rate limiting does not fail open."
+      "DATABASE_URL and Upstash Redis must be set so the database is reachable and auth/booking rate limits can run."
   );
 }
 

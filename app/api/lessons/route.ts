@@ -168,26 +168,18 @@ export async function GET(request: Request) {
       take: 30,
     });
 
-    const payload = await Promise.all(
-      lessons.map(async (lesson) => {
-        let streamChannelId =
-          lesson.chatChannel?.streamChannelId ?? null;
-        if (lesson.packageId) {
-          try {
-            streamChannelId =
-              (await resolveLessonStreamChannelId(lesson)) ?? streamChannelId;
-          } catch {
-            streamChannelId =
-              lesson.package?.chat?.streamChannelId ?? streamChannelId;
-          }
-        }
-        return {
-          ...lesson,
-          roomUrl: lesson.dailyRoomUrl,
-          streamChannelId,
-        };
-      })
-    );
+    // Relations are already on the row (teacher, student, chat, package chat).
+    // Do not call resolveLessonStreamChannelId here — it queries managers and
+    // may create a Stream channel per lesson (N+1, and it blocks the list).
+    // Channel creation stays on POST booking and on the single-lesson join path.
+    const payload = lessons.map((lesson) => ({
+      ...lesson,
+      roomUrl: lesson.dailyRoomUrl,
+      streamChannelId:
+        lesson.package?.chat?.streamChannelId ??
+        lesson.chatChannel?.streamChannelId ??
+        null,
+    }));
 
     return NextResponse.json(payload, { status: 200 });
   } catch (error: unknown) {

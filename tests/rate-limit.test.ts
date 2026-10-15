@@ -24,8 +24,8 @@ vi.mock("@upstash/ratelimit", () => {
 
 const ORIGIN = "https://project100.vercel.app";
 
-function request(path: string, headers: Record<string, string> = {}): NextRequest {
-  return new NextRequest(`${ORIGIN}${path}`, { method: "POST", headers });
+function request(path: string, headers: Record<string, string> = {}, method = "POST"): NextRequest {
+  return new NextRequest(`${ORIGIN}${path}`, { method, headers });
 }
 
 function configureRedis() {
@@ -80,21 +80,41 @@ describe("fail-open without Redis outside production", () => {
 
 });
 
-describe("monitored fail-open in production without Redis", () => {
-  it("never returns 503 — auth routes stay reachable", async () => {
+describe("circuit breaker in production without Redis", () => {
+  it("fails closed on auth and booking so those routes are not reachable unlimited", async () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.spyOn(console, "error").mockImplementation(() => {});
     const middleware = await loadMiddleware();
 
-    for (const path of ["/api/login", "/api/register", "/api/auth/forgot-password"]) {
+    for (const path of [
+      "/api/login",
+      "/api/register",
+      "/api/auth/forgot-password",
+      "/api/auth/reset-password",
+      "/api/lessons",
+    ]) {
       const res = await middleware(request(path));
-      expect(res.status).not.toBe(503);
-      expect(res.status).not.toBe(429);
-      expect(res.headers.get("x-middleware-next")).toBe("1");
+      expect(res.status).toBe(503);
+      expect(res.headers.get("Retry-After")).toBe("60");
+      expect(await res.json()).toEqual({
+        error: "לא הצלחנו להשלים את הבקשה כרגע. נסו שוב בעוד דקה.",
+      });
     }
   });
 
-  it("flags the result as degraded and logs a DEGRADED error", async () => {
+  it("fails open for public form posts", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const middleware = await loadMiddleware();
+
+    const res = await middleware(request("/api/leads"));
+
+    expect(res.status).not.toBe(503);
+    expect(res.status).not.toBe(429);
+    expect(res.headers.get("x-middleware-next")).toBe("1");
+  });
+
+  it("flags auth as degraded and failing closed, and logs a DEGRADED error", async () => {
     vi.stubEnv("NODE_ENV", "production");
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -102,10 +122,22 @@ describe("monitored fail-open in production without Redis", () => {
 
     const result = await checkRateLimit(request("/api/login"), "auth");
 
-    expect(result).toMatchObject({ success: true, bypassed: true, degraded: true });
+    expect(result).toMatchObject({ success: false, bypassed: false, degraded: true });
     expect(error).toHaveBeenCalledWith(expect.stringContaining("DEGRADED"));
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("failing closed"));
     expect(error).toHaveBeenCalledWith(expect.stringContaining("UPSTASH_REDIS_REST_URL"));
     expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("flags public posts as degraded and failing open", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { checkRateLimit } = await loadRateLimit();
+
+    const result = await checkRateLimit(request("/api/leads"), "api");
+
+    expect(result).toMatchObject({ success: true, bypassed: true, degraded: true });
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("failing open"));
   });
 
   it("re-alerts at most once per interval per instance", async () => {
@@ -128,9 +160,10 @@ describe("monitored fail-open in production without Redis", () => {
 });
 
 describe("limits", () => {
-  it("allows 15 auth requests per 60 s (classroom behind one NAT IP) and 30 api requests", async () => {
+  it("allows 15 auth requests per 60 s, 10 booking requests, and 30 api requests", async () => {
     const { RATE_LIMITS } = await loadRateLimit();
     expect(RATE_LIMITS.auth).toEqual({ requests: 15, window: "60 s" });
+    expect(RATE_LIMITS.booking).toEqual({ requests: 10, window: "60 s" });
     expect(RATE_LIMITS.api).toEqual({ requests: 30, window: "60 s" });
   });
 });
@@ -227,6 +260,8 @@ describe("middleware with Redis configured", () => {
     ["/api/auth/forgot-password", "project8:ratelimit:auth"],
     ["/api/auth/reset-password", "project8:ratelimit:auth"],
     ["/api/leads", "project8:ratelimit:api"],
+    ["/api/lessons", "project8:ratelimit:booking"],
+    ["/api/lessons/lesson-1/reschedule", "project8:ratelimit:booking"],
   ])("applies the right limiter to %s", async (path, prefix) => {
     configureRedis();
     const middleware = await loadMiddleware();
@@ -237,17 +272,18 @@ describe("middleware with Redis configured", () => {
     expect(rl.limit).toHaveBeenCalledWith(prefix, expect.stringContaining(path));
   });
 
-  it("does not rate limit other routes", async () => {
+  it("does not rate limit lesson list reads or other routes", async () => {
     configureRedis();
     const middleware = await loadMiddleware();
 
-    await middleware(request("/api/lessons"));
+    await middleware(request("/api/lessons", {}, "GET"));
+    await middleware(request("/api/lessons/lesson-1/cancel"));
     await middleware(request("/dashboard"));
 
     expect(rl.limit).not.toHaveBeenCalled();
   });
 
-  it("fails open (and logs) when Redis errors at runtime", async () => {
+  it("fails open (and logs) when Redis errors at runtime outside production", async () => {
     configureRedis();
     rl.limit.mockRejectedValue(new Error("ECONNRESET"));
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -259,6 +295,26 @@ describe("middleware with Redis configured", () => {
     expect(res.status).not.toBe(503);
     expect(error).toHaveBeenCalledWith(
       expect.stringContaining("Upstash Redis error"),
+      expect.any(Error)
+    );
+  });
+
+  it("fails closed when Redis errors at runtime in production for auth and booking", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    configureRedis();
+    rl.limit.mockRejectedValue(new Error("ECONNRESET"));
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const middleware = await loadMiddleware();
+
+    for (const path of ["/api/login", "/api/lessons", "/api/auth/reset-password"]) {
+      const res = await middleware(request(path));
+      expect(res.status).toBe(503);
+    }
+    const leads = await middleware(request("/api/leads"));
+    expect(leads.status).not.toBe(503);
+    expect(leads.status).not.toBe(429);
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining("failing closed"),
       expect.any(Error)
     );
   });

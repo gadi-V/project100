@@ -4,6 +4,9 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+  /// Production runtime MUST set DATABASE_URL to the Neon pooled connection
+  /// string: hostname contains `-pooler`, query `pgbouncer=true&connection_limit=1`.
+  /// Use the direct (non-pooler) Neon URL only for `prisma migrate`. See lib/prisma.ts.
   url      = env("DATABASE_URL")
 }
 

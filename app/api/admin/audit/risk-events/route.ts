@@ -58,51 +58,69 @@ async function isAuthorized(request: NextRequest): Promise<boolean> {
 
 async function computeNoTeacherAssigned(): Promise<RiskEvent[]> {
   const since = new Date(Date.now() - 2 * 60 * 60 * 1000); // 2 hours
+  // One query for payments + student. Assignment checks are three batched
+  // lookups by student id, not a query per payment (that was 1 + 4N round trips).
   const recentPayments = await prisma.payment.findMany({
     where: { createdAt: { gte: since }, status: "COMPLETED" },
     orderBy: { createdAt: "desc" },
     take: 100,
+    select: {
+      id: true,
+      studentId: true,
+      packageType: true,
+      amountPaid: true,
+      createdAt: true,
+      student: { select: { id: true, name: true, lessonCredits: true } },
+    },
   });
+
+  const studentIds = [...new Set(recentPayments.map((payment) => payment.studentId))];
+  if (studentIds.length === 0) return [];
+
+  const [unlockedDiagnostics, referrals, upcomingLessons] = await Promise.all([
+    prisma.diagnosticQuiz.findMany({
+      where: { studentId: { in: studentIds }, isUnlocked: true },
+      select: { studentId: true },
+      distinct: ["studentId"],
+    }),
+    prisma.teacherReferral.findMany({
+      where: { studentId: { in: studentIds } },
+      select: { studentId: true },
+      distinct: ["studentId"],
+    }),
+    prisma.lesson.findMany({
+      where: { studentId: { in: studentIds }, status: { in: ["SCHEDULED", "IN_PROGRESS"] } },
+      select: { studentId: true },
+      distinct: ["studentId"],
+    }),
+  ]);
+
+  const assignedStudentIds = new Set<string>([
+    ...unlockedDiagnostics.map((row) => row.studentId),
+    ...referrals.map((row) => row.studentId),
+    ...upcomingLessons.map((row) => row.studentId),
+  ]);
 
   const events: RiskEvent[] = [];
   for (const payment of recentPayments) {
-    const student = await prisma.user.findUnique({
-      where: { id: payment.studentId },
-      select: { id: true, name: true, lessonCredits: true },
-    });
-    if (!student) continue;
+    const student = payment.student;
+    if (!student || assignedStudentIds.has(student.id)) continue;
 
-    const unlockedDiagnostic = await prisma.diagnosticQuiz.findFirst({
-      where: { studentId: student.id, isUnlocked: true },
-      select: { id: true },
+    events.push({
+      id: `no-teacher-${payment.id}`,
+      severity: "CRITICAL",
+      kind: "NO_TEACHER_ASSIGNED",
+      title: "תלמיד שילם על חבילה ללא שיבוץ מורה (2h)",
+      description: `התלמיד "${student.name || student.id}" שילם על ${payment.packageType} אך לא שובץ מורה תוך שעתיים.`,
+      playerId: student.id,
+      createdAt: payment.createdAt.toISOString(),
+      payload: {
+        paymentId: payment.id,
+        packageType: payment.packageType,
+        amountPaid: payment.amountPaid,
+        lessonCredits: student.lessonCredits,
+      },
     });
-    const referral = await prisma.teacherReferral.findFirst({
-      where: { studentId: student.id },
-      select: { id: true },
-    });
-    const upcomingLesson = await prisma.lesson.findFirst({
-      where: { studentId: student.id, status: { in: ["SCHEDULED", "IN_PROGRESS"] } },
-      select: { id: true },
-    });
-
-    const isAssigned = Boolean(unlockedDiagnostic || referral || upcomingLesson);
-    if (!isAssigned) {
-      events.push({
-        id: `no-teacher-${payment.id}`,
-        severity: "CRITICAL",
-        kind: "NO_TEACHER_ASSIGNED",
-        title: "תלמיד שילם על חבילה ללא שיבוץ מורה (2h)",
-        description: `התלמיד "${student.name || student.id}" שילם על ${payment.packageType} אך לא שובץ מורה תוך שעתיים.`,
-        playerId: student.id,
-        createdAt: payment.createdAt.toISOString(),
-        payload: {
-          paymentId: payment.id,
-          packageType: payment.packageType,
-          amountPaid: payment.amountPaid,
-          lessonCredits: student.lessonCredits,
-        },
-      });
-    }
   }
   return events;
 }
@@ -147,12 +165,24 @@ async function computeStripeAndLedger(): Promise<RiskEvent[]> {
     ORDER BY cnt DESC
     LIMIT 50
   `;
-  for (const row of dupTxs) {
+  const txIds = dupTxs.map((row) => String(row.transactionid));
+  const entriesByTx = new Map<string, { userId: string; createdAt: Date; entryType: string }[]>();
+  if (txIds.length > 0) {
     const entries = await prisma.billingLedger.findMany({
-      where: { transactionId: String(row.transactionid) },
+      where: { transactionId: { in: txIds } },
       orderBy: { createdAt: "asc" },
-      take: 10,
+      select: { transactionId: true, userId: true, createdAt: true, entryType: true },
     });
+    for (const entry of entries) {
+      const key = entry.transactionId ?? "";
+      const bucket = entriesByTx.get(key) ?? [];
+      if (bucket.length >= 10) continue;
+      bucket.push({ userId: entry.userId, createdAt: entry.createdAt, entryType: entry.entryType });
+      entriesByTx.set(key, bucket);
+    }
+  }
+  for (const row of dupTxs) {
+    const entries = entriesByTx.get(String(row.transactionid)) ?? [];
     events.push({
       id: `ledger-dup-${row.transactionid}`,
       severity: "CRITICAL",

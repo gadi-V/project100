@@ -17,11 +17,19 @@ import {
 const AUTH_RATE_LIMITED_ROUTES = new Set(["/api/login", "/api/register", "/api/register/student"]);
 const API_RATE_LIMITED_ROUTES = new Set(["/api/leads", "/api/careers/apply"]);
 
-function rateLimitTypeForPath(pathname: string): RateLimitType | null {
+/** Student booking and reschedule. GET list/detail stays unlimited (a static read). */
+function isBookingRequest(pathname: string, method: string): boolean {
+  if (method !== "POST") return false;
+  if (pathname === "/api/lessons") return true;
+  return /^\/api\/lessons\/[^/]+\/reschedule$/.test(pathname);
+}
+
+function rateLimitTypeForPath(pathname: string, method: string): RateLimitType | null {
   if (isRateLimitExempt(pathname)) return null;
   if (AUTH_RATE_LIMITED_ROUTES.has(pathname) || pathname.startsWith("/api/auth/")) {
     return "auth";
   }
+  if (isBookingRequest(pathname, method)) return "booking";
   if (API_RATE_LIMITED_ROUTES.has(pathname)) return "api";
   return null;
 }
@@ -87,12 +95,19 @@ function isPublicApiPath(pathname: string): boolean {
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Rate limit sensitive public endpoints before anything else (/api/cron/* is exempt).
-  const rateLimitType = rateLimitTypeForPath(pathname);
+  // Rate limit sensitive endpoints before anything else (/api/cron/* is exempt).
+  // Auth and booking fail closed when Redis is down (503). Public form posts fail open.
+  const rateLimitType = rateLimitTypeForPath(pathname, request.method);
   if (rateLimitType) {
     const limited = await checkRateLimit(request, rateLimitType);
     if (!limited.success) {
       const retryAfter = Math.max(1, Math.ceil((limited.reset - Date.now()) / 1000));
+      if (limited.degraded) {
+        return NextResponse.json(
+          { error: "לא הצלחנו להשלים את הבקשה כרגע. נסו שוב בעוד דקה." },
+          { status: 503, headers: { "Retry-After": String(retryAfter) } }
+        );
+      }
       return NextResponse.json(
         { error: "Too Many Requests" },
         {

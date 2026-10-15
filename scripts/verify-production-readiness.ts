@@ -84,7 +84,22 @@ function checkDatabaseUrl() {
   if (neon && ssl !== "require" && ssl !== "verify-full") {
     return record("ENV", "DATABASE_URL", "WARN", `${mask(value)} — Neon host without sslmode=require`);
   }
-  record("ENV", "DATABASE_URL", "OK", `${mask(value)} — ${neon ? "Neon" : "PostgreSQL"} host, sslmode=${ssl ?? "default"}`);
+  const pooled = url.hostname.includes("-pooler") || url.searchParams.get("pgbouncer") === "true";
+  if (neon && !pooled) {
+    return record(
+      "ENV",
+      "DATABASE_URL",
+      "WARN",
+      `${mask(value)} — Neon host is not pooled. Production must use the -pooler host with pgbouncer=true&connection_limit=1`
+    );
+  }
+  const limit = url.searchParams.get("connection_limit");
+  record(
+    "ENV",
+    "DATABASE_URL",
+    "OK",
+    `${mask(value)} — ${neon ? "Neon" : "PostgreSQL"} host${pooled ? ", pooled" : ""}, sslmode=${ssl ?? "default"}, connection_limit=${limit ?? "default"}`
+  );
 }
 
 function checkAuthSecret() {
