@@ -6,12 +6,47 @@ import BenefitsBar from "./BenefitsBar";
 import AboutSection from "./AboutSection";
 import SubjectsMarquee from "./SubjectsMarquee";
 import MethodFlipCards from "./MethodFlipCards";
+import StatsBar from "./StatsBar";
+import { ChevronDown } from "lucide-react";
 import BrandWordmark from "../BrandWordmark";
+import PricingPlans from "../pricing/PricingPlans";
 import { orangeCta } from "../../lib/ui";
+
+const FAQ_ITEMS: readonly { q: string; a: string }[] = [
+  {
+    q: "איך עובד התשלום / מהו תהליך התשלום?",
+    a: "בוחרים במחירון חבילה של 1, 3, 5 או 10 שיעורים ומשלמים בדף תשלום מאובטח. השיעורים נטענים לאזור האישי שלכם, ושיעור יורד מהחבילה רק אחרי שהתקיים בפועל. אין מנוי ואין התחייבות.",
+  },
+  {
+    q: "איזה מסלולי לימוד אנו מציעים?",
+    a: "שלושה מסלולים: סגירת פערים מהיסוד, הכנה ממוקדת למבחן, וליווי קבוע לאורך הסמסטר או שנת הלימודים. כל מסלול מתאים גם לבגרות וגם לקורסים באקדמיה.",
+  },
+  {
+    q: "למי מיועדים השיעורים של PROJECT100?",
+    a: "לתלמידי תיכון שמתכוננים לבגרות, למשל במתמטיקה 3–5 יח\"ל, פיזיקה, כימיה ואנגלית, ולסטודנטים בקורסים כמו חדו\"א, אלגברה לינארית, הסתברות ומבני נתונים. גם למי שמתקשה בחומר וגם למי שרוצה לתרגל ברמת מבחן גבוהה.",
+  },
+  {
+    q: "איך לימודים עם PROJECT100 יכולים לעזור לי להשיג ציון 90 ומעלה?",
+    a: "כל שיעור הוא 1-על-1 ונבנה לפי הסילבוס, המרצה ומבנה המבחן שלכם. פותרים מבחני עבר, סוגרים בדיוק את מה שחסר, ובסוף כל שיעור הלוח נשמר כ-PDF באזור האישי כדי שתוכלו לחזור עליו לפני המבחן.",
+  },
+  {
+    q: "מה קורה אם אני נתקע עם תרגיל?",
+    a: "מביאים אותו לשיעור הבא ופותרים יחד על הלוח המשותף. בחבילות של 3 שיעורים ומעלה נפתחת אחרי השיבוץ גם קבוצת וואטסאפ עם המורה ונציג מלווה, ושם אפשר לשאול גם בין השיעורים.",
+  },
+  {
+    q: "מהי גישת הלימוד שלכם?",
+    a: "שיעור חי מול מורה, לא סרטון מוקלט. מתחילים באבחון קצר כדי להבין איפה הקושי, ואז מתקדמים בקצב שלכם: מסבירים, פותרים יחד, ומתרגלים עד שאתם פותרים לבד.",
+  },
+  {
+    q: "האם אתם עוזרים בנושאים ספציפיים או בהכנה למבחנים?",
+    a: "כן. אפשר לקבוע שיעור בודד על נושא אחד שלא ברור, או חבילה שלמה לקראת בגרות או מבחן סמסטר, עם פתרון מבחני עבר ותרגול ברמת מבחן.",
+  },
+];
 
 /** Interactive landing body; `reviews` is rendered on the server so review data stays out of this bundle. */
 export default function HomeLanding({ reviews }: { reviews: ReactNode }) {
   const [activeFaq, setActiveFaq] = useState<number | null>(null);
+  const [pricingOpen, setPricingOpen] = useState(false);
   const [leadForm, setLeadForm] = useState({ name: "", phone: "", grade: "" });
   const [leadLoading, setLeadLoading] = useState(false);
   const [leadSent, setLeadSent] = useState(false);
@@ -189,8 +224,12 @@ export default function HomeLanding({ reviews }: { reviews: ReactNode }) {
 
       </section>
 
+      <StatsBar />
+
+      {reviews}
+
       {/* 3b. מחירון / כרטיסיות — scroll target for nav + ambient violet/gold */}
-      <section id="pricing" className="max-w-7xl mx-auto px-6 lg:px-10 py-24 min-h-[70vh] flex flex-col justify-center space-y-6">
+      <section id="pricing" className="max-w-7xl mx-auto px-6 lg:px-10 py-24 space-y-6">
         <div className="text-center space-y-3">
           <span className="text-xs font-black tracking-widest text-[#6e6e73] uppercase block">מחירון שקוף</span>
           <h2 className="text-3xl sm:text-4xl font-black text-[#1d1d1f] tracking-tight">כרטיסיית מפגשים. בלי אותיות קטנות.</h2>
@@ -199,17 +238,36 @@ export default function HomeLanding({ reviews }: { reviews: ReactNode }) {
             <span className="text-[#0071e3] block sm:inline sm:ms-1 font-black">קיימות אופציות ומסלולי ליווי מורחבים בהתאמה אישית.</span>
           </p>
           <div className="pt-2">
-            <Link
-              href="/pricing"
-              className="inline-block text-center bg-[#1d1d1f] hover:bg-[#2d2d2f] text-white font-black text-xs py-3 px-8 rounded-full transition-all shadow-md"
+            <button
+              type="button"
+              onClick={() => setPricingOpen((open) => !open)}
+              aria-expanded={pricingOpen}
+              aria-controls="pricing-plans"
+              className="inline-flex items-center gap-1.5 bg-[#1d1d1f] hover:bg-[#2d2d2f] text-white font-black text-xs py-3 px-8 rounded-full transition-all shadow-md"
             >
-              למחירון המלא
-            </Link>
+              {pricingOpen ? "הסתרת המחירון" : "למחירון המלא"}
+              <ChevronDown
+                aria-hidden="true"
+                size={14}
+                strokeWidth={2.5}
+                className={`transition-transform duration-300 ${pricingOpen ? "rotate-180" : ""}`}
+              />
+            </button>
+          </div>
+        </div>
+
+        <div
+          id="pricing-plans"
+          inert={!pricingOpen}
+          className={`grid transition-[grid-template-rows,opacity] duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none ${
+            pricingOpen ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
+          }`}
+        >
+          <div className="min-h-0 overflow-hidden">
+            <PricingPlans className="pt-10" resumePath={() => "/#pricing"} />
           </div>
         </div>
       </section>
-
-      {reviews}
 
       <AboutSection />
 
@@ -219,17 +277,13 @@ export default function HomeLanding({ reviews }: { reviews: ReactNode }) {
           <h2 className="text-3xl font-black text-[#1d1d1f] tracking-tight text-center">נעים להכיר, בגובה העיניים</h2>
           
           <div className="border-t border-slate-300 divide-y divide-slate-300">
-            {[
-              { q: "כיצד המערכת מתאימה לי את המורה?", a: "מנוע האבחון הדינמי שלנו משקלל את המקצוע או הקורס האקדמי הספציפי, רמת הלימוד, סוג הקושי (פערי עבר, חרדת בחינות) והשעות הפנויות שלך, ומציג לך את המורים המנוסים והרלוונטיים ביותר שעונים על הדרישה המדויקת הזו." },
-              { q: "איך עובד מנגנון החיוב והכרטיסיות?", a: "הכול שקוף ומנוהל באזור האישי. אתם בוחרים כרטיסיית מפגשים מוגדרת מראש. השעות נשארות בחשבון שלכם ואינן פוקעות, וניכוי השיעור מתבצע מתוך הכרטיסייה אך ורק לאחר שהמפגש התקיים בפועל במערכת." },
-              { q: "האם אני יכול להחליף מורה במהלך הדרך?", a: "בוודאי. הפלטפורמה מעניקה חופש בחירה מוחלט. אם אתם מרגישים צורך לרענן, לעבור למורה אחר או לשלב מורה נוסף לקורס אחר – אתם חופשיים לעשות זאת ישירות מתוך המערכת על בסיס זמינות הלו\"ז שלו, ללא בירוקרטיה." }
-            ].map((item, idx) => (
+            {FAQ_ITEMS.map((item, idx) => (
               <div key={idx} className="py-5">
                 <button onClick={() => toggleFaq(idx)} className="w-full flex justify-between items-center text-right text-sm font-black text-[#1d1d1f] hover:text-[#0071e3] transition-colors focus:outline-none">
                   <span>{item.q}</span>
                   <span className={`text-[#0071e3] font-bold text-xl transition-transform duration-200 ${activeFaq === idx ? "rotate-45" : ""}`}>+</span>
                 </button>
-                <div className={`overflow-hidden transition-all duration-300 text-xs font-bold text-[#6e6e73] leading-relaxed ${activeFaq === idx ? "max-h-32 mt-3" : "max-h-0"}`}>
+                <div className={`overflow-hidden transition-all duration-300 text-xs font-bold text-[#6e6e73] leading-relaxed ${activeFaq === idx ? "max-h-60 mt-3" : "max-h-0"}`}>
                   {item.a}
                 </div>
               </div>

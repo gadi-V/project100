@@ -47,32 +47,32 @@ type OrbClasses = {
  */
 const PALETTES: Record<AmbientSection, OrbClasses> = {
   hero: {
-    orb1: "bg-gradient-to-br from-sky-300/60 via-sky-200/30 to-transparent",
-    orb2: "bg-gradient-to-tr from-amber-200/55 via-orange-100/30 to-transparent",
-    orb3: "bg-gradient-to-tl from-fuchsia-200/45 via-pink-100/25 to-transparent",
-    orb4: "bg-gradient-to-bl from-cyan-200/45 via-sky-100/25 to-transparent",
+    orb1: "bg-gradient-to-br from-sky-400/75 via-sky-300/40 to-transparent",
+    orb2: "bg-gradient-to-tr from-amber-300/70 via-orange-200/40 to-transparent",
+    orb3: "bg-gradient-to-tl from-fuchsia-300/60 via-pink-200/35 to-transparent",
+    orb4: "bg-gradient-to-bl from-cyan-300/60 via-sky-200/35 to-transparent",
   },
   challenge: {
-    orb1: "bg-gradient-to-br from-indigo-400/50 via-indigo-300/30 to-transparent",
-    orb2: "bg-gradient-to-tr from-emerald-300/45 via-emerald-200/25 to-transparent",
-    orb3: "bg-gradient-to-tl from-cyan-300/40 via-sky-200/25 to-transparent",
-    orb4: "bg-gradient-to-bl from-violet-300/40 via-purple-200/25 to-transparent",
+    orb1: "bg-gradient-to-br from-indigo-500/60 via-indigo-400/35 to-transparent",
+    orb2: "bg-gradient-to-tr from-emerald-400/60 via-emerald-300/35 to-transparent",
+    orb3: "bg-gradient-to-tl from-cyan-400/55 via-sky-300/30 to-transparent",
+    orb4: "bg-gradient-to-bl from-violet-400/55 via-purple-300/30 to-transparent",
   },
   pricing: {
-    orb1: "bg-gradient-to-br from-violet-400/50 via-violet-300/30 to-transparent",
-    orb2: "bg-gradient-to-tr from-amber-300/55 via-amber-200/30 to-transparent",
-    orb3: "bg-gradient-to-tl from-rose-300/45 via-pink-200/25 to-transparent",
-    orb4: "bg-gradient-to-bl from-sky-300/40 via-indigo-200/25 to-transparent",
+    orb1: "bg-gradient-to-br from-violet-500/60 via-violet-400/35 to-transparent",
+    orb2: "bg-gradient-to-tr from-amber-400/65 via-amber-300/35 to-transparent",
+    orb3: "bg-gradient-to-tl from-rose-400/55 via-pink-300/30 to-transparent",
+    orb4: "bg-gradient-to-bl from-sky-400/55 via-indigo-300/30 to-transparent",
   },
   faq: {
-    orb1: "bg-gradient-to-br from-teal-300/50 via-teal-200/30 to-transparent",
-    orb2: "bg-gradient-to-tr from-rose-300/45 via-rose-200/25 to-transparent",
-    orb3: "bg-gradient-to-tl from-amber-200/45 via-yellow-100/25 to-transparent",
-    orb4: "bg-gradient-to-bl from-indigo-300/40 via-sky-200/25 to-transparent",
+    orb1: "bg-gradient-to-br from-teal-400/65 via-teal-300/35 to-transparent",
+    orb2: "bg-gradient-to-tr from-rose-400/55 via-rose-300/30 to-transparent",
+    orb3: "bg-gradient-to-tl from-amber-300/60 via-yellow-200/35 to-transparent",
+    orb4: "bg-gradient-to-bl from-indigo-400/55 via-sky-300/30 to-transparent",
   },
 };
 
-const ORB_TRANSITION = "transition-all duration-1000 ease-out";
+const ORB_TRANSITION = "transition-all duration-[1400ms] ease-out";
 
 /**
  * Scroll-linked drift (px at full page scroll). Orbs move in different
