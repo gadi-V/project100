@@ -217,7 +217,8 @@ export async function POST(request: Request) {
       try {
         uploadedPdfUrl = await uploadLessonPdf(lessonId, pdfBuffer);
       } catch (uploadError) {
-        console.error("[complete] Board PDF upload failed (non-fatal):", uploadError);
+        const reason = uploadError instanceof Error ? uploadError.name : "unknown";
+        console.error("[complete] Board PDF upload failed (non-fatal)", { lessonId, reason });
         uploadedPdfUrl = null;
       }
     }

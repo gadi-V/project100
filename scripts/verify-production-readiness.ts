@@ -106,7 +106,10 @@ function checkAuthSecret() {
   const value = env("AUTH_SECRET");
   if (!value) {
     const unread = env("NEXTAUTH_SECRET") ? " (NEXTAUTH_SECRET is set but the app reads AUTH_SECRET)" : "";
-    return record("ENV", "AUTH_SECRET", "FAIL", `missing${unread} — sessions would use the build-only fallback`);
+    return record("ENV", "AUTH_SECRET", "FAIL", `missing${unread} — production refuses to sign sessions`);
+  }
+  if (value === "build-time-only-auth-secret-not-for-production") {
+    return record("ENV", "AUTH_SECRET", "FAIL", "build-time fallback — production refuses to sign sessions");
   }
   if (value.length < MIN_AUTH_SECRET_LENGTH) {
     return record("ENV", "AUTH_SECRET", "FAIL", `${mask(value)} — shorter than ${MIN_AUTH_SECRET_LENGTH} characters`);

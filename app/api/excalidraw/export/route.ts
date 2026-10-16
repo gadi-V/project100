@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { PDFDocument } from "pdf-lib";
 import { getCurrentUser } from "../../../../lib/session";
 import { prisma } from "../../../../lib/prisma";
-import { uploadLessonPdf } from "../../../../lib/storage";
+import { STORAGE_UPLOAD_CLIENT_ERROR, uploadLessonPdf } from "../../../../lib/storage";
 
 /** Canonical A4 page dimensions at 96 dpi (matches ClassroomWhiteboard PAGE_W/PAGE_H). */
 const A4_WIDTH_PX = 794;
@@ -136,7 +136,14 @@ export async function POST(request: Request) {
       try {
         pdfUrl = await uploadLessonPdf(lessonId, pdfBytes, "board-summary.pdf");
       } catch (uploadErr) {
-        console.error("[export] PDF upload to storage failed (non-fatal):", uploadErr);
+        const reason = uploadErr instanceof Error ? uploadErr.name : "unknown";
+        console.error("[export] PDF upload failed", { reason });
+        return NextResponse.json({ error: STORAGE_UPLOAD_CLIENT_ERROR }, { status: 500 });
+      }
+
+      if (!pdfUrl && process.env.NODE_ENV === "production") {
+        console.error("[export] PDF upload returned no URL");
+        return NextResponse.json({ error: STORAGE_UPLOAD_CLIENT_ERROR }, { status: 500 });
       }
 
       return NextResponse.json({

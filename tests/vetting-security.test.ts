@@ -39,6 +39,13 @@ vi.mock("../lib/teacher-vetting", () => vetting);
 vi.mock("../lib/storage", () => ({
   uploadBoardImage: vi.fn(),
   uploadLessonPdf: vi.fn(),
+  STORAGE_UPLOAD_CLIENT_ERROR: "Upload failed, please try again",
+  StorageUploadError: class StorageUploadError extends Error {
+    constructor() {
+      super("Upload failed, please try again");
+      this.name = "StorageUploadError";
+    }
+  },
 }));
 
 const ORIGIN = "https://project100.vercel.app";

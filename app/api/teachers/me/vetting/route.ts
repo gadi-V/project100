@@ -6,7 +6,12 @@ import {
   updateVettingStep,
 } from "../../../../../lib/teacher-vetting";
 import { VettingStepName, VettingStepStatus } from "@prisma/client";
-import { uploadBoardImage, uploadLessonPdf } from "../../../../../lib/storage";
+import {
+  STORAGE_UPLOAD_CLIENT_ERROR,
+  StorageUploadError,
+  uploadBoardImage,
+  uploadLessonPdf,
+} from "../../../../../lib/storage";
 
 /**
  * Identity comes only from the signed session cookie. The `x-user-id` request
@@ -161,7 +166,18 @@ export async function POST(request: NextRequest) {
       { status: 200 }
     );
   } catch (error) {
-    console.error("Failed to submit exam 581 solution:", error);
+    if (
+      error instanceof StorageUploadError ||
+      (error instanceof Error && error.message.includes("SUPABASE_"))
+    ) {
+      console.error("[vetting] solution upload failed", {
+        reason: error instanceof Error ? error.name : "unknown",
+      });
+      return NextResponse.json({ error: STORAGE_UPLOAD_CLIENT_ERROR }, { status: 500 });
+    }
+    console.error("Failed to submit exam 581 solution", {
+      reason: error instanceof Error ? error.name : "unknown",
+    });
     return NextResponse.json(
       { error: "Internal Server Error" },
       { status: 500 }

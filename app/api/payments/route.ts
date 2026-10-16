@@ -128,6 +128,12 @@ export async function POST(request: Request) {
 
     const stripe = getStripe();
     const baseUrl = appBaseUrl(request);
+    const paymentMetadata = {
+      userId: auth.user.id,
+      packageType,
+      credits: String(selectedPackage.credits),
+      amountPaid: String(selectedPackage.price),
+    };
 
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
@@ -146,13 +152,9 @@ export async function POST(request: Request) {
       ],
       success_url: `${baseUrl}${safeSuccessPath}${safeSuccessPath.includes("?") ? "&" : "?"}payment=success`,
       cancel_url: `${baseUrl}${safeCancelPath}${safeCancelPath.includes("?") ? "&" : "?"}payment=cancelled`,
-      metadata: {
-        userId: auth.user.id,
-        packageType,
-        credits: String(selectedPackage.credits),
-        amountPaid: String(selectedPackage.price),
-      },
+      metadata: paymentMetadata,
       client_reference_id: auth.user.id,
+      payment_intent_data: { metadata: paymentMetadata },
     });
 
     if (!session.url) {

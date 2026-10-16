@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { nanoid } from "nanoid";
 import { getCurrentUser } from "../../../lib/session";
-import { uploadBoardImage } from "../../../lib/storage";
+import { STORAGE_UPLOAD_CLIENT_ERROR, uploadBoardImage } from "../../../lib/storage";
 
 const MAX_BYTES = 5 * 1024 * 1024;
 const ALLOWED = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
@@ -33,7 +33,8 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     return NextResponse.json({ id: imageId, url });
   } catch (error) {
-    console.error("[upload]", error);
-    return NextResponse.json({ error: "שגיאה בהעלאת התמונה" }, { status: 500 });
+    const reason = error instanceof Error ? error.name : "unknown";
+    console.error("[upload] failed", { reason });
+    return NextResponse.json({ error: STORAGE_UPLOAD_CLIENT_ERROR }, { status: 500 });
   }
 }
