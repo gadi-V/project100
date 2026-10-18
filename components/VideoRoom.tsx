@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useRef, useCallback } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import DailyIframe, { DailyCall } from "@daily-co/daily-js";
 import {
   DailyProvider,
@@ -146,55 +146,97 @@ function MockVideoBox() {
   );
 }
 
+function destroyDailyCall(call: DailyCall | null | undefined): Promise<void> {
+  if (!call || call.isDestroyed()) return Promise.resolve();
+  // destroy() yields on leave() before it clears Daily's singleton.
+  // Callers must await this before createCallObject(), or Strict Mode
+  // throws "Duplicate DailyIframe instances are not allowed".
+  return call.destroy().then(() => undefined).catch(() => undefined);
+}
+
 export default function VideoRoom({ roomUrl, token }: VideoRoomProps) {
   const [callObject, setCallObject] = useState<DailyCall | null>(null);
   // When Daily is unavailable (bad credentials, billing, join failure, etc.)
   // we fall back to MockVideoBox silently — no red error screen.
   const [dailyFailed, setDailyFailed] = useState(false);
+  const callObjectRef = useRef<DailyCall | null>(null);
+  const teardownRef = useRef<Promise<void>>(Promise.resolve());
 
-  const connect = useCallback(() => {
+  useEffect(() => {
     // No credentials in dev → clean placeholder, no error.
     if (!roomUrl || !token) {
       setCallObject(null);
       return;
     }
 
-    // Best-effort media permission warm-up (failure is non-blocking).
-    if (navigator.mediaDevices?.getUserMedia) {
-      navigator.mediaDevices
-        .getUserMedia({ video: true, audio: true })
-        .catch((err: unknown) => {
-          console.warn("[VideoRoom] Media permission denied:", err);
-        });
-    }
+    let cancelled = false;
 
-    const co = DailyIframe.createCallObject();
-    setCallObject(co);
+    const connect = async () => {
+      // Yield once so Strict Mode's simulated unmount can mark this run
+      // cancelled before we touch Daily's process-wide call instance.
+      await Promise.resolve();
+      await teardownRef.current;
+      if (cancelled) return;
 
-    // Listen for Daily error events (e.g. account-missing-payment-method).
-    co.on("error", (event) => {
-      console.warn("[VideoRoom] Daily error event — using fallback:", event);
-      setDailyFailed(true);
-    });
+      const lingering = callObjectRef.current ?? DailyIframe.getCallInstance();
+      if (lingering && !lingering.isDestroyed()) {
+        teardownRef.current = destroyDailyCall(lingering);
+        await teardownRef.current;
+      }
+      if (cancelled) return;
 
-    co.join({ url: roomUrl, token }).catch((err: unknown) => {
-      // Swallow join errors silently and fall back to MockVideoBox.
-      // Common causes: expired token, room deleted, billing issue.
-      console.warn("[VideoRoom] Daily join failed — using fallback:", err);
-      setDailyFailed(true);
-    });
+      const existing = DailyIframe.getCallInstance();
+      const co =
+        existing && !existing.isDestroyed() ? existing : DailyIframe.createCallObject();
+      callObjectRef.current = co;
 
-    return co;
-  }, [roomUrl, token]);
+      if (cancelled) {
+        teardownRef.current = destroyDailyCall(co);
+        await teardownRef.current;
+        if (callObjectRef.current === co) callObjectRef.current = null;
+        return;
+      }
 
-  useEffect(() => {
-    const co = connect();
-    return () => {
-      if (!co) return;
-      co.leave().catch(() => undefined);
-      co.destroy();
+      // Best-effort media permission warm-up (failure is non-blocking).
+      if (navigator.mediaDevices?.getUserMedia) {
+        navigator.mediaDevices
+          .getUserMedia({ video: true, audio: true })
+          .catch((err: unknown) => {
+            console.warn("[VideoRoom] Media permission denied:", err);
+          });
+      }
+
+      setCallObject(co);
+      setDailyFailed(false);
+
+      // Listen for Daily error events (e.g. account-missing-payment-method).
+      co.on("error", (event) => {
+        if (cancelled) return;
+        console.warn("[VideoRoom] Daily error event — using fallback:", event);
+        setDailyFailed(true);
+      });
+
+      co.join({ url: roomUrl, token }).catch((err: unknown) => {
+        if (cancelled) return;
+        // Swallow join errors silently and fall back to MockVideoBox.
+        // Common causes: expired token, room deleted, billing issue.
+        console.warn("[VideoRoom] Daily join failed — using fallback:", err);
+        setDailyFailed(true);
+      });
     };
-  }, [connect]);
+
+    void connect();
+
+    return () => {
+      cancelled = true;
+      const co = callObjectRef.current ?? DailyIframe.getCallInstance();
+      callObjectRef.current = null;
+      setCallObject(null);
+      if (co && !co.isDestroyed()) {
+        teardownRef.current = destroyDailyCall(co);
+      }
+    };
+  }, [roomUrl, token]);
 
   // No credentials or Daily failed → silent placeholder.
   if (!roomUrl || !token || dailyFailed) {

@@ -81,10 +81,17 @@ export default function ClassroomChat({
   const [unavailable, setUnavailable] = useState(false);
 
   const chatTitle = packageId ? "צ'אט כיתה · חומרי חבילה" : "צ'אט כיתה חכם";
+  const streamUserId = typeof userId === "string" ? userId.trim() : "";
+  const streamFirstName = typeof firstName === "string" ? firstName.trim() : "";
+  const identityReady = Boolean(streamUserId && streamFirstName);
   const credentialsReady =
-    Boolean(apiKey && channelId && userId) && isUsableStreamUserToken(userToken);
+    Boolean(apiKey && channelId) && identityReady && isUsableStreamUserToken(userToken ?? "");
 
   useEffect(() => {
+    // Props can arrive a render late. Connecting before id/name exist makes
+    // the websocket open with user_details omitted (close code 4).
+    if (!identityReady) return;
+
     let cancelled = false;
 
     if (!credentialsReady) {
@@ -99,19 +106,17 @@ export default function ClassroomChat({
     // calls disconnectUser(), which wipes the token and the remount then throws
     // "Both secret and user tokens are not set".
     const chatClient = new StreamChat(apiKey);
+    const streamUser = {
+      id: streamUserId,
+      name: `${streamFirstName} (${streamUserId.slice(0, 4)})`,
+    };
+
+    const connectionPromise = chatClient.connectUser(streamUser, userToken);
 
     const initChat = async () => {
       try {
         setUnavailable(false);
-
-        await chatClient.connectUser(
-          {
-            id: userId,
-            name: `${firstName} (${userId.slice(0, 4)})`,
-          },
-          userToken
-        );
-
+        await connectionPromise;
         if (cancelled) return;
 
         const ch = chatClient.channel("messaging", channelId);
@@ -143,14 +148,33 @@ export default function ClassroomChat({
     return () => {
       cancelled = true;
       onChannelReady?.(null);
-      try {
-        const pending = chatClient.disconnectUser();
-        void Promise.resolve(pending).catch(() => undefined);
-      } catch {
-        // disconnectUser can throw once the token manager was already reset.
-      }
+      // disconnectUser() deletes _user immediately. Waiting until connectUser
+      // settles keeps user_details on the socket that is already opening.
+      void connectionPromise
+        .catch(() => undefined)
+        .then(() => chatClient.disconnectUser())
+        .catch(() => undefined);
     };
-  }, [apiKey, userToken, userId, firstName, channelId, onChannelReady, credentialsReady]);
+  }, [
+    apiKey,
+    userToken,
+    streamUserId,
+    streamFirstName,
+    channelId,
+    onChannelReady,
+    credentialsReady,
+    identityReady,
+  ]);
+
+  if (!identityReady) {
+    return (
+      <div className="flex h-full min-h-[200px] items-center justify-center bg-white/80 backdrop-blur-md border border-neutral-200/80 rounded-2xl">
+        <span className="text-neutral-500 font-medium text-sm animate-pulse">
+          מתחבר לערוץ התקשורת המאובטח...
+        </span>
+      </div>
+    );
+  }
 
   if (!credentialsReady || unavailable) {
     return <ChatUnavailable />;
