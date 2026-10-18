@@ -166,6 +166,67 @@ describe("GET/POST /api/agents/dispatch — auth", () => {
     });
   });
 
+  it("returns a retryable busy response when OpenRouter fails, without leaking the provider body", async () => {
+    db.userFindMany.mockResolvedValue([userLead("u1", "054-123-4567")]);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("upstream exploded sk-or-live-secret", { status: 500 }))
+    );
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const { GET } = await loadDispatch();
+
+    const res = await GET(
+      dispatchRequest("?agent=leads", { authorization: "Bearer cron-test-secret" })
+    );
+
+    expect(res.status).toBe(503);
+    const body = await res.json();
+    expect(body).toEqual({
+      success: false,
+      agent: "leads",
+      error: "AI service is currently busy. Please try again later.",
+    });
+    expect(JSON.stringify(body)).not.toContain("sk-or-live-secret");
+    expect(JSON.stringify(body)).not.toContain("upstream exploded");
+    expect(wa.sendWhatsAppMessage).not.toHaveBeenCalled();
+  });
+
+  it("returns 503 when OpenRouter hangs, and does not throw", async () => {
+    vi.useFakeTimers();
+    db.userFindMany.mockResolvedValue([userLead("u1", "054-123-4567")]);
+    stubHangingLLM();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const { GET } = await loadDispatch();
+
+    const pending = GET(
+      dispatchRequest("?agent=leads", { authorization: "Bearer cron-test-secret" })
+    );
+    await vi.advanceTimersByTimeAsync(25_000);
+    const res = await pending;
+
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({
+      success: false,
+      agent: "leads",
+      error: "AI service is currently busy. Please try again later.",
+    });
+  });
+
+  it("returns 500 without the thrown message when the runner fails before reaching OpenRouter", async () => {
+    db.userFindMany.mockRejectedValue(new Error("db exploded with secret"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const { GET } = await loadDispatch();
+
+    const res = await GET(
+      dispatchRequest("?agent=leads", { authorization: "Bearer cron-test-secret" })
+    );
+
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body).toEqual({ success: false, agent: "leads", error: "Agent run failed" });
+    expect(JSON.stringify(body)).not.toContain("secret");
+  });
+
   it("returns 400 for an unknown or missing agent after auth", async () => {
     const { GET } = await loadDispatch();
     const auth = { authorization: "Bearer cron-test-secret" };
@@ -355,16 +416,16 @@ describe("callAgentLLM", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("aborts after 25 s with a TIMEOUT error and clears the timer", async () => {
+  it("aborts after 20 s with a TIMEOUT error and clears the timer", async () => {
     vi.useFakeTimers();
     stubHangingLLM();
     const clearSpy = vi.spyOn(globalThis, "clearTimeout");
     const { callAgentLLM, AGENT_LLM_TIMEOUT_MS } = await loadLLM();
-    expect(AGENT_LLM_TIMEOUT_MS).toBe(25_000);
+    expect(AGENT_LLM_TIMEOUT_MS).toBe(20_000);
 
     const call = callAgentLLM({ systemPrompt: "s", userPrompt: "u" });
     const assertion = expect(call).rejects.toMatchObject({ code: "TIMEOUT" });
-    await vi.advanceTimersByTimeAsync(24_999);
+    await vi.advanceTimersByTimeAsync(19_999);
     expect(vi.getTimerCount()).toBe(1);
     await vi.advanceTimersByTimeAsync(1);
     await assertion;
@@ -373,14 +434,16 @@ describe("callAgentLLM", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("never waits longer than 25 s even if a caller asks for more", async () => {
+  it("never waits longer than 20 s even if a caller asks for more", async () => {
     vi.useFakeTimers();
     stubHangingLLM();
     const { callAgentLLM } = await loadLLM();
 
     const call = callAgentLLM({ systemPrompt: "s", userPrompt: "u", timeoutMs: 120_000 });
     const assertion = expect(call).rejects.toMatchObject({ code: "TIMEOUT" });
-    await vi.advanceTimersByTimeAsync(25_000);
+    await vi.advanceTimersByTimeAsync(19_999);
+    expect(vi.getTimerCount()).toBe(1);
+    await vi.advanceTimersByTimeAsync(1);
     await assertion;
   });
 
@@ -395,6 +458,7 @@ describe("callAgentLLM", () => {
     await expect(callAgentLLM({ systemPrompt: "s", userPrompt: "u" })).rejects.toMatchObject({
       code: "HTTP",
       status: 429,
+      message: "OpenRouter request failed",
     });
     expect(clearSpy).toHaveBeenCalled();
   });

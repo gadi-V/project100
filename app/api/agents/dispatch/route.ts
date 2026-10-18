@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { verifyCronRequest } from "../../../../lib/auth/cron";
+import { AI_SERVICE_BUSY_MESSAGE } from "../../../../lib/agents/core/llm";
 import { runLeadAgent } from "../../../../lib/agents/lead-agent";
 
 export const maxDuration = 30;
@@ -31,17 +32,37 @@ export async function GET(request: Request) {
   }
 
   try {
-    const { processedCount, sentCount, failedCount, skippedCount } = await runLeadAgent();
+    const result = await runLeadAgent();
+    const openRouterDown = result.skipped.some(
+      (item) => item.reason === "LLM_TIMEOUT" || item.reason === "LLM_ERROR"
+    );
+    if (openRouterDown) {
+      console.error(
+        `[agents/dispatch] ${agent} OpenRouter unavailable; exiting so QStash can retry`,
+        {
+          sentCount: result.sentCount,
+          failedCount: result.failedCount,
+          skippedCount: result.skippedCount,
+        }
+      );
+      return NextResponse.json(
+        { success: false, agent, error: AI_SERVICE_BUSY_MESSAGE },
+        { status: 503 }
+      );
+    }
     return NextResponse.json({
       success: true,
       agent,
-      processedCount,
-      sentCount,
-      failedCount,
-      skippedCount,
+      processedCount: result.processedCount,
+      sentCount: result.sentCount,
+      failedCount: result.failedCount,
+      skippedCount: result.skippedCount,
     });
   } catch (error) {
-    console.error(`[agents/dispatch] ${agent} agent failed:`, error);
+    console.error(
+      `[agents/dispatch] ${agent} agent failed:`,
+      error instanceof Error ? error.name : "unknown"
+    );
     return NextResponse.json(
       { success: false, agent, error: "Agent run failed" },
       { status: 500 }

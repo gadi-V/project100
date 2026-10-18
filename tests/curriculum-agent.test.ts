@@ -77,10 +77,21 @@ describe("timeout", () => {
       timeout: DEFAULT_CURRICULUM_AGENT_TIMEOUT_MS,
       maxRetries: 0,
     });
-    expect(DEFAULT_CURRICULUM_AGENT_TIMEOUT_MS).toBeLessThan(60_000);
+    expect(DEFAULT_CURRICULUM_AGENT_TIMEOUT_MS).toBeGreaterThanOrEqual(15_000);
+    expect(DEFAULT_CURRICULUM_AGENT_TIMEOUT_MS).toBeLessThanOrEqual(20_000);
+    const requestOptions = ai.create.mock.calls[0][1] as {
+      signal: AbortSignal;
+      timeout: number;
+      maxRetries: number;
+    };
+    expect(requestOptions).toMatchObject({
+      timeout: DEFAULT_CURRICULUM_AGENT_TIMEOUT_MS,
+      maxRetries: 0,
+    });
+    expect(requestOptions.signal).toBeInstanceOf(AbortSignal);
   });
 
-  it("honors CURRICULUM_AGENT_TIMEOUT_MS and ignores invalid values", async () => {
+  it("honors CURRICULUM_AGENT_TIMEOUT_MS, ignores invalid values, and caps at 20s", async () => {
     ai.create.mockResolvedValue(completion("[]"));
 
     vi.stubEnv("CURRICULUM_AGENT_TIMEOUT_MS", "20000");
@@ -89,33 +100,46 @@ describe("timeout", () => {
     await parseSyllabusWithHive("syllabus text here");
     vi.stubEnv("CURRICULUM_AGENT_TIMEOUT_MS", "-5");
     await parseSyllabusWithHive("syllabus text here");
+    vi.stubEnv("CURRICULUM_AGENT_TIMEOUT_MS", "120000");
+    await parseSyllabusWithHive("syllabus text here");
+    vi.stubEnv("CURRICULUM_AGENT_TIMEOUT_MS", "15000");
+    await parseSyllabusWithHive("syllabus text here");
 
     expect(ai.options.map((o) => o.timeout)).toEqual([
       20_000,
       DEFAULT_CURRICULUM_AGENT_TIMEOUT_MS,
       DEFAULT_CURRICULUM_AGENT_TIMEOUT_MS,
+      20_000,
+      15_000,
     ]);
   });
 
-  it("returns a clear timeout error instead of throwing", async () => {
+  it("returns a busy fallback on timeout instead of throwing or leaking provider text", async () => {
     vi.stubEnv("CURRICULUM_AGENT_TIMEOUT_MS", "20000");
     ai.create.mockRejectedValue(new APIConnectionTimeoutError());
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
 
     const result = await parseSyllabusWithHive("syllabus text here");
 
     expect(result).toEqual({
       success: false,
-      error: "Agent parse call timed out after 20s",
+      error: "AI service is currently busy. Please try again later.",
     });
+    expect(JSON.stringify(result)).not.toContain("APIConnectionTimeoutError");
+    expect(logged).toHaveBeenCalled();
   });
 
-  it("reports other provider errors without throwing", async () => {
-    ai.create.mockRejectedValue(new Error("502 Bad Gateway"));
+  it("reports other provider errors without throwing or returning the provider body", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    ai.create.mockRejectedValue(new Error("502 Bad Gateway sk-or-secret"));
     const result = await parseSyllabusWithHive("syllabus text here");
     expect(result).toEqual({
       success: false,
-      error: "Agent parse call failed: 502 Bad Gateway",
+      error: "AI service is currently busy. Please try again later.",
     });
+    expect(JSON.stringify(result)).not.toContain("502");
+    expect(JSON.stringify(result)).not.toContain("sk-or-secret");
+    expect(JSON.stringify(logged.mock.calls)).not.toContain("sk-or-secret");
   });
 });
 

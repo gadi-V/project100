@@ -1,5 +1,6 @@
 import subprocess
 import os
+import sys
 import json
 from pathlib import Path
 from typing import List, Literal, Optional
@@ -72,7 +73,7 @@ def parse_syllabus_to_curriculum(raw_text_or_markdown: str) -> str:
             "error": "OPENROUTER_API_KEY is not configured in agents_hive/.env"
         })
 
-    client = OpenAI(base_url=BASE_URL, api_key=API_KEY)
+    client = OpenAI(base_url=BASE_URL, api_key=API_KEY, timeout=20.0, max_retries=0)
     system_prompt = """You are an expert EdTech Curriculum Architect.
 Analyze the provided syllabus, exam focus document (מיקוד בגרות/מבחן), or course outline.
 Extract and structure the curriculum into a strictly valid JSON array of CurriculumTopic objects.
@@ -115,6 +116,11 @@ Output ONLY raw JSON (an array of objects). Do not include markdown codeblocks o
         validate_curriculum_payload(parsed)
 
         return json.dumps({"success": True, "topics": parsed}, ensure_ascii=False)
+    except json.JSONDecodeError:
+        return json.dumps(
+            {"success": False, "error": "LLM output must be a JSON array of CurriculumTopic objects"},
+            ensure_ascii=False,
+        )
     except ValidationError as ve:
         return json.dumps(
             {
@@ -124,8 +130,17 @@ Output ONLY raw JSON (an array of objects). Do not include markdown codeblocks o
             },
             ensure_ascii=False,
         )
-    except Exception as e:
-        return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
+    except ValueError as ve:
+        return json.dumps({"success": False, "error": str(ve)}, ensure_ascii=False)
+    except Exception as exc:
+        print(
+            f"[parse_syllabus_to_curriculum] OpenRouter call failed: {type(exc).__name__}",
+            file=sys.stderr,
+        )
+        return json.dumps(
+            {"success": False, "error": "AI service is currently busy. Please try again later."},
+            ensure_ascii=False,
+        )
 
 @mcp.tool()
 def run_orchestration() -> str:

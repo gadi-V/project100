@@ -23,12 +23,19 @@ async function qstashSignature({
   path = "/api/cron/reminders",
   body = "",
   issuer = "Upstash",
-}: { key?: string; path?: string; body?: string; issuer?: string } = {}): Promise<string> {
+  origin = ORIGIN,
+}: {
+  key?: string;
+  path?: string;
+  body?: string;
+  issuer?: string;
+  origin?: string;
+} = {}): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(body));
   return new SignJWT({ body: base64url.encode(new Uint8Array(digest)) })
     .setProtectedHeader({ alg: "HS256", typ: "JWT" })
     .setIssuer(issuer)
-    .setSubject(`${ORIGIN}${path}`)
+    .setSubject(`${origin}${path}`)
     .setIssuedAt()
     .setNotBefore("0s")
     .setExpirationTime("5m")
@@ -102,6 +109,27 @@ describe("verifyQStashSignature", () => {
     }
   });
 
+  it("binds the signature to path and query, and ignores a rewritten host", async () => {
+    vi.stubEnv("QSTASH_CURRENT_SIGNING_KEY", SIGNING_KEY);
+    const sig = await qstashSignature({
+      path: "/api/agents/dispatch?agent=leads",
+      origin: "https://internal.vercel.app",
+    });
+    expect(
+      await verifyQStashSignature(
+        requestWith({ "upstash-signature": sig }, "/api/agents/dispatch?agent=leads")
+      )
+    ).toBe(true);
+    expect(
+      await verifyQStashSignature(
+        requestWith({ "upstash-signature": sig }, "/api/agents/dispatch?agent=other")
+      )
+    ).toBe(false);
+    expect(
+      await verifyQStashSignature(requestWith({ "upstash-signature": sig }, "/api/agents/dispatch"))
+    ).toBe(false);
+  });
+
   it("rejects when no signing key is configured", async () => {
     vi.stubEnv("QSTASH_CURRENT_SIGNING_KEY", "");
     vi.stubEnv("QSTASH_NEXT_SIGNING_KEY", "");
@@ -136,6 +164,37 @@ describe("middleware cron passthrough", () => {
 
   it("does not open look-alike paths outside /api/cron", async () => {
     const res = await middleware(requestWithBearer("from-scheduler", "/api/cronjobs"));
+    expect(res.status).toBe(401);
+  });
+});
+
+describe("cron route handlers", () => {
+  it("returns 401 when the request has neither a cron secret nor a valid QStash signature", async () => {
+    vi.stubEnv("CRON_SECRET", "vercel-secret");
+    vi.stubEnv("QSTASH_CURRENT_SIGNING_KEY", SIGNING_KEY);
+    vi.stubEnv("QSTASH_NEXT_SIGNING_KEY", "");
+    vi.stubEnv("HIVE_MONITOR_SECRET", "");
+    const reminders = await import("../app/api/cron/reminders/route");
+    const lessons = await import("../app/api/cron/lesson-reminders/route");
+    const desk = await import("../app/api/cron/head-of-desk/route");
+
+    for (const handler of [reminders.GET, reminders.POST, lessons.GET, desk.GET, desk.POST]) {
+      const res = await handler(requestWith());
+      expect(res.status).toBe(401);
+      expect(await res.json()).toEqual({ error: "Unauthorized" });
+    }
+  });
+
+  it("returns 401 for a forged QStash signature", async () => {
+    vi.stubEnv("CRON_SECRET", "");
+    vi.stubEnv("QSTASH_CURRENT_SIGNING_KEY", SIGNING_KEY);
+    vi.stubEnv("HIVE_MONITOR_SECRET", "");
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const forged = await qstashSignature({ key: "attacker_key" });
+    const { GET } = await import("../app/api/cron/lesson-reminders/route");
+
+    const res = await GET(requestWith({ "upstash-signature": forged }));
+
     expect(res.status).toBe(401);
   });
 });

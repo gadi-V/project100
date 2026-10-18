@@ -24,7 +24,7 @@ export function verifyCronAuth(req: Request): boolean {
 /**
  * Verifies the `Upstash-Signature` JWT that QStash attaches to every delivery.
  * The header alone proves nothing — it must verify against a signing key, match
- * the request body hash, and target this route's path.
+ * the request body hash, and target this route's path and query.
  */
 export async function verifyQStashSignature(req: Request): Promise<boolean> {
   const signature = req.headers.get("upstash-signature");
@@ -43,28 +43,36 @@ export async function verifyQStashSignature(req: Request): Promise<boolean> {
     return false;
   }
 
-  const body = await req.clone().text();
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(body));
-  const bodyHash = base64url.encode(new Uint8Array(digest));
-  const requestPath = new URL(req.url).pathname;
+  try {
+    const body = await req.clone().text();
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(body));
+    const bodyHash = base64url.encode(new Uint8Array(digest));
+    const requestTarget = targetOf(req.url);
+    if (!requestTarget) return false;
 
-  // Both keys are tried so signing-key rotation in the Upstash console never drops a delivery.
-  for (const key of signingKeys) {
-    try {
-      const { payload } = await jwtVerify(signature, new TextEncoder().encode(key), {
-        issuer: "Upstash",
-        algorithms: ["HS256"],
-        clockTolerance: 5,
-      });
-      const claimedBody = typeof payload.body === "string" ? payload.body.replace(/=+$/, "") : "";
-      if (claimedBody !== bodyHash) continue;
-      if (typeof payload.sub !== "string" || pathnameOf(payload.sub) !== requestPath) continue;
-      return true;
-    } catch {
-      continue;
+    // Both keys are tried so signing-key rotation in the Upstash console never drops a delivery.
+    for (const key of signingKeys) {
+      try {
+        const { payload } = await jwtVerify(signature, new TextEncoder().encode(key), {
+          issuer: "Upstash",
+          algorithms: ["HS256"],
+          clockTolerance: 5,
+        });
+        const claimedBody = typeof payload.body === "string" ? payload.body.replace(/=+$/, "") : "";
+        if (claimedBody !== bodyHash) continue;
+        // Host is ignored (Vercel rewrites it). Path and query must match, so a
+        // signature for one job cannot be replayed against another.
+        if (typeof payload.sub !== "string" || targetOf(payload.sub) !== requestTarget) continue;
+        return true;
+      } catch {
+        continue;
+      }
     }
+    return false;
+  } catch {
+    console.error("[CRON_AUTH] QStash signature verification failed.");
+    return false;
   }
-  return false;
 }
 
 /** Single entry point for cron route handlers: CRON_SECRET bearer, or a verified QStash signature. */
@@ -73,9 +81,11 @@ export async function verifyCronRequest(req: Request): Promise<boolean> {
   return verifyQStashSignature(req);
 }
 
-function pathnameOf(url: string): string | null {
+/** Path plus query, without host. Returns null when `url` is not absolute. */
+function targetOf(url: string): string | null {
   try {
-    return new URL(url).pathname;
+    const parsed = new URL(url);
+    return `${parsed.pathname}${parsed.search}`;
   } catch {
     return null;
   }

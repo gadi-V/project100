@@ -265,9 +265,16 @@ async function draftMessage(
     return text ? { text: `${text}\n\n${OPT_OUT_LINE}` } : { reason: "INVALID_MESSAGE" };
   } catch (error) {
     if (error instanceof AgentLLMError && error.code === "TIMEOUT") {
+      console.error(`[lead-agent] OpenRouter timed out for ${lead.source} ${lead.leadId}`);
       return { reason: "LLM_TIMEOUT" };
     }
-    console.error(`[lead-agent] LLM draft failed for ${lead.source} ${lead.leadId}:`, error);
+    const code = error instanceof AgentLLMError ? error.code : "UNKNOWN";
+    const status = error instanceof AgentLLMError ? error.status : undefined;
+    console.error(
+      `[lead-agent] OpenRouter draft failed for ${lead.source} ${lead.leadId}: ${code}${
+        status ? ` (${status})` : ""
+      }`
+    );
     return { reason: "LLM_ERROR" };
   }
 }
@@ -303,6 +310,22 @@ async function recordReengagement(lead: LeadCandidate, phoneJid: string, message
 }
 
 async function processLead(
+  lead: LeadCandidate,
+  phoneJid: string,
+  deadline: number
+): Promise<LeadOutcome> {
+  try {
+    return await deliverLead(lead, phoneJid, deadline);
+  } catch (error) {
+    console.error(
+      `[lead-agent] stopped ${lead.source} ${lead.leadId} after an unexpected failure:`,
+      error instanceof Error ? error.name : "unknown"
+    );
+    return { kind: "skipped", lead: { leadId: lead.leadId, reason: "LLM_ERROR" } };
+  }
+}
+
+async function deliverLead(
   lead: LeadCandidate,
   phoneJid: string,
   deadline: number

@@ -4,6 +4,7 @@ import { prisma } from "../../../../lib/prisma";
 import { requireAuth } from "../../../../lib/api-auth";
 import { writeAuditLog } from "../../../../lib/audit";
 import {
+  AI_SERVICE_BUSY_MESSAGE,
   parseSyllabusWithHive,
   type SyllabusParseResult,
 } from "../../../../lib/curriculum-agent";
@@ -15,6 +16,18 @@ const CURRICULUM_GRADE_LEVELS = [
   "HIGH_SCHOOL",
   "ACADEMIC",
 ] as const;
+
+const SYLLABUS_CLIENT_ERRORS = new Set([
+  AI_SERVICE_BUSY_MESSAGE,
+  "הפלט מהסוכן אינו מערך CurriculumTopic",
+  "OPENROUTER_API_KEY is not configured server-side (see .env)",
+  "האג'נט נכשל בניתוח הסילבוס",
+]);
+
+function syllabusClientError(error: string | undefined): string {
+  if (error && SYLLABUS_CLIENT_ERRORS.has(error)) return error;
+  return AI_SERVICE_BUSY_MESSAGE;
+}
 
 /**
  * POST /api/admin/curriculum
@@ -41,7 +54,7 @@ export async function POST(request: Request) {
     const result: SyllabusParseResult = await parseSyllabusWithHive(rawText);
     if (!result.success || !result.topics) {
       return NextResponse.json(
-        { error: result.error ?? "האג'נט נכשל בניתוח הסילבוס" },
+        { error: syllabusClientError(result.error) },
         { status: 502 }
       );
     }

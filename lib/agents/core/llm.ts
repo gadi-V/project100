@@ -4,7 +4,10 @@
  */
 
 export const OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions";
-export const AGENT_LLM_TIMEOUT_MS = 25_000;
+/** Hard ceiling for every OpenRouter call. Callers may wait less, never more. */
+export const AGENT_LLM_TIMEOUT_MS = 20_000;
+/** Client-facing fallback. Never include provider status text or response bodies. */
+export const AI_SERVICE_BUSY_MESSAGE = "AI service is currently busy. Please try again later.";
 
 export type AgentLLMErrorCode = "CONFIG" | "TIMEOUT" | "HTTP" | "EMPTY_RESPONSE" | "NETWORK";
 
@@ -81,12 +84,8 @@ export async function callAgentLLM({
     });
 
     if (!response.ok) {
-      const detail = (await response.text().catch(() => "")).slice(0, 300);
-      throw new AgentLLMError(
-        "HTTP",
-        `OpenRouter request failed (${response.status}): ${detail || response.statusText}`,
-        response.status
-      );
+      await response.body?.cancel().catch(() => undefined);
+      throw new AgentLLMError("HTTP", "OpenRouter request failed", response.status);
     }
 
     const data = (await response.json()) as ChatCompletionResponse;
@@ -103,8 +102,7 @@ export async function callAgentLLM({
         `OpenRouter did not respond within ${effectiveTimeoutMs} ms`
       );
     }
-    const message = error instanceof Error ? error.message : String(error);
-    throw new AgentLLMError("NETWORK", `OpenRouter request failed: ${message}`);
+    throw new AgentLLMError("NETWORK", "OpenRouter request failed");
   } finally {
     clearTimeout(timeout);
   }
