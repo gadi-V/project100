@@ -202,7 +202,10 @@ export async function POST(request: Request, { params }: RouteContext) {
         whatsappDispatched = sent.sent;
         if (!sent.sent) console.error(`[pedagogic-decision] group post for ${id} not sent: ${sent.error}`);
       } catch (whatsappError: unknown) {
-        console.error(`[pedagogic-decision] group post for ${id} failed:`, whatsappError);
+        console.error(
+          `[pedagogic-decision] group post for ${id} failed:`,
+          whatsappError instanceof Error ? whatsappError.message : "send failed"
+        );
       }
     }
 

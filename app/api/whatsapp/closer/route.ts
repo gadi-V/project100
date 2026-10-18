@@ -119,7 +119,10 @@ export async function POST(request: NextRequest) {
       dispatch: result.dispatch,
     });
   } catch (error: unknown) {
-    console.error("WhatsApp Closer API Error:", error);
+    console.error(
+      "WhatsApp Closer API Error:",
+      error instanceof Error ? error.message : "unknown"
+    );
     return NextResponse.json(
       { error: "Internal Server Error" },
       { status: 500 }

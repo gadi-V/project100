@@ -330,7 +330,10 @@ async function processLead(
     }
     messageId = result.messageId;
   } catch (error) {
-    console.error(`[lead-agent] WhatsApp send failed for ${lead.source} ${lead.leadId}:`, error);
+    console.error(
+      `[lead-agent] WhatsApp send failed for ${lead.source} ${lead.leadId}:`,
+      error instanceof Error ? error.message : "send failed"
+    );
     return {
       kind: "failed",
       lead: { leadId: lead.leadId, source: lead.source, reason: "WHATSAPP_ERROR" },

@@ -141,7 +141,10 @@ async function postToGroup(
     if (!result.sent) console.error(`[lesson-lifecycle] group post for lesson ${lessonId} not sent: ${result.error}`);
     return result.sent;
   } catch (whatsappError: unknown) {
-    console.error(`[lesson-lifecycle] group post for lesson ${lessonId} failed:`, whatsappError);
+    console.error(
+      `[lesson-lifecycle] group post for lesson ${lessonId} failed:`,
+      whatsappError instanceof Error ? whatsappError.message : "send failed"
+    );
     return false;
   }
 }

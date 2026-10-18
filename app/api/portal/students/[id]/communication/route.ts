@@ -68,7 +68,10 @@ async function dispatchSummaryToGroup(
     if (!result.sent) console.error("Lesson summary WhatsApp dispatch failed:", result.error);
     return result.sent;
   } catch (error: unknown) {
-    console.error("Lesson summary WhatsApp dispatch error:", error);
+    console.error(
+      "Lesson summary WhatsApp dispatch error:",
+      error instanceof Error ? error.message : "send failed"
+    );
     return false;
   }
 }

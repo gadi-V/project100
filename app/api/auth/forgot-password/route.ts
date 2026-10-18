@@ -9,6 +9,8 @@ import {
 } from "../../../../lib/otp";
 
 const UNIFORM_MESSAGE = "אם המספר רשום במערכת, נשלח אליו קוד אימות.";
+/** Shown when the provider fails. Never includes a Twilio status, code, or response body. */
+const SMS_DELIVERY_ERROR = "שליחת קוד האימות נכשלה. נסו שוב מאוחר יותר.";
 
 export async function POST(request: Request) {
   try {
@@ -54,9 +56,11 @@ export async function POST(request: Request) {
 
     try {
       await sendSmsOtp(phone, code);
-    } catch (smsError) {
+    } catch {
+      // The OTP row stays. A provider outage must not roll back the write or
+      // surface Twilio's status and error code to the client.
       console.error("Forgot password SMS delivery failed");
-      // Still return uniform success to avoid enumeration / probing via error differences.
+      return NextResponse.json({ error: SMS_DELIVERY_ERROR }, { status: 503 });
     }
 
     return NextResponse.json({

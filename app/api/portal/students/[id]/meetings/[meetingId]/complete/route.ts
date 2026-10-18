@@ -65,7 +65,10 @@ async function postNoShowAlert(groupId: string | null, lessonId: string): Promis
     if (!result.sent) console.error(`[lesson-completion] no-show alert for ${lessonId} not sent: ${result.error}`);
     return result.sent;
   } catch (whatsappError: unknown) {
-    console.error(`[lesson-completion] no-show alert for ${lessonId} failed:`, whatsappError);
+    console.error(
+      `[lesson-completion] no-show alert for ${lessonId} failed:`,
+      whatsappError instanceof Error ? whatsappError.message : "send failed"
+    );
     return false;
   }
 }

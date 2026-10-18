@@ -377,7 +377,12 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
         entityId: lessonId,
         metadata: { status: result.status, initiator, failedNotifications: failed },
       });
-    })().catch((err) => console.error("Cancellation notification dispatch failed:", err));
+    })().catch((err: unknown) =>
+      console.error(
+        "Cancellation notification dispatch failed:",
+        err instanceof Error ? err.message : "send failed"
+      )
+    );
 
     return NextResponse.json({
       success: true,

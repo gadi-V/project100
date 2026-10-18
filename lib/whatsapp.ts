@@ -20,6 +20,75 @@ function getWhatsAppConfig(): { apiUrl: string; apiKey: string } | null {
   return { apiUrl: apiUrl.replace(/\/$/, ""), apiKey };
 }
 
+/** Hung gateways must not hold a request open after the database write has committed. */
+const DEFAULT_WHATSAPP_TIMEOUT_MS = 10_000;
+
+function gatewaySecrets(): string[] {
+  return [process.env.WHATSAPP_API_KEY, process.env.WHATSAPP_API_URL]
+    .map((value) => value?.trim())
+    .filter((value): value is string => Boolean(value && value.length >= 6));
+}
+
+/** Strips gateway URLs, bearer tokens, and configured secrets before anything is logged or returned. */
+function redactGatewayText(text: string): string {
+  let redacted = text;
+  for (const secret of gatewaySecrets()) {
+    redacted = redacted.split(secret).join("[redacted]");
+  }
+  return redacted
+    .replace(/Bearer\s+\S+/gi, "Bearer [redacted]")
+    .replace(/https?:\/\/\S+/gi, "[url]")
+    .slice(0, 180);
+}
+
+function logWhatsAppFailure(operation: string, detail: { status?: number; reason: string }): void {
+  console.error(`[whatsapp] ${operation} failed`, {
+    status: detail.status ?? null,
+    reason: redactGatewayText(detail.reason),
+  });
+}
+
+function isAbortLike(error: unknown): boolean {
+  return error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
+}
+
+/**
+ * Posts to the gateway with a hard timeout. Failures throw a status-only error:
+ * the response body is discarded so tokens echoed by the provider never leave this function.
+ */
+async function postToGateway(
+  operation: "sendMessage" | "sendDocument",
+  url: string,
+  init: RequestInit,
+  timeoutMs: number
+): Promise<Response> {
+  let response: Response;
+  try {
+    response = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+  } catch (error) {
+    const timedOut = isAbortLike(error);
+    logWhatsAppFailure(operation, {
+      reason: timedOut ? `timed out after ${timeoutMs} ms` : "network error",
+    });
+    throw new Error(
+      timedOut
+        ? `WhatsApp ${operation} timed out after ${timeoutMs} ms`
+        : `WhatsApp ${operation} request failed`
+    );
+  }
+
+  if (!response.ok) {
+    await response.body?.cancel()?.catch(() => undefined);
+    logWhatsAppFailure(operation, {
+      status: response.status,
+      reason: "gateway rejected the message",
+    });
+    throw new Error(`WhatsApp ${operation} failed (${response.status})`);
+  }
+
+  return response;
+}
+
 /** Personal numbers → `972XXXXXXXXX@c.us`; existing group JIDs (`…@g.us`) pass through. */
 function resolveWhatsAppRecipient(target: string): { phone: string; chatId: string } {
   const trimmed = target.trim();
@@ -75,24 +144,25 @@ export async function sendWhatsAppMessage(
     return { messageId: null, mocked: true };
   }
 
-  const response = await fetch(`${config.apiUrl}/sendMessage`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${config.apiKey}`,
-      "Content-Type": "application/json",
+  const timeoutMs =
+    options.timeoutMs && options.timeoutMs > 0 ? options.timeoutMs : DEFAULT_WHATSAPP_TIMEOUT_MS;
+  const response = await postToGateway(
+    "sendMessage",
+    `${config.apiUrl}/sendMessage`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${config.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        phone: recipient.phone,
+        chatId,
+        message,
+      }),
     },
-    body: JSON.stringify({
-      phone: recipient.phone,
-      chatId,
-      message,
-    }),
-    ...(options.timeoutMs ? { signal: AbortSignal.timeout(options.timeoutMs) } : {}),
-  });
-
-  if (!response.ok) {
-    const detail = await response.text().catch(() => response.statusText);
-    throw new Error(`WhatsApp sendMessage failed (${response.status}): ${detail}`);
-  }
+    timeoutMs
+  );
 
   const body: unknown = await response.json().catch(() => null);
   return { messageId: extractMessageId(body), mocked: false };
@@ -131,18 +201,18 @@ async function sendWhatsAppDocument(
     fileName
   );
 
-  const response = await fetch(`${config.apiUrl}/sendDocument`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${config.apiKey}`,
+  await postToGateway(
+    "sendDocument",
+    `${config.apiUrl}/sendDocument`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${config.apiKey}`,
+      },
+      body: form,
     },
-    body: form,
-  });
-
-  if (!response.ok) {
-    const detail = await response.text().catch(() => response.statusText);
-    throw new Error(`WhatsApp sendDocument failed (${response.status}): ${detail}`);
-  }
+    DEFAULT_WHATSAPP_TIMEOUT_MS
+  );
 }
 
 export type LessonReminderNotificationInput = {
@@ -534,12 +604,6 @@ function stringField(record: Record<string, unknown>, keys: string[]): string | 
   return null;
 }
 
-function isAbortLike(error: unknown): boolean {
-  return (
-    error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")
-  );
-}
-
 /**
  * Opens the quad group on the gateway (`POST {WHATSAPP_API_URL}/createGroup`
  * with `{ groupName, chatIds }`) and posts the welcome message into it.
@@ -602,16 +666,16 @@ export async function createWhatsAppQuadGroup(
         message: `WhatsApp createGroup did not respond within ${QUAD_GATEWAY_TIMEOUT_MS} ms`,
       });
     }
-    const message = error instanceof Error ? error.message : String(error);
+    const message = redactGatewayText(error instanceof Error ? error.message : "network error");
     return fail({ code: "NETWORK", message: `WhatsApp createGroup request failed: ${message}` });
   }
 
   if (!response.ok) {
-    const detail = (await response.text().catch(() => "")).slice(0, 300);
+    await response.body?.cancel()?.catch(() => undefined);
     return fail({
       code: "GATEWAY_ERROR",
       status: response.status,
-      message: `WhatsApp createGroup failed (${response.status}): ${detail || response.statusText}`,
+      message: `WhatsApp createGroup failed (${response.status})`,
     });
   }
 
@@ -1226,7 +1290,10 @@ export async function dispatchWhatsAppCloser(
     }
   } catch (error: unknown) {
     // Fail-open: the analysis is still valuable even if delivery fails.
-    dispatchError = error instanceof Error ? error.message : String(error);
+    // The client sees a generic reason; the status-only detail stays in the log.
+    const reason = error instanceof Error ? error.message : "WhatsApp delivery failed";
+    logWhatsAppFailure("closer", { reason: redactGatewayText(reason) });
+    dispatchError = "WhatsApp delivery failed";
   }
 
   const dispatch = {

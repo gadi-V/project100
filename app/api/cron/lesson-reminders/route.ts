@@ -86,12 +86,10 @@ export async function GET(request: Request) {
     const failed = results.filter((r) => r.status === "rejected").length;
 
     results
-      .filter((r) => r.status === "rejected")
+      .filter((r): r is PromiseRejectedResult => r.status === "rejected")
       .forEach((r) => {
-        console.error(
-          "[Cron] Reminder failed:",
-          (r as PromiseRejectedResult).reason
-        );
+        const reason = r.reason instanceof Error ? r.reason.message : "send failed";
+        console.error("[Cron] Reminder failed:", reason);
       });
 
     return NextResponse.json({

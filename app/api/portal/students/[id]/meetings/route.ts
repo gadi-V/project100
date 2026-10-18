@@ -210,7 +210,10 @@ export async function POST(request: Request, { params }: RouteContext) {
     } catch (whatsappError: unknown) {
       if (groupStatus === "NOT_OPENED") groupStatus = "FAILED";
       whatsappErrorCode = whatsappErrorCode ?? "UNEXPECTED";
-      console.error(`[meetings] WhatsApp step for lesson ${lesson.id} failed:`, whatsappError);
+      console.error(
+        `[meetings] WhatsApp step for lesson ${lesson.id} failed:`,
+        whatsappError instanceof Error ? whatsappError.message : "send failed"
+      );
     }
 
     const whatsappGroupCreated = groupStatus === "OPENED";

@@ -356,7 +356,10 @@ export async function POST(request: Request) {
           estimatedScore: calculatedScore,
         });
       } catch (waErr) {
-        console.error("WhatsApp parent notification error:", waErr);
+        console.error(
+          "WhatsApp parent notification error:",
+          waErr instanceof Error ? waErr.message : "send failed"
+        );
       }
     }
 
@@ -385,7 +388,10 @@ export async function POST(request: Request) {
         closerAnalysis = closerResult.analysis;
         closerDispatch = closerResult.dispatch;
       } catch (closerErr) {
-        console.error("WhatsApp Closer (teaser) error:", closerErr);
+        console.error(
+          "WhatsApp Closer (teaser) error:",
+          closerErr instanceof Error ? closerErr.message : "send failed"
+        );
       }
     }
 

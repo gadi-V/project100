@@ -391,7 +391,12 @@ export async function POST(request: Request) {
           `[complete] WhatsApp summary: ${failed}/${results.length} notifications failed`
         );
       }
-    })().catch((e) => console.error("[complete] WhatsApp dispatch error:", e));
+    })().catch((e: unknown) =>
+      console.error(
+        "[complete] WhatsApp dispatch error:",
+        e instanceof Error ? e.message : "send failed"
+      )
+    );
 
     return NextResponse.json({
       success: true,

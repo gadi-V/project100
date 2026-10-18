@@ -40,22 +40,30 @@ async function sendWhatsAppText(chatId: string, message: string): Promise<void> 
     return;
   }
 
-  const response = await fetch(`${config.apiUrl}/sendMessage`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${config.apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      phone: chatId.replace(/@c\.us$/, ""),
-      chatId,
-      message,
-    }),
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${config.apiUrl}/sendMessage`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${config.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        phone: chatId.replace(/@c\.us$/, ""),
+        chatId,
+        message,
+      }),
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch (error) {
+    const timedOut =
+      error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
+    throw new Error(timedOut ? "WhatsApp send timed out" : "WhatsApp send request failed");
+  }
 
   if (!response.ok) {
-    const body = await response.text().catch(() => "");
-    throw new Error(`WhatsApp send failed (${response.status}): ${body}`);
+    await response.body?.cancel()?.catch(() => undefined);
+    throw new Error(`WhatsApp send failed (${response.status})`);
   }
 }
 
@@ -173,7 +181,10 @@ export async function dispatchTeacherWelcomeEnvelope({
       await sendWhatsAppText(chatId, welcomeMessage);
       whatsappSent = true;
     } catch (err) {
-      console.error("Failed to send WhatsApp welcome envelope:", err);
+      console.error(
+        "Failed to send WhatsApp welcome envelope:",
+        err instanceof Error ? err.message : "send failed"
+      );
     }
   }
 

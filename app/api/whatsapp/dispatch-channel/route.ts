@@ -208,7 +208,15 @@ export async function POST(request: NextRequest) {
 
     if (packageType === "SINGLE") {
       // Single: transactional 1-on-1 only — never open a group.
-      await sendWhatsAppText(studentPhone, conversionMessage);
+      // A gateway failure is logged and rethrown as a status-only error so the
+      // route's catch can answer the client without the provider body.
+      try {
+        await sendWhatsAppText(studentPhone, conversionMessage);
+      } catch (sendError: unknown) {
+        const reason = sendError instanceof Error ? sendError.message : "send failed";
+        console.error("[dispatch-channel] transactional send failed", { reason });
+        throw new Error("WhatsApp transactional send failed");
+      }
     } else if (student.whatsappGroupId) {
       groupStatus = "EXISTING";
     } else {
@@ -321,7 +329,10 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: true, data });
   } catch (error: unknown) {
-    console.error("[dispatch-channel] error:", error);
+    console.error(
+      "[dispatch-channel] error:",
+      error instanceof Error ? error.message : "unknown"
+    );
     return NextResponse.json(
       { success: false, error: "שגיאה בניתוב ערוץ ה-WhatsApp" },
       { status: 500 }
