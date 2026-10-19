@@ -112,6 +112,17 @@ describe("dispatchTeacherWelcomeEnvelope — Daily domain", () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
+  it("expands a bare Daily subdomain to project.daily.co", async () => {
+    vi.stubEnv("DAILY_DOMAIN", "project100");
+    mockTeacher("0541234567");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const result = await dispatchTeacherWelcomeEnvelope({ teacherId: "teacher-1" });
+
+    expect(result.permanentRoomUrl).toBe("https://project100.daily.co/tutor-dana");
+    expect(warn).not.toHaveBeenCalled();
+  });
+
   it("falls back to project100.daily.co and warns when DAILY_DOMAIN is unset", async () => {
     vi.stubEnv("DAILY_DOMAIN", "");
     mockTeacher("0541234567");

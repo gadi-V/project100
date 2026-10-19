@@ -1,9 +1,13 @@
 /**
  * Host-based routing for the isolated teacher cockpit (e.g. teachers.project100.co.il,
- * teachers.localhost:3000). Pure functions only, so the proxy and tests share one source of truth.
+ * teachers.localhost:3000) and the student app host (app.project100.co.il, app.localhost).
+ * Pure functions only, so the proxy and tests share one source of truth.
  */
 
 export const TEACHERS_SUBDOMAIN = "teachers";
+
+/** Student application host (app.project100.co.il, app.localhost:3000). */
+export const APP_SUBDOMAIN = "app";
 
 /** Cockpit served at `/` on the teachers host. */
 export const TEACHERS_HOME_PATH = "/portal/dashboard";
@@ -35,13 +39,19 @@ export type TeachersHostDecision =
   | { action: "redirect-main-site"; pathname: string }
   | { action: "forbidden" };
 
-function hostnameOf(host: string): string {
+/** Lowercase hostname with any trailing port removed (`teachers.localhost:3000` → `teachers.localhost`). */
+export function normalizeHostname(host: string): string {
   return host.trim().toLowerCase().replace(/:\d+$/, "");
 }
 
 export function isTeachersHost(host: string | null | undefined): boolean {
   if (!host) return false;
-  return hostnameOf(host).startsWith(`${TEACHERS_SUBDOMAIN}.`);
+  return normalizeHostname(host).startsWith(`${TEACHERS_SUBDOMAIN}.`);
+}
+
+export function isAppHost(host: string | null | undefined): boolean {
+  if (!host) return false;
+  return normalizeHostname(host).startsWith(`${APP_SUBDOMAIN}.`);
 }
 
 function matchesPrefix(pathname: string, prefix: string): boolean {

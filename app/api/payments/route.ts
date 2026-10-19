@@ -5,6 +5,7 @@ import { LedgerEntryType } from "@prisma/client";
 import { requireAuth } from "../../../lib/api-auth";
 import { prisma } from "../../../lib/prisma";
 import { writeLedgerEntryInTransaction } from "../../../lib/services/LedgerService";
+import { resolveAppUrl } from "../../../lib/platform-env";
 
 const PACKAGES: Record<string, { price: number; credits: number; label: string }> = {
   SINGLE: { price: 200, credits: 1, label: "שיעור בודד" },
@@ -27,11 +28,7 @@ function isMockStripeMode(): boolean {
 }
 
 function appBaseUrl(request: Request): string {
-  return (
-    process.env.APP_URL?.replace(/\/$/, "") ||
-    process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ||
-    new URL(request.url).origin
-  );
+  return resolveAppUrl(new URL(request.url).origin);
 }
 
 /** Same-origin relative path only — blocks open redirects. */

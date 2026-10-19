@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { AI_SERVICE_BUSY_MESSAGE } from "./agents/core/llm";
+import { resolveOpenRouterApiKey, resolveOpenRouterBaseUrl } from "./platform-env";
 
 export { AI_SERVICE_BUSY_MESSAGE };
 
@@ -23,8 +24,8 @@ function resolveTimeoutMs(): number {
 
 function getAgentConfig() {
   return {
-    apiKey: process.env.OPENROUTER_API_KEY?.trim() || null,
-    baseURL: process.env.OPENROUTER_BASE_URL?.trim() || "https://openrouter.ai/api/v1",
+    apiKey: resolveOpenRouterApiKey(),
+    baseURL: resolveOpenRouterBaseUrl(),
     model: process.env.MODEL_ARCHITECT?.trim() || "deepseek/deepseek-r1",
     timeoutMs: resolveTimeoutMs(),
   };

@@ -3,14 +3,11 @@
  * Bidirectional chat stays in-app (Stream Chat); never relay participant phones.
  */
 
+import { resolveAppUrl } from "./platform-env";
 import { normalizeToE164, normalizeToWhatsAppJid } from "./utils/phone";
 
 function getAppUrl(): string {
-  return (
-    process.env.APP_URL?.replace(/\/$/, "") ||
-    process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ||
-    "http://localhost:3000"
-  );
+  return resolveAppUrl();
 }
 
 function getWhatsAppConfig(): { apiUrl: string; apiKey: string } | null {

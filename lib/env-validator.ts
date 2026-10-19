@@ -2,10 +2,10 @@
  * Tiered production env checks.
  *
  * P0 (database + Upstash) hard-fail at process start so auth and booking
- * rate limits are not missing Redis. If Redis errors at request time,
- * auth/booking fail closed and public form posts fail open
- * (lib/security/rate-limit.ts). P1 integrations warn and stay disabled so
- * public pages still load.
+ * rate limits are not missing Redis. If Redis throws at request time, every
+ * limiter fails open (lib/security/rate-limit.ts). Missing credentials in
+ * production still fail closed for auth and booking. P1 integrations warn
+ * and stay disabled so public pages still load.
  * Values are never returned or logged.
  */
 

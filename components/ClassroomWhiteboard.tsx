@@ -16,6 +16,7 @@ import type { Channel } from "stream-chat";
 
 const PAGE_W = 794;
 const PAGE_H = 1123;
+const GRID_STEP = 24;
 const PAGE_GAP = 32;
 const DESK_BG = "#f5f5f4";
 const HANDLE_R = 6;
@@ -53,6 +54,21 @@ function mmToPx(mm: number): number {
   return Math.round(mm * 3.7795);
 }
 
+/** Ruled paper line spacing — 8mm, about 30px. */
+const RULED_STEP = mmToPx(8);
+const RULED_MARGIN_X = 72;
+
+const PAPER_COLORS = {
+  gridFill: "#ffffff",
+  gridLine: "#f1f5f9",
+  ruledFill: "#fffef8",
+  ruledLine: "#e7e5e4",
+  ruledMargin: "#f43f5e",
+  dotFill: "#ffffff",
+  dot: "#cbd5e1",
+  blankFill: "#fafaf9",
+} as const;
+
 const WIDTH_PRESETS = [
   { mm: 0.3, label: "0.3mm" },
   { mm: 0.6, label: "0.6mm" },
@@ -75,6 +91,14 @@ type StrokeStyle = "solid" | "dashed" | "dotted";
 type EraserMode = "stroke" | "pixel";
 type LassoStyle = "rect" | "free";
 type TextAlign = "right" | "center" | "left";
+type PaperStyle = "grid" | "ruled" | "dotted" | "blank";
+
+const PAPER_OPTIONS: ReadonlyArray<{ value: PaperStyle; label: string }> = [
+  { value: "grid", label: "משבצות" },
+  { value: "ruled", label: "שורות" },
+  { value: "dotted", label: "נקודות" },
+  { value: "blank", label: "חלק" },
+];
 
 interface EditTextSession {
   pageIndex: number;
@@ -1127,6 +1151,127 @@ function paintText(ctx: CanvasRenderingContext2D, el: TextEl): void {
   ctx.restore();
 }
 
+function paperBackgroundStyle(style: PaperStyle): React.CSSProperties {
+  if (style === "ruled") {
+    const margin = RULED_MARGIN_X;
+    return {
+      backgroundColor: PAPER_COLORS.ruledFill,
+      backgroundImage: [
+        `linear-gradient(to right, transparent ${margin}px, ${PAPER_COLORS.ruledMargin} ${margin}px, ${PAPER_COLORS.ruledMargin} ${margin + 1}px, transparent ${margin + 1}px)`,
+        `repeating-linear-gradient(to bottom, transparent 0, transparent ${RULED_STEP - 1}px, ${PAPER_COLORS.ruledLine} ${RULED_STEP - 1}px, ${PAPER_COLORS.ruledLine} ${RULED_STEP}px)`,
+      ].join(","),
+    };
+  }
+  if (style === "dotted") {
+    return {
+      backgroundColor: PAPER_COLORS.dotFill,
+      backgroundImage: `radial-gradient(circle, ${PAPER_COLORS.dot} 1px, transparent 1.5px)`,
+      backgroundSize: `${GRID_STEP}px ${GRID_STEP}px`,
+    };
+  }
+  if (style === "blank") {
+    return {
+      backgroundColor: PAPER_COLORS.blankFill,
+      backgroundImage: "none",
+    };
+  }
+  return {
+    backgroundColor: PAPER_COLORS.gridFill,
+    backgroundImage:
+      `linear-gradient(to right, ${PAPER_COLORS.gridLine} 1px, transparent 1px),` +
+      `linear-gradient(to bottom, ${PAPER_COLORS.gridLine} 1px, transparent 1px)`,
+    backgroundSize: `${GRID_STEP}px ${GRID_STEP}px`,
+  };
+}
+
+/** Draws the page paper so PNG/PDF export matches the on-screen background. */
+function paintPaperBackground(ctx: CanvasRenderingContext2D, style: PaperStyle): void {
+  ctx.save();
+  ctx.setLineDash([]);
+  if (style === "blank") {
+    ctx.fillStyle = PAPER_COLORS.blankFill;
+    ctx.fillRect(0, 0, PAGE_W, PAGE_H);
+    ctx.restore();
+    return;
+  }
+  if (style === "ruled") {
+    ctx.fillStyle = PAPER_COLORS.ruledFill;
+    ctx.fillRect(0, 0, PAGE_W, PAGE_H);
+    ctx.strokeStyle = PAPER_COLORS.ruledLine;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let y = RULED_STEP; y < PAGE_H + 1; y += RULED_STEP) {
+      const lineY = y - 0.5;
+      ctx.moveTo(0, lineY);
+      ctx.lineTo(PAGE_W, lineY);
+    }
+    ctx.stroke();
+    ctx.strokeStyle = PAPER_COLORS.ruledMargin;
+    ctx.beginPath();
+    ctx.moveTo(RULED_MARGIN_X + 0.5, 0);
+    ctx.lineTo(RULED_MARGIN_X + 0.5, PAGE_H);
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
+  if (style === "dotted") {
+    ctx.fillStyle = PAPER_COLORS.dotFill;
+    ctx.fillRect(0, 0, PAGE_W, PAGE_H);
+    ctx.fillStyle = PAPER_COLORS.dot;
+    const origin = GRID_STEP / 2;
+    for (let y = origin; y < PAGE_H; y += GRID_STEP) {
+      for (let x = origin; x < PAGE_W; x += GRID_STEP) {
+        ctx.beginPath();
+        ctx.arc(x, y, 1, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.restore();
+    return;
+  }
+  ctx.fillStyle = PAPER_COLORS.gridFill;
+  ctx.fillRect(0, 0, PAGE_W, PAGE_H);
+  ctx.strokeStyle = PAPER_COLORS.gridLine;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let x = 0; x <= PAGE_W; x += GRID_STEP) {
+    ctx.moveTo(x + 0.5, 0);
+    ctx.lineTo(x + 0.5, PAGE_H);
+  }
+  for (let y = 0; y <= PAGE_H; y += GRID_STEP) {
+    ctx.moveTo(0, y + 0.5);
+    ctx.lineTo(PAGE_W, y + 0.5);
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
+function renderPageDataUrl(
+  pageIndex: number,
+  pageElements: readonly DrawEl[],
+  images: ReadonlyMap<string, HTMLImageElement>,
+  style: PaperStyle,
+): string {
+  const off = document.createElement("canvas");
+  off.width = PAGE_W;
+  off.height = PAGE_H;
+  const ctx = off.getContext("2d");
+  if (!ctx) return "";
+  paintPaperBackground(ctx, style);
+  for (const el of pageElements) {
+    if (el.pageIndex !== pageIndex) continue;
+    if (el.kind === "stroke")
+      paintSmoothStroke(ctx, el.points, el.color, el.width, el.opacity, el.tool === "highlighter", el.strokeStyle);
+    else if (el.kind === "shape") paintShape(ctx, el);
+    else if (el.kind === "text") paintText(ctx, el);
+    else if (el.kind === "image") {
+      const img = images.get(el.id);
+      if (img?.complete && img.naturalWidth > 0) paintImage(ctx, img, el);
+    }
+  }
+  return off.toDataURL("image/png");
+}
+
 function paintToolCursor(
   ctx: CanvasRenderingContext2D,
   pt: Point,
@@ -1509,8 +1654,9 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
     const [eraserPt, setEraserPt] = useState<Point | null>(null);
     const [cursorPt, setCursorPt] = useState<(Point & { pageIndex: number }) | null>(null);
     const [canvasCursor, setCanvasCursor] = useState<string>("crosshair");
+    const [paperStyle, setPaperStyle] = useState<PaperStyle>("grid");
     const [openMenu, setOpenMenu] = useState<
-      "selection" | "pen" | "highlighter" | "eraser" | "shapes" | null
+      "selection" | "pen" | "highlighter" | "eraser" | "shapes" | "paper" | null
     >(null);
     const [textMenu, setTextMenu] = useState<"size" | "align" | "color" | null>(null);
     const [showRecolorPicker, setShowRecolorPicker] = useState(false);
@@ -3061,49 +3207,12 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
       exportBoardToPdf: async (lessonId?: string): Promise<Blob | string | null> => {
         // Render every A4 page at full resolution (794 × 1123 px).
         const frames: ExportFrame[] = pages
-          .map((page, idx) => {
-            const off = document.createElement("canvas");
-            off.width = PAGE_W;
-            off.height = PAGE_H;
-            const ctx = off.getContext("2d");
-            if (!ctx)
-              return { pageNumber: page.pageNumber, width: PAGE_W, height: PAGE_H, dataUrl: "" };
-
-            ctx.fillStyle = "#ffffff";
-            ctx.fillRect(0, 0, PAGE_W, PAGE_H);
-            ctx.strokeStyle = "#e2e8f0";
-            ctx.lineWidth = 0.5;
-            for (let x = 0; x <= PAGE_W; x += 20) {
-              ctx.beginPath();
-              ctx.moveTo(x, 0);
-              ctx.lineTo(x, PAGE_H);
-              ctx.stroke();
-            }
-            for (let y = 0; y <= PAGE_H; y += 20) {
-              ctx.beginPath();
-              ctx.moveTo(0, y);
-              ctx.lineTo(PAGE_W, y);
-              ctx.stroke();
-            }
-
-            for (const el of elements) {
-              if (el.pageIndex !== idx) continue;
-              if (el.kind === "stroke")
-                paintSmoothStroke(ctx, el.points, el.color, el.width, el.opacity, el.tool === "highlighter", el.strokeStyle);
-              else if (el.kind === "shape") paintShape(ctx, el);
-              else if (el.kind === "text") paintText(ctx, el);
-              else if (el.kind === "image") {
-                const img = imgCache.current.get(el.id);
-                if (img?.complete && img.naturalWidth > 0) paintImage(ctx, img, el);
-              }
-            }
-            return {
-              pageNumber: page.pageNumber,
-              width: PAGE_W,
-              height: PAGE_H,
-              dataUrl: off.toDataURL("image/png"),
-            };
-          })
+          .map((page, idx) => ({
+            pageNumber: page.pageNumber,
+            width: PAGE_W,
+            height: PAGE_H,
+            dataUrl: renderPageDataUrl(idx, elements, imgCache.current, paperStyle),
+          }))
           .filter((f) => f.dataUrl !== "");
 
         if (frames.length === 0) return null;
@@ -3137,42 +3246,8 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
       exportBoardToPng: async (pageIndex: number = activePageIndex): Promise<void> => {
         const targetPage = pages[pageIndex] ?? pages[0];
         if (!targetPage) return;
-        const off = document.createElement("canvas");
-        off.width = PAGE_W;
-        off.height = PAGE_H;
-        const ctx = off.getContext("2d");
-        if (!ctx) return;
-
-        ctx.fillStyle = "#ffffff";
-        ctx.fillRect(0, 0, PAGE_W, PAGE_H);
-        ctx.strokeStyle = "#e2e8f0";
-        ctx.lineWidth = 0.5;
-        for (let x = 0; x <= PAGE_W; x += 20) {
-          ctx.beginPath();
-          ctx.moveTo(x, 0);
-          ctx.lineTo(x, PAGE_H);
-          ctx.stroke();
-        }
-        for (let y = 0; y <= PAGE_H; y += 20) {
-          ctx.beginPath();
-          ctx.moveTo(0, y);
-          ctx.lineTo(PAGE_W, y);
-          ctx.stroke();
-        }
-
-        for (const el of elements) {
-          if (el.pageIndex !== pageIndex) continue;
-          if (el.kind === "stroke")
-            paintSmoothStroke(ctx, el.points, el.color, el.width, el.opacity, el.tool === "highlighter", el.strokeStyle);
-          else if (el.kind === "shape") paintShape(ctx, el);
-          else if (el.kind === "text") paintText(ctx, el);
-          else if (el.kind === "image") {
-            const img = imgCache.current.get(el.id);
-            if (img?.complete && img.naturalWidth > 0) paintImage(ctx, img, el);
-          }
-        }
-
-        const dataUrl = off.toDataURL("image/png");
+        const dataUrl = renderPageDataUrl(pageIndex, elements, imgCache.current, paperStyle);
+        if (!dataUrl) return;
         const a = document.createElement("a");
         a.href = dataUrl;
         a.download = `whiteboard-page-${pageIndex + 1}.png`;
@@ -3182,41 +3257,12 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
 
     const exportPdfDirect = useCallback(async (): Promise<void> => {
       const frames: ExportFrame[] = pages
-        .map((page, idx) => {
-          const off = document.createElement("canvas");
-          off.width = PAGE_W;
-          off.height = PAGE_H;
-          const ctx = off.getContext("2d");
-          if (!ctx) return { pageNumber: page.pageNumber, width: PAGE_W, height: PAGE_H, dataUrl: "" };
-          ctx.fillStyle = "#ffffff";
-          ctx.fillRect(0, 0, PAGE_W, PAGE_H);
-          ctx.strokeStyle = "#e2e8f0";
-          ctx.lineWidth = 0.5;
-          for (let x = 0; x <= PAGE_W; x += 20) {
-            ctx.beginPath();
-            ctx.moveTo(x, 0);
-            ctx.lineTo(x, PAGE_H);
-            ctx.stroke();
-          }
-          for (let y = 0; y <= PAGE_H; y += 20) {
-            ctx.beginPath();
-            ctx.moveTo(0, y);
-            ctx.lineTo(PAGE_W, y);
-            ctx.stroke();
-          }
-          for (const el of elements) {
-            if (el.pageIndex !== idx) continue;
-            if (el.kind === "stroke")
-              paintSmoothStroke(ctx, el.points, el.color, el.width, el.opacity, el.tool === "highlighter", el.strokeStyle);
-            else if (el.kind === "shape") paintShape(ctx, el);
-            else if (el.kind === "text") paintText(ctx, el);
-            else if (el.kind === "image") {
-              const img = imgCache.current.get(el.id);
-              if (img?.complete && img.naturalWidth > 0) paintImage(ctx, img, el);
-            }
-          }
-          return { pageNumber: page.pageNumber, width: PAGE_W, height: PAGE_H, dataUrl: off.toDataURL("image/png") };
-        })
+        .map((page, idx) => ({
+          pageNumber: page.pageNumber,
+          width: PAGE_W,
+          height: PAGE_H,
+          dataUrl: renderPageDataUrl(idx, elements, imgCache.current, paperStyle),
+        }))
         .filter((f) => f.dataUrl !== "");
       if (frames.length === 0) return;
       try {
@@ -3236,48 +3282,17 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
       } catch (err) {
         console.error("[whiteboard] export pdf error:", err);
       }
-    }, [elements, pages]);
+    }, [elements, pages, paperStyle]);
 
     const exportPngDirect = useCallback((): void => {
       const pageIndex = activePageIndex;
-      const off = document.createElement("canvas");
-      off.width = PAGE_W;
-      off.height = PAGE_H;
-      const ctx = off.getContext("2d");
-      if (!ctx) return;
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(0, 0, PAGE_W, PAGE_H);
-      ctx.strokeStyle = "#e2e8f0";
-      ctx.lineWidth = 0.5;
-      for (let x = 0; x <= PAGE_W; x += 20) {
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, PAGE_H);
-        ctx.stroke();
-      }
-      for (let y = 0; y <= PAGE_H; y += 20) {
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(PAGE_W, y);
-        ctx.stroke();
-      }
-      for (const el of elements) {
-        if (el.pageIndex !== pageIndex) continue;
-        if (el.kind === "stroke")
-          paintSmoothStroke(ctx, el.points, el.color, el.width, el.opacity, el.tool === "highlighter", el.strokeStyle);
-        else if (el.kind === "shape") paintShape(ctx, el);
-        else if (el.kind === "text") paintText(ctx, el);
-        else if (el.kind === "image") {
-          const img = imgCache.current.get(el.id);
-          if (img?.complete && img.naturalWidth > 0) paintImage(ctx, img, el);
-        }
-      }
-      const dataUrl = off.toDataURL("image/png");
+      const dataUrl = renderPageDataUrl(pageIndex, elements, imgCache.current, paperStyle);
+      if (!dataUrl) return;
       const a = document.createElement("a");
       a.href = dataUrl;
       a.download = `whiteboard-page-${pageIndex + 1}.png`;
       a.click();
-    }, [activePageIndex, elements]);
+    }, [activePageIndex, elements, paperStyle]);
 
     const syncLabel = !streamChannel
       ? "לוח מקומי"
@@ -3287,13 +3302,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
           ? "שגיאה"
           : "מתחבר";
 
-    const GRID_CSS = {
-      backgroundColor: "#ffffff",
-      backgroundImage:
-        "linear-gradient(to right, #f1f5f9 1px, transparent 1px)," +
-        "linear-gradient(to bottom, #f1f5f9 1px, transparent 1px)",
-      backgroundSize: "24px 24px",
-    } as const;
+    const pagePaperStyle = paperBackgroundStyle(paperStyle);
 
     const AddPageButton = ({ className }: { className: string }) => (
       <button
@@ -3555,6 +3564,42 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
       </Popover>
     );
 
+    const PaperPopover = (): React.ReactElement => (
+      <Popover width={248}>
+        <div className="grid grid-cols-2 gap-1.5">
+          {PAPER_OPTIONS.map((opt) => {
+            const selected = paperStyle === opt.value;
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                title={opt.label}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  setPaperStyle(opt.value);
+                  setOpenMenu(null);
+                }}
+                className={`flex flex-col gap-1 rounded-xl p-1.5 text-start transition-all ${
+                  selected
+                    ? "bg-neutral-900 text-white"
+                    : "text-neutral-600 hover:bg-neutral-100"
+                }`}
+              >
+                <span
+                  aria-hidden
+                  className={`block h-10 w-full rounded-md border ${
+                    selected ? "border-white/30" : "border-neutral-200"
+                  }`}
+                  style={paperBackgroundStyle(opt.value)}
+                />
+                <span className="px-0.5 text-[13px] font-semibold">{opt.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </Popover>
+    );
+
     const ShapesPopover = (): React.ReactElement => (
       <Popover>
         <div className="flex flex-col gap-1">
@@ -3702,6 +3747,22 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
 
               <div className="h-4 w-px bg-neutral-200 mx-0.5" />
 
+              <div className="relative shrink-0">
+                <button
+                  type="button"
+                  title="רקע הדף"
+                  onClick={() => setOpenMenu((prev) => (prev === "paper" ? null : "paper"))}
+                  className={`h-8 px-2.5 shrink-0 rounded-xl text-xs font-semibold flex items-center transition-all ${
+                    openMenu === "paper"
+                      ? "bg-neutral-900 text-white"
+                      : "bg-white text-neutral-700 border border-neutral-200 hover:bg-neutral-50"
+                  }`}
+                >
+                  {PAPER_OPTIONS.find((opt) => opt.value === paperStyle)?.label ?? "משבצות"}
+                </button>
+                {openMenu === "paper" && <PaperPopover />}
+              </div>
+
               <button
                 type="button"
                 title="ייצוא כל העמודים לקובץ PDF"
@@ -3760,7 +3821,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
               <div key={page.id} className="flex flex-col items-center">
                 <div
                   className="relative rounded-lg shadow-sm overflow-hidden border border-neutral-200"
-                  style={{ width: PAGE_W, height: PAGE_H, ...GRID_CSS }}
+                  style={{ width: PAGE_W, height: PAGE_H, ...pagePaperStyle }}
                   onContextMenu={(e) => e.preventDefault()}
                 >
                   <canvas

@@ -293,6 +293,8 @@ describe("Google sign-in", () => {
   it("redirects to Google with a state cookie when configured", async () => {
     vi.stubEnv("GOOGLE_CLIENT_ID", "client-id");
     vi.stubEnv("GOOGLE_CLIENT_SECRET", "client-secret");
+    vi.stubEnv("APP_URL", "");
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "");
     const { GET } = await import("../app/api/auth/google/route");
     const res = await GET(new NextRequest("https://project100.test/api/auth/google"));
     const location = new URL(res.headers.get("location") ?? "");

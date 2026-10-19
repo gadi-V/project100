@@ -6,6 +6,7 @@ import { uploadLessonPdf } from "../../../../lib/storage";
 import { sendLessonSummaryNotification } from "../../../../lib/whatsapp";
 import { schedulePayoutInTransaction } from "../../../../lib/services/PayoutService";
 import { writeLedgerEntryInTransaction } from "../../../../lib/services/LedgerService";
+import { resolveAppUrl } from "../../../../lib/platform-env";
 
 // ─── Financial split (ILS) — mirrors the single-credit price of 180 ₪ ───
 /** Gross value credited to a completed lesson (SINGLE package = 200 ILS). */
@@ -16,11 +17,7 @@ const PLATFORM_FEE_PERCENT = 0.3;
 const TUTOR_PAYOUT_PERCENT = 1 - PLATFORM_FEE_PERCENT;
 
 function appBaseUrl(): string {
-  return (
-    process.env.APP_URL?.replace(/\/$/, "") ||
-    process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ||
-    "https://project100.vercel.app"
-  );
+  return resolveAppUrl();
 }
 
 /** Strip contact fields so phones/emails are never returned to callers. */

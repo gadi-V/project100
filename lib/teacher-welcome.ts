@@ -1,15 +1,12 @@
 import { prisma } from "./prisma";
 import { writeAuditLog } from "./audit";
+import { resolveAppUrl } from "./platform-env";
 import { normalizeToWhatsAppJid } from "./utils/phone";
 
 const DEFAULT_DAILY_DOMAIN = "project100.daily.co";
 
 function getAppUrl(): string {
-  return (
-    process.env.APP_URL?.replace(/\/$/, "") ||
-    process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ||
-    "https://project100.vercel.app"
-  );
+  return resolveAppUrl();
 }
 
 function getWhatsAppConfig(): { apiUrl: string; apiKey: string } | null {
@@ -19,13 +16,19 @@ function getWhatsAppConfig(): { apiUrl: string; apiKey: string } | null {
   return { apiUrl: apiUrl.replace(/\/$/, ""), apiKey };
 }
 
+/**
+ * Daily subdomain or full host. A bare name (`project100`) becomes
+ * `project100.daily.co`. A value that already contains a dot is used as-is.
+ */
 function getDailyDomain(): string {
-  const domain = process.env.DAILY_DOMAIN?.trim();
-  if (domain) return domain;
-  console.warn(
-    `[teacher-welcome] DAILY_DOMAIN is not set — falling back to ${DEFAULT_DAILY_DOMAIN}`
-  );
-  return DEFAULT_DAILY_DOMAIN;
+  const raw = process.env.DAILY_DOMAIN?.trim().replace(/^https?:\/\//, "").replace(/\/+$/, "");
+  if (!raw) {
+    console.warn(
+      `[teacher-welcome] DAILY_DOMAIN is not set — falling back to ${DEFAULT_DAILY_DOMAIN}`
+    );
+    return DEFAULT_DAILY_DOMAIN;
+  }
+  return raw.includes(".") ? raw : `${raw}.daily.co`;
 }
 
 /** `chatId` must already be a normalized WhatsApp JID (`972XXXXXXXXX@c.us`). */

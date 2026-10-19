@@ -4,8 +4,11 @@ const fsMock = vi.hoisted(() => ({ mkdir: vi.fn(), writeFile: vi.fn() }));
 vi.mock("fs/promises", () => ({ ...fsMock, default: fsMock }));
 
 import {
+  BOARD_SIGNED_URL_TTL_SECONDS,
+  LESSON_BOARDS_BUCKET,
   StorageUploadError,
   canUseLocalDiskStorage,
+  probeLessonBoardsStorage,
   uploadBoardImage,
   uploadLessonPdf,
 } from "../lib/storage";
@@ -112,6 +115,123 @@ describe("board image storage with Supabase", () => {
     await expect(uploadLessonPdf("lesson-1", Buffer.from("pdf"))).rejects.toThrow(
       "Upload failed, please try again"
     );
+    vi.unstubAllGlobals();
+  });
+
+  it("uploads a PNG and a PDF to lesson-boards and returns a time-limited signed URL", async () => {
+    vi.stubEnv("SUPABASE_URL", "https://proj.supabase.co");
+    vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "service-key");
+    vi.stubEnv("SUPABASE_STORAGE_PUBLIC", "false");
+    vi.stubEnv("SUPABASE_SIGNED_URL_TTL", "120");
+    vi.stubEnv("SUPABASE_STORAGE_BUCKET", "");
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url).includes("/object/sign/")) {
+        return new Response(
+          JSON.stringify({ signedURL: "/storage/v1/object/sign/lesson-boards/file?token=t" }),
+          { status: 200 }
+        );
+      }
+      return new Response("{}", { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const png = await uploadBoardImage("img1", Buffer.from("png"), "image/png");
+    const pdf = await uploadLessonPdf("lesson-1", Buffer.from("pdf"));
+
+    expect(LESSON_BOARDS_BUCKET).toBe("lesson-boards");
+    expect(png).toBe(
+      "https://proj.supabase.co/storage/v1/object/sign/lesson-boards/file?token=t"
+    );
+    expect(pdf).toBe(png);
+    const uploads = fetchMock.mock.calls.map((call) => String(call[0]));
+    expect(uploads).toContain(
+      "https://proj.supabase.co/storage/v1/object/lesson-boards/board-images/img1.png"
+    );
+    expect(uploads).toContain(
+      "https://proj.supabase.co/storage/v1/object/lesson-boards/lessons/lesson-1/board-summary.pdf"
+    );
+    const signBodies = fetchMock.mock.calls
+      .filter((call) => String(call[0]).includes("/object/sign/"))
+      .map((call) => JSON.parse(String(call[1]?.body ?? "{}")) as { expiresIn: number });
+    expect(signBodies).toEqual([{ expiresIn: 120 }, { expiresIn: 120 }]);
+    expect(fsMock.writeFile).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it("defaults to a private bucket and a 60-minute signed URL, with no local disk write", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("SUPABASE_URL", "https://proj.supabase.co/");
+    vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "service-key");
+    vi.stubEnv("SUPABASE_STORAGE_PUBLIC", "");
+    vi.stubEnv("SUPABASE_SIGNED_URL_TTL", "");
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url).includes("/object/sign/")) {
+        return new Response(
+          JSON.stringify({ signedURL: "/storage/v1/object/sign/lesson-boards/board-images/img1.png?token=t" }),
+          { status: 200 }
+        );
+      }
+      return new Response("{}", { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const url = await uploadBoardImage("img1", Buffer.from("png"), "image/png");
+
+    expect(BOARD_SIGNED_URL_TTL_SECONDS).toBe(3600);
+    expect(url).toBe(
+      "https://proj.supabase.co/storage/v1/object/sign/lesson-boards/board-images/img1.png?token=t"
+    );
+    const sign = fetchMock.mock.calls.find((call) => String(call[0]).includes("/object/sign/"));
+    expect(JSON.parse(String(sign?.[1]?.body))).toEqual({ expiresIn: 3600 });
+    expect(fsMock.mkdir).not.toHaveBeenCalled();
+    expect(fsMock.writeFile).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+});
+
+describe("lesson-boards storage probe", () => {
+  it("is down without a network call when Supabase keys are missing", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(probeLessonBoardsStorage()).resolves.toEqual({ status: "down", latencyMs: null });
+    expect(fetchMock).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it("reports the lesson-boards bucket as up and measures latency", async () => {
+    vi.stubEnv("SUPABASE_URL", "https://proj.supabase.co");
+    vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "service-key");
+    vi.stubEnv("SUPABASE_STORAGE_BUCKET", "lesson-boards");
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ id: "lesson-boards" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const probe = await probeLessonBoardsStorage();
+
+    expect(probe.status).toBe("up");
+    expect(probe.latencyMs).toEqual(expect.any(Number));
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://proj.supabase.co/storage/v1/bucket/lesson-boards",
+      expect.objectContaining({
+        method: "GET",
+        headers: expect.objectContaining({
+          Authorization: "Bearer service-key",
+          apikey: "service-key",
+        }),
+      })
+    );
+    vi.unstubAllGlobals();
+  });
+
+  it("stays down when the bucket check fails and does not throw", async () => {
+    vi.stubEnv("SUPABASE_URL", "https://proj.supabase.co");
+    vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "service-key");
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      throw new DOMException("The operation was aborted", "TimeoutError");
+    }));
+
+    await expect(probeLessonBoardsStorage()).resolves.toMatchObject({ status: "down" });
     vi.unstubAllGlobals();
   });
 });

@@ -3,6 +3,15 @@ import type { NextRequest } from "next/server";
 import { SESSION_COOKIE, verifySession } from "./lib/auth";
 import { isHiveMonitorBearer } from "./lib/hive-m2m-auth";
 import {
+  isSubdomainBypassPath,
+  readRequestHost,
+  resolveTeachersAliasRewrite,
+  subdomainContext,
+  PATHNAME_HEADER,
+  SUBDOMAIN_HEADER,
+  type SubdomainContext,
+} from "./lib/routing/subdomain";
+import {
   isPublicLandingPath,
   isTeachersHost,
   mainSiteOrigin,
@@ -68,21 +77,45 @@ const AUTH_PAGES = new Set(["/login", "/register", "/forgot-password"]);
  */
 const TRUSTED_USER_ID_HEADER = "x-user-id";
 
-function trustedHeaders(request: NextRequest, verifiedUserId: string | null): Headers {
+function trustedHeaders(
+  request: NextRequest,
+  verifiedUserId: string | null,
+  context?: SubdomainContext
+): Headers {
   const headers = new Headers(request.headers);
   headers.delete(TRUSTED_USER_ID_HEADER);
+  headers.delete(SUBDOMAIN_HEADER);
+  headers.delete(PATHNAME_HEADER);
   if (verifiedUserId) {
     headers.set(TRUSTED_USER_ID_HEADER, verifiedUserId);
+  }
+  if (context) {
+    headers.set(SUBDOMAIN_HEADER, context.subdomain);
+    headers.set(PATHNAME_HEADER, context.pathname);
   }
   return headers;
 }
 
-function forward(request: NextRequest, verifiedUserId: string | null = null) {
-  return NextResponse.next({ request: { headers: trustedHeaders(request, verifiedUserId) } });
+function forward(
+  request: NextRequest,
+  verifiedUserId: string | null = null,
+  context?: SubdomainContext
+) {
+  return NextResponse.next({ request: { headers: trustedHeaders(request, verifiedUserId, context) } });
+}
+
+function rewriteTo(request: NextRequest, pathname: string, verifiedUserId: string | null, context?: SubdomainContext) {
+  return NextResponse.rewrite(new URL(pathname, request.url), {
+    request: { headers: trustedHeaders(request, verifiedUserId, context) },
+  });
 }
 
 function requestHost(request: NextRequest): string {
-  return request.headers.get("host") || request.nextUrl.host;
+  return readRequestHost(
+    request.headers.get("x-forwarded-host"),
+    request.headers.get("host"),
+    request.nextUrl.host
+  );
 }
 
 function isPublicApiPath(pathname: string): boolean {
@@ -122,13 +155,20 @@ export async function proxy(request: NextRequest) {
     }
   }
 
+  // Static assets, public media, and webhooks never change path. Identity
+  // headers are still stripped so a client cannot spoof x-user-id.
+  if (isSubdomainBypassPath(pathname)) {
+    return forward(request);
+  }
+
   const host = requestHost(request);
   const onTeachersHost = isTeachersHost(host);
+  const routeContext = subdomainContext(host, pathname);
 
   if (!onTeachersHost) {
     // Never run redirect logic on auth pages themselves (hard stop for loops)
     if (AUTH_PAGES.has(pathname) || isPublicLandingPath(pathname)) {
-      return forward(request);
+      return forward(request, null, routeContext);
     }
   }
 
@@ -144,9 +184,7 @@ export async function proxy(request: NextRequest) {
     });
     switch (decision.action) {
       case "rewrite":
-        return NextResponse.rewrite(new URL(decision.pathname, request.url), {
-          request: { headers: trustedHeaders(request, verifiedUserId) },
-        });
+        return rewriteTo(request, decision.pathname, verifiedUserId, routeContext);
       case "redirect":
         return NextResponse.redirect(new URL(decision.pathname, request.url));
       case "redirect-main-site":
@@ -158,9 +196,12 @@ export async function proxy(request: NextRequest) {
           { success: false, error: "אזור זה מיועד לצוות ההוראה בלבד" },
           { status: 403 }
         );
-      case "pass":
-        if (AUTH_PAGES.has(pathname)) return forward(request);
+      case "pass": {
+        if (AUTH_PAGES.has(pathname)) return forward(request, null, routeContext);
+        const alias = resolveTeachersAliasRewrite(pathname);
+        if (alias) return rewriteTo(request, alias, verifiedUserId, routeContext);
         break;
+      }
     }
   }
 
@@ -185,19 +226,19 @@ export async function proxy(request: NextRequest) {
 
   if (pathname.startsWith("/api/")) {
     if (isPublicApiPath(pathname)) {
-      return forward(request, verifiedUserId);
+      return forward(request, verifiedUserId, routeContext);
     }
     // FastMCP / cron M2M: valid Bearer HIVE_MONITOR_SECRET bypasses cookie auth.
     // Route handlers still re-verify via requireAuthOrMonitor.
     if (isHiveMonitorBearer(request)) {
-      return forward(request, verifiedUserId);
+      return forward(request, verifiedUserId, routeContext);
     }
     if (!session) {
       return NextResponse.json({ error: "נדרשת התחברות למערכת" }, { status: 401 });
     }
   }
 
-  return forward(request, verifiedUserId);
+  return forward(request, verifiedUserId, routeContext);
 }
 
 export const config = {
@@ -224,6 +265,8 @@ export const config = {
     "/login",
     "/register",
     "/forgot-password",
+    "/classes",
+    "/classes/:path*",
     "/api/:path*",
   ],
 };

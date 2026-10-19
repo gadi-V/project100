@@ -1,15 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { toast } from "react-hot-toast";
 import { Check } from "lucide-react";
 import type { Channel as StreamChannelType } from "stream-chat";
-import ClassroomWhiteboard, {
-  ClassroomWhiteboardRef,
-} from "../../../components/ClassroomWhiteboard";
-import ClassroomChat from "../../../components/ClassroomChat";
-import VideoRoom from "../../../components/VideoRoom";
+import type { ClassroomWhiteboardRef } from "../../../components/ClassroomWhiteboard";
 import RatingModal from "../../../components/RatingModal";
 import PreLessonAssetsSection from "../../../components/packages/PreLessonAssetsSection";
 import DiagnosticSummaryCard from "../../../components/packages/DiagnosticSummaryCard";
@@ -20,6 +17,58 @@ import {
   type CompleteLessonResponse,
 } from "../../../lib/lesson-completion";
 import { frostCard, frostHeader, primaryCta } from "../../../lib/ui";
+
+function LoadingSkeleton({ label }: { label: string }) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="relative flex h-full min-h-[140px] w-full items-center justify-center overflow-hidden bg-[#fafaf9]"
+    >
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0"
+        style={{
+          backgroundColor: "#ffffff",
+          backgroundImage:
+            "linear-gradient(to right, #f1f5f9 1px, transparent 1px), linear-gradient(to bottom, #f1f5f9 1px, transparent 1px)",
+          backgroundSize: "24px 24px",
+        }}
+      />
+      <div className="relative flex items-center gap-2 rounded-full border border-neutral-200/80 bg-white/85 px-4 py-2 text-sm font-medium text-neutral-600 shadow-sm backdrop-blur-md">
+        <span
+          aria-hidden
+          className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-neutral-200 border-t-neutral-900"
+        />
+        {label}
+      </div>
+    </div>
+  );
+}
+
+const ClassroomWhiteboard = dynamic(
+  () => import("../../../components/ClassroomWhiteboard"),
+  {
+    ssr: false,
+    loading: () => <LoadingSkeleton label="טוענים את הלוח" />,
+  }
+);
+
+const ClassroomChat = dynamic(
+  () => import("../../../components/ClassroomChat"),
+  {
+    ssr: false,
+    loading: () => <LoadingSkeleton label="טוענים את הצ'אט" />,
+  }
+);
+
+const VideoRoom = dynamic(
+  () => import("../../../components/VideoRoom"),
+  {
+    ssr: false,
+    loading: () => <LoadingSkeleton label="טוענים את הווידאו" />,
+  }
+);
 
 interface LessonRoomUIProps {
   lesson: {

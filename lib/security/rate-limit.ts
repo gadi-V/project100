@@ -4,19 +4,18 @@
  *
  * Circuit breaker when Upstash cannot answer (tokens missing, or Redis throws):
  *
- * - `auth` and `booking` FAIL CLOSED in production. Login, registration,
- *   password reset, and lesson booking are abuse-sensitive. If the limiter
- *   cannot run, the request is rejected (the middleware returns 503) instead
- *   of being served with no limit.
- * - `api` (public form posts such as leads) FAILS OPEN. The request proceeds,
- *   the result is flagged `degraded`, and a throttled error is logged.
- *   Static reads are not sent through this limiter at all.
+ * - Missing Redis credentials in production: `auth` and `booking` FAIL CLOSED
+ *   (503). A deploy without Upstash must not serve unlimited login or booking.
+ * - A runtime Redis error (timeout, reset, momentary REST hiccup) FAILS OPEN
+ *   for every type. The request proceeds, the result is `degraded`, and a
+ *   throttled error is logged. The Upstash SDK timeout is also an allow.
+ * - `api` (public form posts) FAILS OPEN when Redis is missing in production.
  * - Outside production, missing Redis bypasses the limiter so local dev works
- *   without Upstash. A runtime Redis error outside production also fails open.
+ *   without Upstash.
  */
 
 import { Ratelimit } from "@upstash/ratelimit";
-import { Redis } from "@upstash/redis";
+import { getRedis, redisRestConfig } from "../redis";
 
 export type RateLimitType = "auth" | "booking" | "api";
 
@@ -30,8 +29,9 @@ export type RateLimitResult = {
   bypassed: boolean;
   /**
    * True when the limiter should have run but could not.
-   * Combined with `success: false` this is fail-closed (auth/booking in production).
-   * Combined with `success: true` this is fail-open (public posts, or any type outside production).
+   * Combined with `success: false` this is fail-closed (auth/booking in production
+   * when Redis credentials are missing). Combined with `success: true` this is
+   * fail-open (public posts, any runtime Redis error, or non-production).
    */
   degraded: boolean;
 };
@@ -47,7 +47,10 @@ export const RATE_LIMITS: Record<RateLimitType, { requests: number; window: `${n
   api: { requests: 30, window: "60 s" },
 };
 
-/** Abuse-sensitive types. Production outages of Redis reject these. */
+/**
+ * Abuse-sensitive types. Rejected only when production has no Redis credentials.
+ * A live client that throws (network hiccup) does not use this set.
+ */
 const FAIL_CLOSED_TYPES = new Set<RateLimitType>(["auth", "booking"]);
 
 const RATE_LIMIT_EXEMPT_PREFIXES = ["/api/cron/"] as const;
@@ -93,13 +96,12 @@ function failsClosed(type: RateLimitType): boolean {
 }
 
 function getLimiters(): Record<RateLimitType, Ratelimit> | null {
-  const url = process.env.UPSTASH_REDIS_REST_URL?.trim();
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN?.trim();
-  if (!url || !token) return null;
+  const cfg = redisRestConfig();
+  const redis = getRedis();
+  if (!cfg || !redis) return null;
 
-  const key = `${url}|${token}`;
+  const key = `${cfg.url}|${cfg.token}`;
   if (limiters?.key !== key) {
-    const redis = new Redis({ url, token });
     const build = (type: RateLimitType) =>
       new Ratelimit({
         redis,
@@ -174,8 +176,8 @@ export async function checkRateLimit(
     const { success, limit, remaining, reset } = await byType[type].limit(identifier);
     return { success, limit, remaining, reset, bypassed: false, degraded: false };
   } catch (error) {
-    const mode = failsClosed(type) ? "failing closed" : "failing open";
-    alertDegraded(`[rate-limit] DEGRADED: Upstash Redis error — ${mode} for ${type}:`, error);
-    return degradedResult(type);
+    // A thrown REST call is a hiccup, not a missing deployment. Do not 503 auth.
+    alertDegraded(`[rate-limit] DEGRADED: Upstash Redis error — failing open for ${type}:`, error);
+    return { ...passThrough(type), degraded: true };
   }
 }

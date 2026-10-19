@@ -299,23 +299,45 @@ describe("middleware with Redis configured", () => {
     );
   });
 
-  it("fails closed when Redis errors at runtime in production for auth and booking", async () => {
+  it("fails open when Redis errors at runtime, including auth and booking in production", async () => {
     vi.stubEnv("NODE_ENV", "production");
     configureRedis();
     rl.limit.mockRejectedValue(new Error("ECONNRESET"));
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     const middleware = await loadMiddleware();
 
-    for (const path of ["/api/login", "/api/lessons", "/api/auth/reset-password"]) {
+    for (const path of ["/api/login", "/api/lessons", "/api/auth/reset-password", "/api/leads"]) {
       const res = await middleware(request(path));
-      expect(res.status).toBe(503);
+      expect(res.status, path).not.toBe(503);
+      expect(res.status, path).not.toBe(429);
     }
-    const leads = await middleware(request("/api/leads"));
-    expect(leads.status).not.toBe(503);
-    expect(leads.status).not.toBe(429);
     expect(error).toHaveBeenCalledWith(
-      expect.stringContaining("failing closed"),
+      expect.stringContaining("failing open"),
       expect.any(Error)
     );
+  });
+
+  it("keeps teachers subdomain headers after a request passes the Redis limiter", async () => {
+    configureRedis();
+    rl.limit.mockResolvedValue({ success: true, limit: 15, remaining: 14, reset: Date.now() + 60_000 });
+    const middleware = await loadMiddleware();
+
+    const res = await middleware(
+      new NextRequest("https://teachers.project100.co.il/api/login", {
+        method: "POST",
+        headers: {
+          host: "teachers.project100.co.il",
+          "x-forwarded-for": "203.0.113.9",
+          "x-subdomain": "app",
+          "x-pathname": "/portal",
+        },
+      })
+    );
+
+    expect(rl.limit).toHaveBeenCalledWith("project8:ratelimit:auth", "/api/login:203.0.113.9");
+    expect(res.headers.get("x-middleware-next")).toBe("1");
+    expect(res.headers.get("x-middleware-rewrite")).toBeNull();
+    expect(res.headers.get("x-middleware-request-x-subdomain")).toBe("teachers");
+    expect(res.headers.get("x-middleware-request-x-pathname")).toBe("/api/login");
   });
 });

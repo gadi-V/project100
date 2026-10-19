@@ -1,4 +1,5 @@
 import { SignJWT, createRemoteJWKSet, jwtVerify } from "jose";
+import { resolveAppUrl } from "../platform-env";
 import { getSecretKey } from "../auth";
 
 /**
@@ -35,10 +36,7 @@ export function getGoogleConfig(): GoogleConfig | null {
 }
 
 export function googleRedirectUri(requestOrigin: string): string {
-  const base =
-    process.env.APP_URL?.replace(/\/$/, "") ||
-    process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ||
-    requestOrigin;
+  const base = resolveAppUrl(requestOrigin);
   return `${base}/api/auth/google/callback`;
 }
 

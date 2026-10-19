@@ -3,7 +3,13 @@
  * config read per call from the platform env, and a hard abort deadline.
  */
 
+import { resolveOpenRouterApiKey, resolveOpenRouterBaseUrl } from "../../platform-env";
+
 export const OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions";
+
+function resolveOpenRouterChatUrl(): string {
+  return `${resolveOpenRouterBaseUrl()}/chat/completions`;
+}
 /** Hard ceiling for every OpenRouter call. Callers may wait less, never more. */
 export const AGENT_LLM_TIMEOUT_MS = 20_000;
 /** Client-facing fallback. Never include provider status text or response bodies. */
@@ -52,7 +58,7 @@ export async function callAgentLLM({
   /** Capped at AGENT_LLM_TIMEOUT_MS; callers pass less to fit a function deadline. */
   timeoutMs?: number;
 }): Promise<string> {
-  const apiKey = process.env.OPENROUTER_API_KEY?.trim();
+  const apiKey = resolveOpenRouterApiKey();
   if (!apiKey) {
     throw new AgentLLMError("CONFIG", "OPENROUTER_API_KEY is not configured");
   }
@@ -62,7 +68,7 @@ export async function callAgentLLM({
   const timeout = setTimeout(() => controller.abort(), effectiveTimeoutMs);
 
   try {
-    const response = await fetch(OPENROUTER_CHAT_URL, {
+    const response = await fetch(resolveOpenRouterChatUrl(), {
       method: "POST",
       signal: controller.signal,
       headers: {

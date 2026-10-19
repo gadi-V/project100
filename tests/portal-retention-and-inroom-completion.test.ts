@@ -488,7 +488,7 @@ describe("LessonRoomUI — closing the lesson from the Daily room", () => {
   it("shows the assigned teacher the completion button in the room header", () => {
     const html = renderRoom(TEACHER);
     expect(html).toContain("סיום שיעור ודיווח נוכחות");
-    expect(html).toContain("daily-video-room");
+    expect(html).toContain("טוענים את הווידאו");
   });
 
   it("shows it to management, but not to the student or to another teacher", () => {

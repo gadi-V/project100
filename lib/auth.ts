@@ -1,4 +1,5 @@
 import { SignJWT, jwtVerify } from "jose";
+import { resolveSessionCookieDomain } from "./platform-env";
 
 export const SESSION_COOKIE = "project8_session";
 export const SESSION_MAX_AGE = 60 * 60 * 24 * 7; // 7 days
@@ -83,8 +84,7 @@ export async function verifySession(token: string): Promise<SessionPayload | nul
  * so one sign-in is recognized on both. Unset means a host-only cookie (local dev, previews).
  */
 export function sessionCookieDomain(): string | undefined {
-  const domain = process.env.SESSION_COOKIE_DOMAIN?.trim();
-  return domain ? domain : undefined;
+  return resolveSessionCookieDomain();
 }
 
 function domainOption(): { domain?: string } {
