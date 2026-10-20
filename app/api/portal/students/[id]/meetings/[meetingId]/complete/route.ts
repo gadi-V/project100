@@ -99,7 +99,7 @@ export async function POST(request: Request, { params }: RouteContext) {
   }
   const parsed = parseCompleteLessonInput(body);
   if (!parsed.ok) return fail(parsed.errors.join(" · "), 400);
-  const { attendanceStatus, internalNotes } = parsed.data;
+  const { attendanceStatus, internalNotes, boardPdfUrl } = parsed.data;
 
   try {
     const authorRole = toCommunicationAuthorRole(auth.user.role);
@@ -158,6 +158,7 @@ export async function POST(request: Request, { params }: RouteContext) {
           data: {
             status: effects.status,
             dailyRoomUrl: null,
+            ...(boardPdfUrl ? { excalidrawPdfUrl: boardPdfUrl } : {}),
             ...(effects.attendance
               ? { attendanceStatus: effects.attendance, attendanceMarkedAt: now, attendanceMarkedById: auth.user.id }
               : {}),

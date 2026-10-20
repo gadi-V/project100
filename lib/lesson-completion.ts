@@ -103,7 +103,22 @@ export function creditTakenAtBooking(lesson: { title: string | null }): boolean 
 
 type ParseResult<T> = { ok: true; data: T } | { ok: false; errors: string[] };
 
-export type CompleteLessonInput = { attendanceStatus: AttendanceOutcome; internalNotes: string | null };
+export type CompleteLessonInput = {
+  attendanceStatus: AttendanceOutcome;
+  internalNotes: string | null;
+  /** Stored board PDF. Omitted when the room did not produce an http(s) URL. */
+  boardPdfUrl?: string;
+};
+
+function readBoardPdfUrl(record: Record<string, unknown>): string | null {
+  for (const key of ["boardPdfUrl", "boardUrl", "excalidrawPdfUrl", "pdfUrl"] as const) {
+    const value = record[key];
+    if (typeof value !== "string") continue;
+    const trimmed = value.trim();
+    if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) return trimmed;
+  }
+  return null;
+}
 
 function isAttendanceOutcome(value: unknown): value is AttendanceOutcome {
   return typeof value === "string" && (ATTENDANCE_OUTCOMES as readonly string[]).includes(value);
@@ -129,7 +144,11 @@ export function parseCompleteLessonInput(value: unknown): ParseResult<CompleteLe
     }
   }
   if (errors.length > 0 || !isAttendanceOutcome(attendanceStatus)) return { ok: false, errors };
-  return { ok: true, data: { attendanceStatus, internalNotes } };
+  const boardPdfUrl = readBoardPdfUrl(record);
+  return {
+    ok: true,
+    data: boardPdfUrl ? { attendanceStatus, internalNotes, boardPdfUrl } : { attendanceStatus, internalNotes },
+  };
 }
 
 /** `POST …/complete` answers these fields at the top level. */
@@ -162,13 +181,27 @@ export function completeLessonEndpoint(studentId: string, lessonId: string): str
 
 /** Posts the attendance report; resolves with the API answer or throws with the Hebrew error. */
 export async function submitLessonCompletion(
-  params: { studentId: string; lessonId: string; attendanceStatus: AttendanceOutcome; internalNotes: string | null },
+  params: {
+    studentId: string;
+    lessonId: string;
+    attendanceStatus: AttendanceOutcome;
+    internalNotes: string | null;
+    boardPdfUrl?: string | null;
+  },
   fetchImpl: typeof fetch = fetch
 ): Promise<CompleteLessonResponse> {
+  const body: { attendanceStatus: AttendanceOutcome; internalNotes: string | null; boardPdfUrl?: string } = {
+    attendanceStatus: params.attendanceStatus,
+    internalNotes: params.internalNotes,
+  };
+  const boardPdfUrl = params.boardPdfUrl?.trim();
+  if (boardPdfUrl && (boardPdfUrl.startsWith("http://") || boardPdfUrl.startsWith("https://"))) {
+    body.boardPdfUrl = boardPdfUrl;
+  }
   const res = await fetchImpl(completeLessonEndpoint(params.studentId, params.lessonId), {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ attendanceStatus: params.attendanceStatus, internalNotes: params.internalNotes }),
+    body: JSON.stringify(body),
   });
   const json = (await res.json().catch(() => ({ success: false }))) as CompleteLessonResponse;
   if (!res.ok || !json.success) throw new Error(json.error ?? "סיום השיעור נכשל");

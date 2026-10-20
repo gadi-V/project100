@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "react-hot-toast";
 import { Check } from "lucide-react";
 import type { Channel as StreamChannelType } from "stream-chat";
-import type { ClassroomWhiteboardRef } from "../../../components/ClassroomWhiteboard";
+import type { ClassroomWhiteboardHandle } from "../../../components/ClassroomWhiteboard";
 import RatingModal from "../../../components/RatingModal";
 import PreLessonAssetsSection from "../../../components/packages/PreLessonAssetsSection";
 import DiagnosticSummaryCard from "../../../components/packages/DiagnosticSummaryCard";
@@ -112,10 +112,21 @@ export default function LessonRoomUI({
   pedagogicalBrief,
 }: LessonRoomUIProps) {
   const router = useRouter();
-  const whiteboardRef = useRef<ClassroomWhiteboardRef>(null);
+  const whiteboardRef = useRef<ClassroomWhiteboardHandle>(null);
+
+  const resolveBoardPdfUrl = useCallback(async (): Promise<string | null> => {
+    try {
+      const url = await whiteboardRef.current?.exportBoardToPdf(lesson.id);
+      return typeof url === "string" && (url.startsWith("http://") || url.startsWith("https://")) ? url : null;
+    } catch (exportError: unknown) {
+      console.error("[whiteboard] board export skipped:", exportError);
+      return null;
+    }
+  }, [lesson.id]);
   const [showRating, setShowRating] = useState(false);
   const [showCompleteModal, setShowCompleteModal] = useState(false);
   const [callEnded, setCallEnded] = useState(false);
+  const [sidePanelOpen, setSidePanelOpen] = useState(true);
   const [boardChannel, setBoardChannel] = useState<StreamChannelType | null>(
     null
   );
@@ -197,6 +208,7 @@ export default function LessonRoomUI({
             teacherName: user.role === "TEACHER" ? user.name : null,
           }}
           context="room"
+          resolveBoardPdfUrl={resolveBoardPdfUrl}
           onClose={closeCompleteModal}
           onDone={handleLessonCompleted}
         />
@@ -252,7 +264,7 @@ export default function LessonRoomUI({
       </header>
 
       <div className="flex-1 flex min-h-0 overflow-hidden">
-        <main className="flex-1 relative bg-neutral-100 p-2 min-h-0">
+        <main className="flex-1 relative bg-neutral-100 p-2 min-h-0 min-w-0 w-full">
           <div className="w-full h-full rounded-2xl overflow-hidden border border-neutral-200 shadow-sm">
             <ClassroomWhiteboard
               ref={whiteboardRef}
@@ -264,7 +276,27 @@ export default function LessonRoomUI({
           </div>
         </main>
 
-        <aside className="w-full max-w-sm sm:w-96 flex flex-col border-e border-neutral-200/80 bg-stone-50/80 shrink-0 p-2 gap-2 overflow-y-auto">
+        <button
+          type="button"
+          onClick={() => setSidePanelOpen((open) => !open)}
+          aria-expanded={sidePanelOpen}
+          aria-controls="lesson-side-panel"
+          title={sidePanelOpen ? "מזער סרגל" : "הצג סרגל"}
+          className="shrink-0 self-stretch w-9 border-x border-neutral-200 bg-white text-[13px] font-semibold text-neutral-800 hover:bg-neutral-50"
+        >
+          <span className="inline-block [writing-mode:vertical-rl]">
+            {sidePanelOpen ? "מזער סרגל" : "הצג סרגל"}
+          </span>
+        </button>
+
+        <aside
+          id="lesson-side-panel"
+          className={
+            sidePanelOpen
+              ? "w-full max-w-sm sm:w-96 flex flex-col border-e border-neutral-200/80 bg-stone-50/80 shrink-0 p-2 gap-2 overflow-y-auto"
+              : "hidden"
+          }
+        >
           {pedagogicalBrief && (
             <div className={`${frostCard} p-3 text-xs text-neutral-700`}>
               <div className="flex items-center justify-between font-bold text-neutral-900 mb-1.5">

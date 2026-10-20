@@ -17,6 +17,8 @@ type CompleteLessonModalProps = {
   meeting: Pick<MeetingRow, "id" | "title" | "scheduledAt" | "teacherName">;
   /** "room": opened from the Daily classroom, which closes the call and moves on to the portal. */
   context?: "portal" | "room";
+  /** Room-only: upload the board PDF before attendance is posted. A null result must not block completion. */
+  resolveBoardPdfUrl?: () => Promise<string | null>;
   onClose: () => void;
   onDone: (result: CompleteLessonResponse) => void;
 };
@@ -44,6 +46,7 @@ export default function CompleteLessonModal({
   studentId,
   meeting,
   context = "portal",
+  resolveBoardPdfUrl,
   onClose,
   onDone,
 }: CompleteLessonModalProps) {
@@ -70,11 +73,21 @@ export default function CompleteLessonModal({
     }
     setSubmitting(true);
     try {
+      let boardPdfUrl: string | null = null;
+      if (resolveBoardPdfUrl) {
+        try {
+          boardPdfUrl = await resolveBoardPdfUrl();
+        } catch (exportError: unknown) {
+          console.error("[whiteboard] board export skipped:", exportError);
+          boardPdfUrl = null;
+        }
+      }
       const result = await submitLessonCompletion({
         studentId,
         lessonId: meeting.id,
         attendanceStatus: outcome,
         internalNotes: notes.trim() || null,
+        boardPdfUrl,
       });
       onDone(result);
     } catch (submitError: unknown) {

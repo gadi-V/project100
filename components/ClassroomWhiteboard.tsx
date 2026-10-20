@@ -11,19 +11,32 @@ import React, {
 import Draggable from "react-draggable";
 import { nanoid } from "nanoid";
 import type { Channel } from "stream-chat";
+import { applyHistoryBackward, applyHistoryForward } from "../lib/whiteboard/display-list";
+import { backingStoreSize } from "../lib/whiteboard/hidpi";
+import {
+  GRID_STEP,
+  alignRecognizedShape,
+  constrainLineEnd,
+  draftFromRecognized,
+  shouldSnapRecognizedToGrid,
+} from "../lib/whiteboard/snap-commit";
+import { SnapSession } from "../lib/whiteboard/snap-session";
+import type { RecognizedShape } from "../lib/whiteboard/types";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const PAGE_W = 794;
 const PAGE_H = 1123;
-const GRID_STEP = 24;
 const PAGE_GAP = 32;
 const DESK_BG = "#f5f5f4";
 const HANDLE_R = 6;
 const ROT_HANDLE_OFFSET = 32;
 const BOARD_EVENT = "board_sync";
 const STREAM_LIMIT = 4000;
+/** Events are kept under this so a Stream payload never reaches STREAM_LIMIT. */
+export const STREAM_SAFE_LIMIT = 3500;
 const PROTO_V = 6;
+const SNAPSHOT_CHUNK_CAP = 10;
 const LASER_FADE_MS = 1000;
 const PASTE_OFFSET = 24;
 const DUPLICATE_OFFSET = 20;
@@ -100,6 +113,51 @@ const PAPER_OPTIONS: ReadonlyArray<{ value: PaperStyle; label: string }> = [
   { value: "blank", label: "חלק" },
 ];
 
+export function isPaperStyle(value: unknown): value is PaperStyle {
+  return typeof value === "string" && PAPER_OPTIONS.some((option) => option.value === value);
+}
+
+/** A joiner with an empty board asks once for the room's current snapshot. */
+export function shouldRequestSnapshot(elementCount: number, alreadyRequested: boolean): boolean {
+  return elementCount === 0 && !alreadyRequested;
+}
+
+export function buildRequestSnapshot(senderId: string, timestamp: number): SnapshotRequestEvent {
+  return { action: "request_snapshot", senderId, timestamp };
+}
+
+export function readPaperStyleChange(value: { action?: string; paperStyle?: unknown }): PaperStyle | null {
+  if (value.action !== "paper_style_change") return null;
+  return isPaperStyle(value.paperStyle) ? value.paperStyle : null;
+}
+
+export type WhiteboardShortcut = "copy" | "cut" | "paste" | "duplicate" | "redo" | "undo" | "delete";
+
+/**
+ * Keyboard actions for the board. Shift-Z is redo (Cmd+Shift+Z / Ctrl+Shift+Z).
+ * Matching is case-insensitive so a held Shift does not turn the key into "Z"
+ * and skip the shortcut.
+ */
+export function readWhiteboardShortcut(event: {
+  key: string;
+  code?: string;
+  metaKey?: boolean;
+  ctrlKey?: boolean;
+  shiftKey?: boolean;
+}): WhiteboardShortcut | null {
+  const mod = Boolean(event.metaKey || event.ctrlKey);
+  const key = event.key;
+  if (mod && key === "c") return "copy";
+  if (mod && key === "x") return "cut";
+  if (mod && key === "v") return "paste";
+  if (mod && key === "d") return "duplicate";
+  const isZ = key === "z" || key === "Z" || event.code === "KeyZ";
+  if (mod && isZ && event.shiftKey) return "redo";
+  if (mod && isZ) return "undo";
+  if (key === "Delete" || key === "Backspace") return "delete";
+  return null;
+}
+
 interface EditTextSession {
   pageIndex: number;
   x: number;
@@ -149,6 +207,8 @@ interface ShapeEl {
   w: number;
   h: number;
   pageIndex: number;
+  /** Snapped outline. Drawn and transformed in place of the bounding box. */
+  vertices?: Point[];
 }
 
 interface TextEl {
@@ -203,6 +263,8 @@ interface ActivePen {
   strokeStyle: StrokeStyle;
   points: Point[];
   pageIndex: number;
+  /** Live snap ghost while the pen is dwelling. Null keeps the raw ink. */
+  snap: RecognizedShape | null;
 }
 
 interface ActiveShape {
@@ -278,6 +340,14 @@ type SyncEl = SyncStroke | SyncShape | SyncText | SyncImage;
 interface SyncEvent {
   type?: string;
   v?: number;
+  action?: string;
+  senderId?: string;
+  timestamp?: number;
+  snapshotId?: string;
+  chunkIndex?: number;
+  totalChunks?: number;
+  paperStyle?: string;
+  elementsChunk?: unknown;
   add?: unknown;
   remove?: unknown;
   pageCount?: unknown;
@@ -286,19 +356,34 @@ interface SyncEvent {
   layerOrder?: { pageIndex: number; ids: string[] };
 }
 
+export type SnapshotChunkEvent = {
+  action: "snapshot_chunk";
+  senderId: string;
+  snapshotId: string;
+  chunkIndex: number;
+  totalChunks: number;
+  paperStyle: PaperStyle;
+  elementsChunk: SyncEl[];
+};
+
+export type SnapshotRequestEvent = {
+  action: "request_snapshot";
+  senderId: string;
+  timestamp: number;
+};
+
 interface PageInfo {
   id: string;
   pageNumber: number;
 }
 
-export type ClassroomWhiteboardRef = {
-  /** Export all board pages to a PDF.
-   *  - With `lessonId`: uploads to storage and returns the public/signed URL (or null on failure).
-   *  - Without `lessonId`: returns the raw PDF Blob (legacy download mode).
-   */
-  exportBoardToPdf: (lessonId?: string) => Promise<Blob | string | null>;
-  exportBoardToPng: (pageIndex?: number) => Promise<void>;
-};
+export interface ClassroomWhiteboardHandle {
+  /** Upload every A4 page and return the stored PDF URL. Null when export or storage does not yield one. */
+  exportBoardToPdf: (targetLessonId?: string) => Promise<string | null>;
+  clearCanvas: () => void;
+}
+
+export type ClassroomWhiteboardRef = ClassroomWhiteboardHandle;
 
 type BoardRole = "STUDENT" | "TEACHER" | "ADMIN" | "MANAGER";
 
@@ -473,13 +558,21 @@ function elBounds(el: DrawEl): Bounds | null {
     const y = Math.min(...ys);
     return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
   }
-  if (el.kind === "shape")
+  if (el.kind === "shape") {
+    if (el.vertices && el.vertices.length > 0) {
+      const xs = el.vertices.map((p) => p.x);
+      const ys = el.vertices.map((p) => p.y);
+      const x = Math.min(...xs);
+      const y = Math.min(...ys);
+      return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
+    }
     return {
       x: Math.min(el.x, el.x + el.w),
       y: Math.min(el.y, el.y + el.h),
       w: Math.abs(el.w),
       h: Math.abs(el.h),
     };
+  }
   if (el.kind === "text") return textElBounds(el);
   if (el.kind === "image") return { x: el.x, y: el.y, w: el.w, h: el.h };
   return null;
@@ -736,30 +829,6 @@ function lassoHitsEl(el: DrawEl, polygon: readonly Point[]): boolean {
   return polygon.some((p) => ptInBounds(p, b));
 }
 
-function applyHistoryForward(els: readonly DrawEl[], op: HistoryOp): DrawEl[] {
-  const removedIds = new Set(op.removed.map((e) => e.id));
-  const addedIds = new Set(op.added.map((e) => e.id));
-  let next = els.filter((e) => !removedIds.has(e.id) && !addedIds.has(e.id));
-  for (const u of op.updated) {
-    const idx = next.findIndex((e) => e.id === u.id);
-    if (idx >= 0) next = [...next.slice(0, idx), u.after, ...next.slice(idx + 1)];
-    else next = [...next, u.after];
-  }
-  return [...next, ...op.added];
-}
-
-function applyHistoryBackward(els: readonly DrawEl[], op: HistoryOp): DrawEl[] {
-  const addedIds = new Set(op.added.map((e) => e.id));
-  const removedIds = new Set(op.removed.map((e) => e.id));
-  let next = els.filter((e) => !addedIds.has(e.id) && !removedIds.has(e.id));
-  for (const u of op.updated) {
-    const idx = next.findIndex((e) => e.id === u.id);
-    if (idx >= 0) next = [...next.slice(0, idx), u.before, ...next.slice(idx + 1)];
-    else next = [...next, u.before];
-  }
-  return [...next, ...op.removed];
-}
-
 function ensureImageInCache(
   el: ImageEl,
   cache: Map<string, HTMLImageElement>,
@@ -872,7 +941,14 @@ function pixelEraseStroke(stroke: StrokeEl, pt: Point, radius: number): StrokeEl
 function translateEl(el: DrawEl, dx: number, dy: number): DrawEl {
   if (el.kind === "stroke")
     return { ...el, points: el.points.map((p) => ({ x: p.x + dx, y: p.y + dy })) };
-  if (el.kind === "shape") return { ...el, x: el.x + dx, y: el.y + dy };
+  if (el.kind === "shape") {
+    return {
+      ...el,
+      x: el.x + dx,
+      y: el.y + dy,
+      vertices: el.vertices?.map((p) => ({ x: p.x + dx, y: p.y + dy })),
+    };
+  }
   if (el.kind === "text") return { ...el, x: el.x + dx, y: el.y + dy };
   return { ...el, x: el.x + dx, y: el.y + dy };
 }
@@ -889,6 +965,25 @@ function scaleEl(el: DrawEl, b: Bounds, sx: number, sy: number): DrawEl {
     };
   }
   if (el.kind === "shape") {
+    if (el.vertices && el.vertices.length > 0) {
+      const vertices = el.vertices.map((p) => ({
+        x: b.x + (p.x - b.x) * sx,
+        y: b.y + (p.y - b.y) * sy,
+      }));
+      const xs = vertices.map((p) => p.x);
+      const ys = vertices.map((p) => p.y);
+      const x = Math.min(...xs);
+      const y = Math.min(...ys);
+      return {
+        ...el,
+        vertices,
+        x,
+        y,
+        w: Math.max(...xs) - x,
+        h: Math.max(...ys) - y,
+        width: el.width * Math.max(sx, sy),
+      };
+    }
     const nb = elBounds(el);
     if (!nb) return el;
     const nx = b.x + (nb.x - b.x) * sx;
@@ -937,7 +1032,16 @@ function upsertElement(list: readonly DrawEl[], el: DrawEl): DrawEl[] {
 function cloneEl(el: DrawEl, pageIndex: number, offset: number): DrawEl {
   const id = nanoid();
   if (el.kind === "stroke") return { ...el, id, pageIndex, points: el.points.map((p) => ({ x: p.x + offset, y: p.y + offset })) };
-  if (el.kind === "shape") return { ...el, id, pageIndex, x: el.x + offset, y: el.y + offset };
+  if (el.kind === "shape") {
+    return {
+      ...el,
+      id,
+      pageIndex,
+      x: el.x + offset,
+      y: el.y + offset,
+      vertices: el.vertices?.map((p) => ({ x: p.x + offset, y: p.y + offset })),
+    };
+  }
   if (el.kind === "text") return { ...el, id, pageIndex, x: el.x + offset, y: el.y + offset };
   return { ...el, id, pageIndex, x: el.x + offset, y: el.y + offset };
 }
@@ -996,6 +1100,224 @@ function toSyncEl(el: DrawEl): SyncEl | null {
   if (el.kind === "text") return el;
   if (el.kind === "image") return el;
   return null;
+}
+
+function syncElToDraw(raw: SyncEl): DrawEl | null {
+  if (!raw || typeof raw.id !== "string") return null;
+  if (raw.kind === "stroke") {
+    if (!Array.isArray(raw.pts)) return null;
+    return {
+      kind: "stroke",
+      id: raw.id,
+      tool: raw.tool,
+      color: raw.color,
+      width: raw.width,
+      opacity: raw.opacity,
+      strokeStyle: raw.strokeStyle ?? "solid",
+      points: fromSyncPts(raw.pts),
+      pageIndex: raw.pageIndex,
+    };
+  }
+  if (raw.kind === "shape") return raw;
+  if (raw.kind === "text") return normalizeTextEl(raw);
+  if (raw.kind === "image") {
+    return {
+      kind: "image",
+      id: raw.id,
+      url: raw.url,
+      x: raw.x,
+      y: raw.y,
+      w: raw.w,
+      h: raw.h,
+      rotation: raw.rotation ?? 0,
+      crop: raw.crop ?? null,
+      pageIndex: raw.pageIndex,
+    };
+  }
+  return null;
+}
+
+function snapshotChunkBody(
+  snapshotId: string,
+  senderId: string,
+  paperStyle: PaperStyle,
+  chunkIndex: number,
+  totalChunks: number,
+  elementsChunk: readonly SyncEl[],
+): Record<string, unknown> {
+  return {
+    action: "snapshot_chunk",
+    senderId,
+    snapshotId,
+    chunkIndex,
+    totalChunks,
+    paperStyle,
+    elementsChunk,
+  };
+}
+
+function snapshotEnvelope(payload: Record<string, unknown>): string {
+  return JSON.stringify({ type: BOARD_EVENT, v: PROTO_V, ...payload });
+}
+
+function syncPieceFits(
+  piece: SyncEl,
+  paperStyle: PaperStyle,
+  snapshotId: string,
+  senderId: string,
+): boolean {
+  return (
+    snapshotEnvelope(snapshotChunkBody(snapshotId, senderId, paperStyle, 998, 999, [piece])).length <=
+    STREAM_SAFE_LIMIT
+  );
+}
+
+/** Split a stroke until each piece fits in one Stream event. Same id is concatenated on assemble. */
+function fitSyncPiece(
+  el: SyncEl,
+  paperStyle: PaperStyle,
+  snapshotId: string,
+  senderId: string,
+): SyncEl[] {
+  if (syncPieceFits(el, paperStyle, snapshotId, senderId)) return [el];
+  if (el.kind !== "stroke" || el.pts.length < 4) return [];
+  const mid = Math.floor(el.pts.length / 4) * 2;
+  if (mid < 2 || mid >= el.pts.length) return [];
+  return [
+    ...fitSyncPiece({ ...el, pts: el.pts.slice(0, mid) }, paperStyle, snapshotId, senderId),
+    ...fitSyncPiece({ ...el, pts: el.pts.slice(mid) }, paperStyle, snapshotId, senderId),
+  ];
+}
+
+function mergeSyncElements(parts: readonly SyncEl[]): DrawEl[] {
+  const order: string[] = [];
+  const merged = new Map<string, SyncEl>();
+  for (const part of parts) {
+    const prev = merged.get(part.id);
+    if (!prev) {
+      order.push(part.id);
+      merged.set(part.id, part.kind === "stroke" ? { ...part, pts: [...part.pts] } : part);
+      continue;
+    }
+    if (prev.kind === "stroke" && part.kind === "stroke") {
+      prev.pts = [...prev.pts, ...part.pts];
+    } else {
+      merged.set(part.id, part);
+    }
+  }
+  const drawn: DrawEl[] = [];
+  for (const id of order) {
+    const sync = merged.get(id);
+    if (!sync) continue;
+    const el = syncElToDraw(sync);
+    if (el) drawn.push(el);
+  }
+  return drawn;
+}
+
+/** Pack the board into Stream events that stay under STREAM_SAFE_LIMIT. */
+export function buildSnapshotChunks(
+  elements: readonly DrawEl[],
+  paperStyle: PaperStyle,
+  snapshotId: string,
+  senderId = "peer",
+): SnapshotChunkEvent[] {
+  const pieces: SyncEl[] = [];
+  for (const el of elements) {
+    const sync = toSyncEl(el);
+    if (!sync) continue;
+    pieces.push(...fitSyncPiece(sync, paperStyle, snapshotId, senderId));
+  }
+
+  const groups: SyncEl[][] = [];
+  let bucket: SyncEl[] = [];
+  const flush = (): void => {
+    if (bucket.length === 0) return;
+    groups.push(bucket);
+    bucket = [];
+  };
+  for (const piece of pieces) {
+    const trial = [...bucket, piece];
+    const overflows =
+      bucket.length > 0 &&
+      snapshotEnvelope(snapshotChunkBody(snapshotId, senderId, paperStyle, 998, 999, trial)).length >
+        STREAM_SAFE_LIMIT;
+    if (overflows || bucket.length >= SNAPSHOT_CHUNK_CAP) flush();
+    bucket.push(piece);
+  }
+  flush();
+  if (groups.length === 0) groups.push([]);
+
+  return groups.map((elementsChunk, chunkIndex) => ({
+    action: "snapshot_chunk",
+    senderId,
+    snapshotId,
+    chunkIndex,
+    totalChunks: groups.length,
+    paperStyle,
+    elementsChunk,
+  }));
+}
+
+/** Returns the full board once every chunk of one snapshot has arrived. */
+export function noteSnapshotChunk(
+  buffers: Map<string, SnapshotChunkEvent[]>,
+  chunk: SnapshotChunkEvent,
+): { elements: DrawEl[]; paperStyle: PaperStyle } | null {
+  if (!Number.isInteger(chunk.totalChunks) || chunk.totalChunks <= 0) return null;
+  if (!Number.isInteger(chunk.chunkIndex) || chunk.chunkIndex < 0 || chunk.chunkIndex >= chunk.totalChunks) {
+    return null;
+  }
+  const list = buffers.get(chunk.snapshotId) ?? [];
+  if (list.some((item) => item.chunkIndex === chunk.chunkIndex)) return null;
+  if (list.length > 0 && list[0].totalChunks !== chunk.totalChunks) return null;
+  list.push(chunk);
+  buffers.set(chunk.snapshotId, list);
+  if (list.length < chunk.totalChunks) return null;
+
+  const slots: Array<SyncEl[] | undefined> = Array.from({ length: chunk.totalChunks }, () => undefined);
+  let paperStyle: PaperStyle = "grid";
+  for (const item of list) {
+    slots[item.chunkIndex] = item.elementsChunk;
+    if (isPaperStyle(item.paperStyle)) paperStyle = item.paperStyle;
+  }
+  if (slots.some((slot) => !slot)) return null;
+  buffers.delete(chunk.snapshotId);
+  return {
+    elements: mergeSyncElements(slots.flatMap((slot) => slot ?? [])),
+    paperStyle,
+  };
+}
+
+export function parseSnapshotChunk(value: {
+  action?: string;
+  senderId?: unknown;
+  snapshotId?: unknown;
+  chunkIndex?: unknown;
+  totalChunks?: unknown;
+  paperStyle?: unknown;
+  elementsChunk?: unknown;
+}): SnapshotChunkEvent | null {
+  if (value.action !== "snapshot_chunk") return null;
+  if (typeof value.senderId !== "string" || typeof value.snapshotId !== "string") return null;
+  if (typeof value.chunkIndex !== "number" || typeof value.totalChunks !== "number") return null;
+  if (!isPaperStyle(value.paperStyle) || !Array.isArray(value.elementsChunk)) return null;
+  const elementsChunk: SyncEl[] = [];
+  for (const item of value.elementsChunk) {
+    if (!item || typeof item !== "object") continue;
+    const raw = item as SyncEl;
+    if (typeof raw.kind !== "string" || typeof raw.id !== "string") continue;
+    elementsChunk.push(raw);
+  }
+  return {
+    action: "snapshot_chunk",
+    senderId: value.senderId,
+    snapshotId: value.snapshotId,
+    chunkIndex: value.chunkIndex,
+    totalChunks: value.totalChunks,
+    paperStyle: value.paperStyle,
+    elementsChunk,
+  };
 }
 
 function makeThrottle<T extends unknown[]>(fn: (...a: T) => void, ms: number): (...a: T) => void {
@@ -1080,6 +1402,16 @@ function paintShape(ctx: CanvasRenderingContext2D, el: ShapeEl | ActiveShape): v
   ctx.lineWidth = el.width;
   ctx.lineCap = "round";
   setDash(ctx, el.strokeStyle, el.width);
+  if ("vertices" in el && el.vertices && el.vertices.length >= 2) {
+    const vertices = el.vertices;
+    ctx.beginPath();
+    ctx.moveTo(vertices[0].x, vertices[0].y);
+    for (let i = 1; i < vertices.length; i++) ctx.lineTo(vertices[i].x, vertices[i].y);
+    ctx.closePath();
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
   const lx = Math.min(x1, x2);
   const ty = Math.min(y1, y2);
   const rw = Math.abs(x2 - x1);
@@ -1114,6 +1446,39 @@ function paintShape(ctx: CanvasRenderingContext2D, el: ShapeEl | ActiveShape): v
       ctx.stroke();
       paintArrowhead(ctx, { x: x1, y: y1 }, { x: x2, y: y2 }, el.width * 4 + 8);
       break;
+  }
+  ctx.restore();
+}
+
+function paintSnapGhost(
+  ctx: CanvasRenderingContext2D,
+  shape: RecognizedShape,
+  color: string,
+  width: number,
+): void {
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.setLineDash([]);
+  if (shape.type === "line") {
+    ctx.beginPath();
+    ctx.moveTo(shape.start.x, shape.start.y);
+    ctx.lineTo(shape.end.x, shape.end.y);
+    ctx.stroke();
+  } else if (shape.type === "circle") {
+    ctx.beginPath();
+    ctx.arc(shape.center.x, shape.center.y, shape.radius, 0, Math.PI * 2);
+    ctx.stroke();
+  } else if (shape.type === "polygon" && shape.vertices.length >= 2) {
+    ctx.beginPath();
+    ctx.moveTo(shape.vertices[0].x, shape.vertices[0].y);
+    for (let i = 1; i < shape.vertices.length; i++) {
+      ctx.lineTo(shape.vertices[i].x, shape.vertices[i].y);
+    }
+    ctx.closePath();
+    ctx.stroke();
   }
   ctx.restore();
 }
@@ -1460,6 +1825,24 @@ function paintCropOverlay(
   ctx.restore();
 }
 
+/** Live rubber-band: Shift locks line/arrow, grid paper snaps a recognized ghost. */
+function presentActiveDrawing(
+  active: ActiveDrawing,
+  shiftKey: boolean,
+  snapToGrid: boolean,
+): ActiveDrawing {
+  if (!active) return null;
+  if (active.kind === "shape") {
+    if (!shiftKey || (active.shape !== "line" && active.shape !== "arrow")) return active;
+    return { ...active, end: constrainLineEnd(active.start, active.end, true) };
+  }
+  if (active.kind !== "pen" || active.tool !== "pen" || !active.snap) return active;
+  return {
+    ...active,
+    snap: alignRecognizedShape(active.snap, { snapToGrid, constrainLine: shiftKey }),
+  };
+}
+
 function renderPage(
   canvas: HTMLCanvasElement,
   pageIndex: number,
@@ -1480,16 +1863,16 @@ function renderPage(
   penColor: string,
   transformMode: boolean,
 ): void {
-  const dpr = Math.ceil(window.devicePixelRatio ?? 1);
-  if (canvas.width !== PAGE_W * dpr || canvas.height !== PAGE_H * dpr) {
-    canvas.width = PAGE_W * dpr;
-    canvas.height = PAGE_H * dpr;
+  const surface = backingStoreSize(PAGE_W, PAGE_H, window.devicePixelRatio ?? 1);
+  if (canvas.width !== surface.width || canvas.height !== surface.height) {
+    canvas.width = surface.width;
+    canvas.height = surface.height;
   }
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
 
   ctx.save();
-  ctx.scale(dpr, dpr);
+  ctx.scale(surface.scale, surface.scale);
   ctx.clearRect(0, 0, PAGE_W, PAGE_H);
 
   for (const el of elements) {
@@ -1507,8 +1890,19 @@ function renderPage(
   }
 
   if (active?.pageIndex === pageIndex) {
-    if (active.kind === "pen")
-      paintSmoothStroke(ctx, active.points, active.color, active.width, active.opacity, active.tool === "highlighter", active.strokeStyle);
+    if (active.kind === "pen") {
+      const ghost = active.tool === "pen" && active.snap && active.snap.type !== "freehand" ? active.snap : null;
+      paintSmoothStroke(
+        ctx,
+        active.points,
+        active.color,
+        active.width,
+        ghost ? active.opacity * 0.28 : active.opacity,
+        active.tool === "highlighter",
+        active.strokeStyle,
+      );
+      if (ghost) paintSnapGhost(ctx, ghost, active.color, active.width);
+    }
     else if (active.kind === "shape") paintShape(ctx, active);
   }
 
@@ -1624,7 +2018,7 @@ const STROKE_STYLES: { value: StrokeStyle; label: string; preview: string }[] = 
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboardProps>(
+const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhiteboardProps>(
   function ClassroomWhiteboard(
     { role: _role, streamChannel = null, packageId = null, lessonId = null },
     ref,
@@ -1682,15 +2076,28 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
     const selectedRef = useRef<ReadonlySet<string>>(selectedIds);
     const erasingRef = useRef(false);
     const applyRemote = useRef(false);
-    const rafId = useRef<number | null>(null);
     const imgCache = useRef<Map<string, HTMLImageElement>>(new Map());
     const zoomRef = useRef(zoom);
     const clipboardRef = useRef<DrawEl[]>([]);
     const laserTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const snapRef = useRef<SnapSession | null>(null);
+    const cursorRef = useRef<(Point & { pageIndex: number }) | null>(null);
+    const livePaintRafRef = useRef<number | null>(null);
+    const paintBoardRef = useRef<() => void>(() => {});
+    const scheduleLivePaintRef = useRef<() => void>(() => {});
+    const onUpRef = useRef<(event?: { shiftKey?: boolean }) => void>(() => {});
+    const releaseCleanupRef = useRef<(() => void) | null>(null);
     const undoStackRef = useRef<HistoryOp[]>([]);
     const redoStackRef = useRef<HistoryOp[]>([]);
     const eraserSizeRef = useRef(eraserDiameter / 2);
     const broadcastRef = useRef<((payload: Record<string, unknown>) => void) | null>(null);
+    const emitBoardEventRef = useRef<(payload: Record<string, unknown>) => void>(() => {});
+    const clientIdRef = useRef(nanoid());
+    const snapshotRequestedRef = useRef(false);
+    const awaitingSnapshotRef = useRef(false);
+    const snapshotBuffersRef = useRef(new Map<string, SnapshotChunkEvent[]>());
+    const paperStyleRef = useRef<PaperStyle>(paperStyle);
+    const shiftPressedRef = useRef(false);
 
     const eraserRadius = eraserDiameter / 2;
 
@@ -1708,6 +2115,9 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
       elementsRef.current = elements;
     }, [elements]);
     useEffect(() => {
+      paperStyleRef.current = paperStyle;
+    }, [paperStyle]);
+    useEffect(() => {
       selectedRef.current = selectedIds;
     }, [selectedIds]);
     useEffect(() => {
@@ -1715,36 +2125,75 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
     }, [zoom]);
 
     useEffect(() => {
-      if (rafId.current !== null) cancelAnimationFrame(rafId.current);
-      rafId.current = requestAnimationFrame(() => {
-        pages.forEach((page, idx) => {
-          const canvas = canvasMap.current.get(page.id);
-          if (canvas) {
-            renderPage(
-              canvas,
-              idx,
-              elements,
-              active,
-              laserPage === idx ? laserPts : null,
-              laserAlpha,
-              selectedIds,
-              selection,
-              imgCache.current,
-              eraserPt,
-              eraserRadius,
-              cropState,
-              editText?.id ?? null,
-              cursorPt?.pageIndex === idx ? cursorPt : null,
-              tool,
-              tool === "highlighter" ? mmToPx(hlWidthMm) : mmToPx(widthMm),
-              color,
-              transformMode,
-            );
-          }
-        });
+      const session = new SnapSession((preview) => {
+        const cur = activeRef.current;
+        if (!cur || cur.kind !== "pen" || cur.tool !== "pen") return;
+        activeRef.current = { ...cur, snap: preview };
+        scheduleLivePaintRef.current();
       });
+      snapRef.current = session;
       return () => {
-        if (rafId.current !== null) cancelAnimationFrame(rafId.current);
+        session.dispose();
+        if (snapRef.current === session) snapRef.current = null;
+        releaseCleanupRef.current?.();
+        releaseCleanupRef.current = null;
+        if (laserTimerRef.current) {
+          clearTimeout(laserTimerRef.current);
+          laserTimerRef.current = null;
+        }
+      };
+    }, []);
+
+    paintBoardRef.current = () => {
+      const liveActive = presentActiveDrawing(
+        activeRef.current ?? active,
+        shiftPressedRef.current,
+        shouldSnapRecognizedToGrid(paperStyleRef.current),
+      );
+      const liveCursor = cursorRef.current;
+      pages.forEach((page, idx) => {
+        const canvas = canvasMap.current.get(page.id);
+        if (!canvas) return;
+        const cursor =
+          liveCursor?.pageIndex === idx ? liveCursor : cursorPt?.pageIndex === idx ? cursorPt : null;
+        renderPage(
+          canvas,
+          idx,
+          elementsRef.current,
+          liveActive,
+          laserPage === idx ? laserPts : null,
+          laserAlpha,
+          selectedIds,
+          selection,
+          imgCache.current,
+          eraserPt,
+          eraserRadius,
+          cropState,
+          editText?.id ?? null,
+          cursor,
+          tool,
+          tool === "highlighter" ? mmToPx(hlWidthMm) : mmToPx(widthMm),
+          color,
+          transformMode,
+        );
+      });
+    };
+
+    scheduleLivePaintRef.current = () => {
+      if (livePaintRafRef.current !== null) return;
+      livePaintRafRef.current = requestAnimationFrame(() => {
+        livePaintRafRef.current = null;
+        paintBoardRef.current();
+      });
+    };
+
+    useEffect(() => {
+      scheduleLivePaintRef.current();
+      return () => {
+        if (livePaintRafRef.current !== null) {
+          cancelAnimationFrame(livePaintRafRef.current);
+          livePaintRafRef.current = null;
+        }
       };
     });
 
@@ -1795,18 +2244,6 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
       document.addEventListener("pointerdown", onOutside);
       return () => document.removeEventListener("pointerdown", onOutside);
     }, [textMenu]);
-
-    useEffect(() => {
-      const el = scrollRef.current;
-      if (!el) return;
-      const blockHorizontalWheel = (e: WheelEvent): void => {
-        if (!(e.metaKey || e.ctrlKey) && Math.abs(e.deltaX) > 0) {
-          e.preventDefault();
-        }
-      };
-      el.addEventListener("wheel", blockHorizontalWheel, { passive: false });
-      return () => el.removeEventListener("wheel", blockHorizontalWheel);
-    }, []);
 
     useEffect(() => {
       const el = scrollRef.current;
@@ -1876,13 +2313,16 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
     useEffect(() => {
       if (!streamChannel) {
         broadcastRef.current = null;
+        emitBoardEventRef.current = () => {};
+        snapshotRequestedRef.current = false;
+        awaitingSnapshotRef.current = false;
+        snapshotBuffersRef.current.clear();
         return;
       }
-      const throttled = makeThrottle((payload: Record<string, unknown>): void => {
-        if (applyRemote.current) return;
+      const emit = (payload: Record<string, unknown>): void => {
         const json = JSON.stringify({ type: BOARD_EVENT, v: PROTO_V, ...payload });
-        if (json.length > STREAM_LIMIT) {
-          console.warn(`[whiteboard] payload ${json.length}B > limit, skipping`);
+        if (json.length > STREAM_SAFE_LIMIT || json.length > STREAM_LIMIT) {
+          console.warn(`[whiteboard] payload ${json.length}B > safe limit, skipping`);
           return;
         }
         void streamChannel
@@ -1897,18 +2337,85 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
               setSyncStatus("error");
             }
           });
+      };
+      emitBoardEventRef.current = emit;
+      broadcastRef.current = makeThrottle((payload: Record<string, unknown>): void => {
+        if (applyRemote.current) return;
+        emit(payload);
       }, 0);
-      broadcastRef.current = throttled;
       setSyncStatus("live");
     }, [streamChannel]);
 
     useEffect(() => {
       if (!streamChannel) return;
 
+      const applySnapshot = (elements: DrawEl[], nextPaper: PaperStyle): void => {
+        for (const el of elements) {
+          if (el.kind === "image") ensureImageInCache(el, imgCache.current);
+        }
+        elementsRef.current = elements;
+        paperStyleRef.current = nextPaper;
+        setElements(elements);
+        setPaperStyle(nextPaper);
+        const maxPage = elements.reduce((max, el) => Math.max(max, el.pageIndex), 0);
+        setPages((prev) => {
+          const target = maxPage + 1;
+          if (prev.length >= target) return prev;
+          return [
+            ...prev,
+            ...Array.from({ length: target - prev.length }, (_, i) => ({
+              id: nanoid(),
+              pageNumber: prev.length + i + 1,
+            })),
+          ];
+        });
+        scheduleLivePaintRef.current();
+      };
+
+      const publishSnapshot = (): void => {
+        const chunks = buildSnapshotChunks(
+          elementsRef.current,
+          paperStyleRef.current,
+          nanoid(),
+          clientIdRef.current,
+        );
+        for (const chunk of chunks) emitBoardEventRef.current(chunk);
+      };
+
       const onEvent = (ev: SyncEvent): void => {
         if (ev.type !== BOARD_EVENT || (ev.v !== PROTO_V && ev.v !== 5 && ev.v !== 4)) return;
+        if (ev.senderId === clientIdRef.current) return;
         applyRemote.current = true;
         try {
+          if (ev.action === "request_snapshot") {
+            publishSnapshot();
+            return;
+          }
+          if (ev.action === "snapshot_chunk") {
+            if (!awaitingSnapshotRef.current) return;
+            const chunk = parseSnapshotChunk(ev);
+            if (chunk) {
+              const ready = noteSnapshotChunk(snapshotBuffersRef.current, chunk);
+              if (ready) {
+                awaitingSnapshotRef.current = false;
+                if (ready.elements.length === 0 && elementsRef.current.length > 0) {
+                  paperStyleRef.current = ready.paperStyle;
+                  setPaperStyle(ready.paperStyle);
+                } else {
+                  applySnapshot(ready.elements, ready.paperStyle);
+                }
+              }
+            }
+            return;
+          }
+          if (ev.action === "paper_style_change") {
+            const nextPaper = readPaperStyleChange(ev);
+            if (nextPaper) {
+              paperStyleRef.current = nextPaper;
+              setPaperStyle(nextPaper);
+            }
+            return;
+          }
           if (ev.historyOp && (ev.direction === "forward" || ev.direction === "backward")) {
             applyHistoryRemote(ev.historyOp, ev.direction);
           }
@@ -1980,6 +2487,11 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
       };
 
       const unbound = streamChannel.on(BOARD_EVENT as "message.new", onEvent as never);
+      if (shouldRequestSnapshot(elementsRef.current.length, snapshotRequestedRef.current)) {
+        snapshotRequestedRef.current = true;
+        awaitingSnapshotRef.current = true;
+        emitBoardEventRef.current(buildRequestSnapshot(clientIdRef.current, Date.now()));
+      }
       setSyncStatus("live");
       return () => {
         if (typeof unbound === "object" && unbound && "unsubscribe" in unbound) {
@@ -2103,9 +2615,25 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
       [broadcastElement, pushHistory],
     );
 
+    const armPointerRelease = (): void => {
+      releaseCleanupRef.current?.();
+      const onRelease = (event: PointerEvent): void => {
+        releaseCleanupRef.current?.();
+        releaseCleanupRef.current = null;
+        onUpRef.current(event);
+      };
+      window.addEventListener("pointerup", onRelease);
+      window.addEventListener("pointercancel", onRelease);
+      releaseCleanupRef.current = () => {
+        window.removeEventListener("pointerup", onRelease);
+        window.removeEventListener("pointercancel", onRelease);
+      };
+    };
+
     const onDown = useCallback(
       (e: React.PointerEvent<HTMLCanvasElement>, pageIndex: number): void => {
         e.preventDefault();
+        shiftPressedRef.current = e.shiftKey;
         e.currentTarget.setPointerCapture(e.pointerId);
         setActivePageIndex(pageIndex);
         const pt = ptFrom(e);
@@ -2302,9 +2830,16 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
             strokeStyle,
             points: [pt],
             pageIndex,
+            snap: null,
           };
           activeRef.current = na;
-          setActive(na);
+          cursorRef.current = { x: pt.x, y: pt.y, pageIndex };
+          e.currentTarget.style.cursor = "none";
+          scheduleLivePaintRef.current();
+          if (tool === "pen") {
+            snapRef.current?.begin(pt.x, pt.y, performance.now());
+            armPointerRelease();
+          }
           return;
         }
 
@@ -2320,7 +2855,8 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
             pageIndex,
           };
           activeRef.current = na;
-          setActive(na);
+          cursorRef.current = { x: pt.x, y: pt.y, pageIndex };
+          scheduleLivePaintRef.current();
         }
       },
       [tool, color, widthMm, hlWidthMm, strokeStyle, shapeKind, applyEraserAt, lassoStyle, cropState],
@@ -2328,7 +2864,29 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
 
     const onMove = useCallback(
       (e: React.PointerEvent<HTMLCanvasElement>, pageIndex: number): void => {
+        shiftPressedRef.current = e.shiftKey;
         const pt = ptFrom(e);
+        const live = activeRef.current;
+        if (live && live.pageIndex === pageIndex && (live.kind === "pen" || live.kind === "shape")) {
+          cursorRef.current = { x: pt.x, y: pt.y, pageIndex };
+          if (live.kind === "pen") {
+            if (live.tool === "pen") snapRef.current?.move(pt.x, pt.y, performance.now());
+            const snap = activeRef.current?.kind === "pen" ? activeRef.current.snap : null;
+            live.points.push(pt);
+            activeRef.current = { ...live, snap };
+          } else {
+            activeRef.current = { ...live, end: pt };
+          }
+          scheduleLivePaintRef.current();
+          return;
+        }
+        if (!live && (tool === "pen" || tool === "highlighter" || tool === "shapes")) {
+          cursorRef.current = { x: pt.x, y: pt.y, pageIndex };
+          e.currentTarget.style.cursor = tool === "shapes" ? "crosshair" : "none";
+          scheduleLivePaintRef.current();
+          return;
+        }
+        cursorRef.current = { x: pt.x, y: pt.y, pageIndex };
         setCursorPt({ x: pt.x, y: pt.y, pageIndex });
 
         let nextCursor = "crosshair";
@@ -2473,24 +3031,15 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
           }
           return;
         }
-
-        const cur = activeRef.current;
-        if (!cur || cur.pageIndex !== pageIndex) return;
-
-        if (cur.kind === "pen") {
-          const updated: ActivePen = { ...cur, points: [...cur.points, pt] };
-          activeRef.current = updated;
-          setActive(updated);
-        } else if (cur.kind === "shape") {
-          const updated: ActiveShape = { ...cur, end: pt };
-          activeRef.current = updated;
-          setActive(updated);
-        }
       },
       [tool, selection, applyEraserAt, cropState],
     );
 
-    const onUp = useCallback((): void => {
+    const onUp = useCallback((event?: { shiftKey?: boolean }): void => {
+      if (typeof event?.shiftKey === "boolean") shiftPressedRef.current = event.shiftKey;
+      releaseCleanupRef.current?.();
+      releaseCleanupRef.current = null;
+
       if (cropState && selection && !selection.snapshot.length) {
         setSelection(null);
         return;
@@ -2522,26 +3071,67 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
 
       const cur = activeRef.current;
       if (!cur) return;
+      if (livePaintRafRef.current !== null) {
+        cancelAnimationFrame(livePaintRafRef.current);
+        livePaintRafRef.current = null;
+      }
       activeRef.current = null;
+      cursorRef.current = null;
       setActive(null);
 
       if (cur.kind === "pen") {
-        const el: StrokeEl = {
-          kind: "stroke",
-          id: nanoid(),
-          tool: cur.tool,
-          color: cur.color,
-          width: cur.width,
-          opacity: cur.opacity,
-          strokeStyle: cur.strokeStyle,
-          points: [...cur.points],
-          pageIndex: cur.pageIndex,
-        };
-        pushHistory({ id: nanoid(), removed: [], added: [el], updated: [] });
-        setElements((prev) => [...prev, el]);
-        const sync = toSyncEl(el);
-        if (sync) broadcastElement({ add: sync });
+        const recognized = cur.tool === "pen" ? snapRef.current?.finish(performance.now()) ?? null : null;
+        const aligned =
+          recognized && shiftPressedRef.current
+            ? alignRecognizedShape(recognized, { constrainLine: true })
+            : recognized;
+        const draft = aligned
+          ? draftFromRecognized(aligned, {
+              snapToGrid: shouldSnapRecognizedToGrid(paperStyleRef.current),
+            })
+          : null;
+        if (draft) {
+          const el: ShapeEl = {
+            kind: "shape",
+            id: nanoid(),
+            shape: draft.shape,
+            color: cur.color,
+            width: cur.width,
+            strokeStyle: cur.strokeStyle,
+            x: draft.x,
+            y: draft.y,
+            w: draft.w,
+            h: draft.h,
+            pageIndex: cur.pageIndex,
+            ...(draft.vertices ? { vertices: draft.vertices } : {}),
+          };
+          pushHistory({ id: nanoid(), removed: [], added: [el], updated: [] });
+          setElements((prev) => [...prev, el]);
+          const sync = toSyncEl(el);
+          if (sync) broadcastElement({ add: sync });
+        } else {
+          const el: StrokeEl = {
+            kind: "stroke",
+            id: nanoid(),
+            tool: cur.tool,
+            color: cur.color,
+            width: cur.width,
+            opacity: cur.opacity,
+            strokeStyle: cur.strokeStyle,
+            points: [...cur.points],
+            pageIndex: cur.pageIndex,
+          };
+          pushHistory({ id: nanoid(), removed: [], added: [el], updated: [] });
+          setElements((prev) => [...prev, el]);
+          const sync = toSyncEl(el);
+          if (sync) broadcastElement({ add: sync });
+        }
       } else if (cur.kind === "shape") {
+        const end = constrainLineEnd(
+          cur.start,
+          cur.end,
+          shiftPressedRef.current && (cur.shape === "line" || cur.shape === "arrow"),
+        );
         const el: ShapeEl = {
           kind: "shape",
           id: nanoid(),
@@ -2551,8 +3141,8 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
           strokeStyle: cur.strokeStyle,
           x: cur.start.x,
           y: cur.start.y,
-          w: cur.end.x - cur.start.x,
-          h: cur.end.y - cur.start.y,
+          w: end.x - cur.start.x,
+          h: end.y - cur.start.y,
           pageIndex: cur.pageIndex,
         };
         pushHistory({ id: nanoid(), removed: [], added: [el], updated: [] });
@@ -2561,6 +3151,8 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
         if (sync) broadcastElement({ add: sync });
       }
     }, [tool, selection, finalizeSelection, broadcastElement, pushHistory, cropState]);
+
+    onUpRef.current = onUp;
 
     const commitText = useCallback((): void => {
       if (!editText) return;
@@ -3160,36 +3752,59 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
     }, []);
 
     useEffect(() => {
-      const onKey = (e: KeyboardEvent): void => {
-        const mod = e.metaKey || e.ctrlKey;
-        if (mod && e.key === "c") {
+      const onKeyDown = (e: KeyboardEvent): void => {
+        if (e.key === "Shift") {
+          if (!shiftPressedRef.current) {
+            shiftPressedRef.current = true;
+            scheduleLivePaintRef.current();
+          }
+          return;
+        }
+        const action = readWhiteboardShortcut(e);
+        if (action === "copy") {
           e.preventDefault();
           copySelection();
-        } else if (mod && e.key === "x") {
+        } else if (action === "cut") {
           e.preventDefault();
           if (editText) cutEditText();
           else cutSelection();
-        } else if (mod && e.key === "v") {
+        } else if (action === "paste") {
           e.preventDefault();
           pasteClipboard();
-        } else if (mod && e.key === "d") {
+        } else if (action === "duplicate") {
           e.preventDefault();
           if (editText) duplicateEditText();
           else duplicateSelection();
-        } else if (mod && e.key === "z" && e.shiftKey) {
+        } else if (action === "redo") {
           e.preventDefault();
           performRedo();
-        } else if (mod && e.key === "z") {
+        } else if (action === "undo") {
           e.preventDefault();
           performUndo();
-        } else if (e.key === "Delete" || e.key === "Backspace") {
+        } else if (action === "delete") {
           if (editText) return;
           e.preventDefault();
           deleteSelection();
         }
       };
-      window.addEventListener("keydown", onKey);
-      return () => window.removeEventListener("keydown", onKey);
+      const onKeyUp = (e: KeyboardEvent): void => {
+        if (e.key !== "Shift" || !shiftPressedRef.current) return;
+        shiftPressedRef.current = false;
+        scheduleLivePaintRef.current();
+      };
+      const onBlur = (): void => {
+        if (!shiftPressedRef.current) return;
+        shiftPressedRef.current = false;
+        scheduleLivePaintRef.current();
+      };
+      window.addEventListener("keydown", onKeyDown);
+      window.addEventListener("keyup", onKeyUp);
+      window.addEventListener("blur", onBlur);
+      return () => {
+        window.removeEventListener("keydown", onKeyDown);
+        window.removeEventListener("keyup", onKeyUp);
+        window.removeEventListener("blur", onBlur);
+      };
     }, [
       copySelection,
       pasteClipboard,
@@ -3203,67 +3818,75 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
       performRedo,
     ]);
 
-    useImperativeHandle(ref, () => ({
-      exportBoardToPdf: async (lessonId?: string): Promise<Blob | string | null> => {
-        // Render every A4 page at full resolution (794 × 1123 px).
-        const frames: ExportFrame[] = pages
-          .map((page, idx) => ({
-            pageNumber: page.pageNumber,
-            width: PAGE_W,
-            height: PAGE_H,
-            dataUrl: renderPageDataUrl(idx, elements, imgCache.current, paperStyle),
-          }))
-          .filter((f) => f.dataUrl !== "");
-
-        if (frames.length === 0) return null;
-
-        try {
-          const body = lessonId ? { frames, lessonId } : { frames };
-          const res = await fetch("/api/excalidraw/export", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
-          });
-
-          if (!res.ok) {
-            console.error("[whiteboard] export:", await res.text());
-            return null;
-          }
-
-          // When lessonId is provided, the API returns JSON with a storage URL.
-          if (lessonId) {
-            const data = (await res.json()) as { success: boolean; url?: string | null };
-            return data.url ?? null;
-          }
-
-          // Legacy path: return raw PDF blob for direct download.
-          return res.blob();
-        } catch (err) {
-          console.error("[whiteboard] export:", err);
-          return null;
-        }
-      },
-      exportBoardToPng: async (pageIndex: number = activePageIndex): Promise<void> => {
-        const targetPage = pages[pageIndex] ?? pages[0];
-        if (!targetPage) return;
-        const dataUrl = renderPageDataUrl(pageIndex, elements, imgCache.current, paperStyle);
-        if (!dataUrl) return;
-        const a = document.createElement("a");
-        a.href = dataUrl;
-        a.download = `whiteboard-page-${pageIndex + 1}.png`;
-        a.click();
-      },
-    }));
-
-    const exportPdfDirect = useCallback(async (): Promise<void> => {
-      const frames: ExportFrame[] = pages
+    const collectExportFrames = useCallback((): ExportFrame[] => {
+      return pages
         .map((page, idx) => ({
           pageNumber: page.pageNumber,
           width: PAGE_W,
           height: PAGE_H,
           dataUrl: renderPageDataUrl(idx, elements, imgCache.current, paperStyle),
         }))
-        .filter((f) => f.dataUrl !== "");
+        .filter((frame) => frame.dataUrl !== "");
+    }, [elements, pages, paperStyle]);
+
+    const exportBoardToPdf = useCallback(
+      async (targetLessonId?: string): Promise<string | null> => {
+        const storageLessonId = (targetLessonId ?? lessonId ?? "").trim();
+        if (!storageLessonId) return null;
+        const frames = collectExportFrames();
+        if (frames.length === 0) return null;
+        try {
+          const res = await fetch("/api/excalidraw/export", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ frames, lessonId: storageLessonId }),
+          });
+          if (!res.ok) {
+            console.error("[whiteboard] export:", await res.text());
+            return null;
+          }
+          const data = (await res.json()) as { url?: string | null; pdfUrl?: string | null };
+          const url = data.url ?? data.pdfUrl ?? null;
+          return typeof url === "string" && url.startsWith("http") ? url : null;
+        } catch (err) {
+          console.error("[whiteboard] export:", err);
+          return null;
+        }
+      },
+      [collectExportFrames, lessonId],
+    );
+
+    const clearCanvas = useCallback((): void => {
+      if (livePaintRafRef.current !== null) {
+        cancelAnimationFrame(livePaintRafRef.current);
+        livePaintRafRef.current = null;
+      }
+      activeRef.current = null;
+      cursorRef.current = null;
+      elementsRef.current = [];
+      setActive(null);
+      setElements([]);
+      setSelectedIds(new Set());
+      setSelection(null);
+      setEditText(null);
+      setUndoStack([]);
+      setRedoStack([]);
+    }, []);
+
+    useImperativeHandle(
+      ref,
+      () => ({
+        exportBoardToPdf,
+        clearCanvas,
+      }),
+      [clearCanvas, exportBoardToPdf],
+    );
+
+    const exportPdfDirect = useCallback(async (): Promise<void> => {
+      if (lessonId) {
+        await exportBoardToPdf(lessonId);
+      }
+      const frames = collectExportFrames();
       if (frames.length === 0) return;
       try {
         const res = await fetch("/api/excalidraw/export", {
@@ -3282,7 +3905,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
       } catch (err) {
         console.error("[whiteboard] export pdf error:", err);
       }
-    }, [elements, pages, paperStyle]);
+    }, [collectExportFrames, exportBoardToPdf, lessonId]);
 
     const exportPngDirect = useCallback((): void => {
       const pageIndex = activePageIndex;
@@ -3577,7 +4200,9 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => {
                   setPaperStyle(opt.value);
+                  paperStyleRef.current = opt.value;
                   setOpenMenu(null);
+                  broadcastElement({ action: "paper_style_change", paperStyle: opt.value, senderId: clientIdRef.current });
                 }}
                 className={`flex flex-col gap-1 rounded-xl p-1.5 text-start transition-all ${
                   selected
@@ -3651,7 +4276,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
     return (
       <div
         ref={containerRef}
-        className="relative w-full h-full overflow-hidden overflow-x-hidden"
+        className="relative w-full h-full overflow-hidden"
         dir="ltr"
         onContextMenu={(e) => e.preventDefault()}
       >
@@ -3803,13 +4428,15 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardRef, ClassroomWhiteboa
         {/* Scrollable notebook */}
         <div
           ref={scrollRef}
-          className="w-full h-full overflow-y-auto overflow-x-hidden overscroll-x-none"
-          style={{ background: DESK_BG, touchAction: "pan-y" }}
+          className="w-full h-full overflow-auto overscroll-x-contain"
+          style={{ background: DESK_BG, touchAction: "pan-x pan-y" }}
           onContextMenu={(e) => e.preventDefault()}
         >
           <div
-            className="flex flex-col items-center w-full max-w-full"
+            className="mx-auto flex flex-col items-center"
             style={{
+              width: PAGE_W + PAGE_GAP,
+              minWidth: PAGE_W + PAGE_GAP,
               paddingTop: 60 + PAGE_GAP,
               paddingBottom: PAGE_GAP * 4,
               gap: PAGE_GAP,

@@ -48,6 +48,19 @@ type CompletePayload = {
   pdfUrlFromClient: string | null;
 };
 
+const BOARD_PDF_URL_KEYS = ["boardPdfUrl", "boardUrl", "excalidrawPdfUrl", "pdfUrl"] as const;
+
+/** First http(s) URL among the accepted board-PDF aliases. Missing or local values stay null. */
+function readBoardPdfUrl(source: { [key: string]: unknown }): string | null {
+  for (const key of BOARD_PDF_URL_KEYS) {
+    const value = source[key];
+    if (typeof value !== "string") continue;
+    const trimmed = value.trim();
+    if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) return trimmed;
+  }
+  return null;
+}
+
 /**
  * Accept both FastMCP `application/json` and browser `multipart/form-data`.
  * Parses lessonId, feedback, masteredTopics consistently across content types.
@@ -61,6 +74,9 @@ async function parseCompletePayload(request: Request): Promise<CompletePayload |
       feedback?: unknown;
       masteredTopics?: unknown;
       pdfUrl?: unknown;
+      boardPdfUrl?: unknown;
+      boardUrl?: unknown;
+      excalidrawPdfUrl?: unknown;
     };
     const lessonId = typeof body.lessonId === "string" ? body.lessonId.trim() : "";
     if (!lessonId) return { error: "lessonId is required" };
@@ -72,8 +88,7 @@ async function parseCompletePayload(request: Request): Promise<CompletePayload |
     const masteredTopics = Array.isArray(body.masteredTopics)
       ? body.masteredTopics.filter((t): t is string => typeof t === "string" && t.trim() !== "")
       : [];
-    const pdfUrlFromClient =
-      typeof body.pdfUrl === "string" && body.pdfUrl.trim() ? body.pdfUrl.trim() : null;
+    const pdfUrlFromClient = readBoardPdfUrl(body);
 
     return { lessonId, feedback, masteredTopics, pdfFile: null, pdfUrlFromClient };
   }
@@ -109,14 +124,14 @@ async function parseCompletePayload(request: Request): Promise<CompletePayload |
   }
 
   const pdfFile = formData.get("pdfFile");
-  const pdfUrlRaw = formData.get("pdfUrl");
+  const formUrls: { [key: string]: unknown } = {};
+  for (const key of BOARD_PDF_URL_KEYS) formUrls[key] = formData.get(key);
   return {
     lessonId,
     feedback,
     masteredTopics,
     pdfFile: pdfFile instanceof File ? pdfFile : null,
-    pdfUrlFromClient:
-      typeof pdfUrlRaw === "string" && pdfUrlRaw.trim() ? pdfUrlRaw.trim() : null,
+    pdfUrlFromClient: readBoardPdfUrl(formUrls),
   };
 }
 
