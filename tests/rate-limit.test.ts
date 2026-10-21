@@ -165,6 +165,16 @@ describe("limits", () => {
     expect(RATE_LIMITS.auth).toEqual({ requests: 15, window: "60 s" });
     expect(RATE_LIMITS.booking).toEqual({ requests: 10, window: "60 s" });
     expect(RATE_LIMITS.api).toEqual({ requests: 30, window: "60 s" });
+    expect(RATE_LIMITS.boardUpload).toEqual({ requests: 10, window: "60 s" });
+  });
+
+  it("limits board uploads to 10 per minute for one user id", async () => {
+    configureRedis();
+    const { checkUserRateLimit } = await loadRateLimit();
+
+    await checkUserRateLimit("student-1", "boardUpload");
+
+    expect(rl.limit).toHaveBeenCalledWith("project8:ratelimit:boardUpload", "user:student-1");
   });
 });
 

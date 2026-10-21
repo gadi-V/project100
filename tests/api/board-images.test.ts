@@ -17,6 +17,13 @@ vi.mock("../../lib/prisma", () => ({
     boardImage: { create: db.create, findUnique: db.findImage },
   },
 }));
+const limits = vi.hoisted(() => ({
+  checkUserRateLimit: vi.fn(),
+}));
+
+vi.mock("../../lib/security/rate-limit", () => ({
+  checkUserRateLimit: limits.checkUserRateLimit,
+}));
 vi.mock("../../lib/storage", () => ({
   uploadBoardImage: db.upload,
   readBoardObject: db.read,
@@ -27,7 +34,6 @@ vi.mock("../../lib/storage", () => ({
   STORAGE_UPLOAD_CLIENT_ERROR: "Upload failed, please try again",
 }));
 
-import { consumeBoardUpload, resetBoardUploadLimits } from "../../lib/board-upload-limit";
 import { POST as upload } from "../../app/api/upload/route";
 import { GET as readImage } from "../../app/api/board-images/[id]/route";
 
@@ -55,7 +61,16 @@ function readRequest(id = "abcdefghijkl") {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  resetBoardUploadLimits();
+  const used = new Map<string, number>();
+  limits.checkUserRateLimit.mockImplementation(async (userId: string) => {
+    const count = (used.get(userId) ?? 0) + 1;
+    used.set(userId, count);
+    const reset = Date.now() + 60_000;
+    if (count > 10) {
+      return { success: false, limit: 10, remaining: 0, reset, bypassed: false, degraded: false };
+    }
+    return { success: true, limit: 10, remaining: 10 - count, reset, bypassed: false, degraded: false };
+  });
   session.getCurrentUser.mockResolvedValue(OWNER);
   db.access.mockResolvedValue({ id: NOTEBOOK, studentId: OWNER.id });
   db.upload.mockResolvedValue("https://signed.example/ignored");
@@ -100,7 +115,11 @@ describe("POST /api/upload notebook access", () => {
     expect(blocked.status).toBe(429);
     expect(blocked.headers.get("Retry-After")).toBeTruthy();
     expect(db.upload).toHaveBeenCalledTimes(10);
-    expect(consumeBoardUpload("someone-else").ok).toBe(true);
+
+    session.getCurrentUser.mockResolvedValue({ ...OWNER, id: "student-2" });
+    expect((await upload(fileRequest())).status).toBe(200);
+    expect(limits.checkUserRateLimit).toHaveBeenCalledWith("student-2", "boardUpload");
+    expect(db.upload).toHaveBeenCalledTimes(11);
   });
 });
 

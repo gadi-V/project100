@@ -10,6 +10,16 @@ vi.mock("../lib/notebooks", () => notebooks);
 vi.mock("../lib/prisma", () => ({
   prisma: { boardImage: { create: db.create } },
 }));
+vi.mock("../lib/security/rate-limit", () => ({
+  checkUserRateLimit: vi.fn(async () => ({
+    success: true,
+    limit: 10,
+    remaining: 9,
+    reset: Date.now() + 60_000,
+    bypassed: false,
+    degraded: false,
+  })),
+}));
 vi.mock("../lib/storage", () => ({
   uploadBoardImage: storage.uploadBoardImage,
   boardImageObjectPath: (imageId: string) => `board-images/${imageId}.png`,
@@ -38,7 +48,38 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+const TOO_LARGE = { error: "הקובץ גדול מדי (מקס 4MB)" };
+const FOUR_MB = 4 * 1024 * 1024;
+
 describe("POST /api/upload", () => {
+  it("rejects a body over 4MB from Content-Length before reading the file", async () => {
+    const { POST } = await import("../app/api/upload/route");
+    const response = await POST(
+      new Request("https://project100.example/api/upload", {
+        method: "POST",
+        headers: { "content-length": String(FOUR_MB + 1) },
+        body: "x",
+      }),
+    );
+
+    expect(response.status).toBe(413);
+    expect(await response.json()).toEqual(TOO_LARGE);
+    expect(storage.uploadBoardImage).not.toHaveBeenCalled();
+    expect(db.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a file over 4MB with the same message", async () => {
+    const { POST } = await import("../app/api/upload/route");
+    const form = new FormData();
+    form.append("notebookId", "nb-1");
+    form.append("file", new File([new Uint8Array(FOUR_MB + 1)], "big.png", { type: "image/png" }));
+    const response = await POST(new Request("https://project100.example/api/upload", { method: "POST", body: form }));
+
+    expect(response.status).toBe(413);
+    expect(await response.json()).toEqual(TOO_LARGE);
+    expect(storage.uploadBoardImage).not.toHaveBeenCalled();
+  });
+
   it("returns a clean JSON error when storage fails and does not leak the service key", async () => {
     storage.uploadBoardImage.mockRejectedValue(
       new Error("Supabase image upload failed (404): Bucket not found key=service-role-secret")

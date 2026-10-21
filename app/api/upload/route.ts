@@ -10,7 +10,8 @@ import {
   uploadBoardImage,
 } from "../../../lib/storage";
 
-const MAX_BYTES = 5 * 1024 * 1024;
+const MAX_BYTES = 4 * 1024 * 1024;
+const TOO_LARGE = { error: "הקובץ גדול מדי (מקס 4MB)" };
 const ALLOWED = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 
 export async function POST(request: Request): Promise<NextResponse> {
@@ -18,6 +19,11 @@ export async function POST(request: Request): Promise<NextResponse> {
     const user = await getCurrentUser();
     if (!user) {
       return NextResponse.json({ error: "נדרשת התחברות" }, { status: 401 });
+    }
+
+    const declaredLength = Number(request.headers.get("content-length"));
+    if (Number.isFinite(declaredLength) && declaredLength > MAX_BYTES) {
+      return NextResponse.json(TOO_LARGE, { status: 413 });
     }
 
     const formData = await request.formData();
@@ -40,7 +46,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
 
     if (file.size > MAX_BYTES) {
-      return NextResponse.json({ error: "הקובץ גדול מדי (מקס 5MB)" }, { status: 400 });
+      return NextResponse.json(TOO_LARGE, { status: 413 });
     }
 
     const limit = await checkUserRateLimit(user.id, "boardUpload");

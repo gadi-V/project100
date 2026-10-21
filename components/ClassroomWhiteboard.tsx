@@ -30,6 +30,7 @@ import {
   renderBoardPageDataUrl,
   type BoardImageEl,
 } from "../lib/whiteboard/board-image";
+import { prepareBoardImageFile } from "../lib/whiteboard/prepare-board-image";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -3715,7 +3716,20 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
 
     const handleImageFile = useCallback(
       async (file: File): Promise<void> => {
-        const imageId = await uploadBoardFile(file);
+        let prepared: File;
+        try {
+          const result = await prepareBoardImageFile(file);
+          if ("error" in result) {
+            setAiHint("התמונה עדיין גדולה מדי אחרי הכיווץ. נסו קובץ קטן יותר.");
+            return;
+          }
+          prepared = result.file;
+        } catch (err) {
+          console.error("[whiteboard] image prepare:", err);
+          setAiHint("לא הצלחנו להעלות את התמונה. נסו שוב.");
+          return;
+        }
+        const imageId = await uploadBoardFile(prepared);
         if (!imageId) return;
         await insertImageElement(imageId);
       },
@@ -4703,6 +4717,11 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
 
     const handleToolClick = (t: DrawTool): void => {
       if (t === "image") {
+        if (!notebookId) {
+          setAiHint("המחברת עדיין לא מוכנה. נסו שוב בעוד רגע.");
+          setOpenMenu(null);
+          return;
+        }
         fileInputRef.current?.click();
         setOpenMenu(null);
         return;
