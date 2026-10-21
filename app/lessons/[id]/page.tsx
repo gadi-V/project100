@@ -40,8 +40,33 @@ export default async function LessonPage(props: {
     user.role === "MANAGER" ||
     user.role === "ADMIN";
 
-  // Stream token, chat channel, and the pedagogical brief do not need the
-  // Daily room. Start them before provisioning so they overlap that wait.
+  // Reconcile Stream membership before the browser receives a token.
+  // A Stream failure must not block the room.
+  let streamChannelId: string | null = lesson.chatChannel?.streamChannelId ?? null;
+  try {
+    streamChannelId = (await resolveLessonStreamChannelId(lesson)) ?? streamChannelId;
+  } catch (error) {
+    console.error("Failed to resolve lesson Stream channel:", error);
+  }
+  if (streamChannelId) {
+    try {
+      streamChannelId = await ensureLiveStreamChannel(lesson.id, streamChannelId);
+    } catch (error) {
+      const code =
+        typeof error === "object" && error !== null && "code" in error
+          ? (error as { code: unknown }).code
+          : null;
+      console.error("[lesson-room] Stream membership reconciliation failed", {
+        lessonId: lesson.id,
+        teacherId: lesson.teacherId,
+        studentId: lesson.studentId,
+        userId: user.id,
+        code,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   const streamTokenPromise: Promise<string | null> = Promise.resolve().then(() => {
     try {
       return generateStreamToken(user.id);
@@ -50,23 +75,6 @@ export default async function LessonPage(props: {
       return null;
     }
   });
-
-  const streamChannelPromise: Promise<string | null> = (async () => {
-    let resolved: string | null = lesson.chatChannel?.streamChannelId ?? null;
-    try {
-      resolved = (await resolveLessonStreamChannelId(lesson)) ?? resolved;
-    } catch (error) {
-      console.error("Failed to resolve lesson Stream channel:", error);
-    }
-    if (resolved?.startsWith("mock-")) {
-      try {
-        resolved = await ensureLiveStreamChannel(lesson.id, resolved);
-      } catch (error) {
-        console.error("Failed to heal lesson Stream channel:", error);
-      }
-    }
-    return resolved;
-  })();
 
   const diagnosticPromise = isOwner
     ? prisma.diagnosticQuiz.findFirst({
@@ -113,14 +121,12 @@ export default async function LessonPage(props: {
     }
   })();
 
-  const [, dailyToken, streamToken, streamChannelId, studentDiagnostic] =
-    await Promise.all([
-      persistRoomPromise,
-      dailyTokenPromise,
-      streamTokenPromise,
-      streamChannelPromise,
-      diagnosticPromise,
-    ]);
+  const [, dailyToken, streamToken, studentDiagnostic] = await Promise.all([
+    persistRoomPromise,
+    dailyTokenPromise,
+    streamTokenPromise,
+    diagnosticPromise,
+  ]);
 
   const streamApiKey =
     process.env.NEXT_PUBLIC_STREAM_API_KEY || process.env.STREAM_API_KEY || null;

@@ -133,7 +133,12 @@ export default function ClassroomChat({
         setChannel(ch);
         onChannelReady?.(ch);
       } catch (err) {
-        console.error("Stream Chat connection error:", err);
+        const code =
+          typeof err === "object" && err !== null && "code" in err
+            ? (err as { code: unknown }).code
+            : null;
+        const message = err instanceof Error ? err.message : String(err);
+        console.error("[ClassroomChat] Stream watch failed", { code, message });
         if (!cancelled) {
           setUnavailable(true);
           setClient(null);
