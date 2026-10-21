@@ -86,6 +86,7 @@ model User {
   conductedIntakeAssessments IntakeAssessment[]        @relation("RepresentativeIntakeAssessments")
   studentProfile             StudentProfile?
   communicationLogs          StudentCommunicationLog[]
+  uploadedBoardImages        BoardImage[]
 
   createdAt DateTime @default(now())
 }
@@ -296,12 +297,13 @@ model Lesson {
 
 /// One notebook per student. Lessons append pages later; this row is created at booking.
 model Notebook {
-  id        String   @id @default(uuid())
-  studentId String   @unique
-  student   User     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  id        String       @id @default(uuid())
+  studentId String       @unique
+  student   User         @relation(fields: [studentId], references: [id], onDelete: Cascade)
   pages     NotebookPage[]
   lessons   Lesson[]
-  createdAt DateTime @default(now())
+  images    BoardImage[]
+  createdAt DateTime     @default(now())
 }
 
 model NotebookPage {
@@ -315,6 +317,21 @@ model NotebookPage {
   snapshotVersion Int      @default(0)
 
   @@unique([notebookId, pageIndex])
+}
+
+/// A whiteboard image stored by id. The browser loads it from GET /api/board-images/[id], never from a signed URL.
+model BoardImage {
+  id          String   @id
+  notebookId  String
+  notebook    Notebook @relation(fields: [notebookId], references: [id], onDelete: Cascade)
+  uploaderId  String
+  uploader    User     @relation(fields: [uploaderId], references: [id], onDelete: Restrict)
+  path        String
+  contentType String
+  bytes       Int
+  createdAt   DateTime @default(now())
+
+  @@index([notebookId])
 }
 
 model ChatChannel {

@@ -22,6 +22,14 @@ import {
 } from "../lib/whiteboard/snap-commit";
 import { SnapSession } from "../lib/whiteboard/snap-session";
 import type { RecognizedShape } from "../lib/whiteboard/types";
+import {
+  applySyncedImage,
+  ensureImageInCache as cacheBoardImage,
+  imageAddEvent,
+  loadBoardImage,
+  renderBoardPageDataUrl,
+  type BoardImageEl,
+} from "../lib/whiteboard/board-image";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -39,7 +47,6 @@ export const STREAM_SAFE_LIMIT = 1400;
 /** A single stroke is split once its event approaches this size. */
 const STREAM_PIECE_SPLIT = 1200;
 const IMAGE_MAX_WIDTH = 400;
-const IMAGE_URL_SYNC_MAX = 240;
 const PROTO_V = 6;
 const SNAPSHOT_CHUNK_CAP = 10;
 const LASER_FADE_MS = 1000;
@@ -231,18 +238,7 @@ interface TextEl {
   pageIndex: number;
 }
 
-interface ImageEl {
-  kind: "image";
-  id: string;
-  url: string;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  rotation: number;
-  crop: ImageCrop | null;
-  pageIndex: number;
-}
+type ImageEl = BoardImageEl;
 
 type DrawEl = StrokeEl | ShapeEl | TextEl | ImageEl;
 
@@ -327,18 +323,7 @@ interface SyncText extends Omit<TextEl, "kind"> {
   kind: "text";
 }
 
-interface SyncImage {
-  kind: "image";
-  id: string;
-  url: string;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  rotation: number;
-  crop: ImageCrop | null;
-  pageIndex: number;
-}
+type SyncImage = ReturnType<typeof imageAddEvent>["add"];
 
 type SyncEl = SyncStroke | SyncShape | SyncText | SyncImage;
 
@@ -400,6 +385,7 @@ type ClassroomWhiteboardProps = {
   /** When set, load PreLessonAsset items for insert-to-canvas. */
   packageId?: string | null;
   lessonId?: string | null;
+  notebookId?: string | null;
 };
 
 type PreLessonAssetPanelItem = {
@@ -836,15 +822,25 @@ function lassoHitsEl(el: DrawEl, polygon: readonly Point[]): boolean {
   return polygon.some((p) => ptInBounds(p, b));
 }
 
+const legacyImageUrls = new Map<string, string>();
+const repaintBoardRef: { current: () => void } = { current: () => {} };
+
+function rememberLegacyImage(raw: unknown): BoardImageEl | null {
+  const applied = applySyncedImage(raw);
+  if (!applied) return null;
+  if (applied.legacyUrl) legacyImageUrls.set(applied.element.id, applied.legacyUrl);
+  return applied.element;
+}
+
 function ensureImageInCache(
   el: ImageEl,
   cache: Map<string, HTMLImageElement>,
+  onLoad?: () => void,
 ): void {
-  if (cache.has(el.id)) return;
-  const img = new Image();
-  img.crossOrigin = "anonymous";
-  img.onload = () => cache.set(el.id, img);
-  img.src = el.url;
+  cacheBoardImage(el, cache, () => {
+    onLoad?.();
+    repaintBoardRef.current();
+  }, legacyImageUrls.get(el.id));
 }
 
 function ensureHistoryImages(
@@ -1090,12 +1086,6 @@ function wrapCanvasText(
   return lines;
 }
 
-/** Short http(s) or same-origin paths only. Data URLs and blobs never ride a Stream event. */
-function isShortImageUrl(url: string): boolean {
-  if (!url || url.startsWith("data:") || url.startsWith("blob:")) return false;
-  return url.length <= IMAGE_URL_SYNC_MAX;
-}
-
 function toSyncEl(el: DrawEl): SyncEl | null {
   if (el.kind === "stroke")
     return {
@@ -1111,7 +1101,10 @@ function toSyncEl(el: DrawEl): SyncEl | null {
     };
   if (el.kind === "shape") return el;
   if (el.kind === "text") return el;
-  if (el.kind === "image") return isShortImageUrl(el.url) ? el : null;
+  if (el.kind === "image") {
+    const image = rememberLegacyImage(el);
+    return image ? imageAddEvent(image).add : null;
+  }
   return null;
 }
 
@@ -1133,20 +1126,7 @@ function syncElToDraw(raw: SyncEl): DrawEl | null {
   }
   if (raw.kind === "shape") return raw;
   if (raw.kind === "text") return normalizeTextEl(raw);
-  if (raw.kind === "image") {
-    return {
-      kind: "image",
-      id: raw.id,
-      url: raw.url,
-      x: raw.x,
-      y: raw.y,
-      w: raw.w,
-      h: raw.h,
-      rotation: raw.rotation ?? 0,
-      crop: raw.crop ?? null,
-      pageIndex: raw.pageIndex,
-    };
-  }
+  if (raw.kind === "image") return rememberLegacyImage(raw);
   return null;
 }
 
@@ -1289,6 +1269,10 @@ function coerceSyncEl(raw: unknown): SyncEl | null {
 }
 
 function packDrawEl(el: DrawEl): SyncEl {
+  if (el.kind === "image") {
+    const image = rememberLegacyImage(el);
+    return image ? imageAddEvent(image).add : el;
+  }
   if (el.kind !== "stroke") return el;
   return {
     kind: "stroke",
@@ -2031,30 +2015,36 @@ function paintPaperBackground(ctx: CanvasRenderingContext2D, style: PaperStyle):
   ctx.restore();
 }
 
-function renderPageDataUrl(
+async function renderPageDataUrl(
   pageIndex: number,
   pageElements: readonly DrawEl[],
-  images: ReadonlyMap<string, HTMLImageElement>,
+  images: Map<string, HTMLImageElement>,
   style: PaperStyle,
-): string {
-  const off = document.createElement("canvas");
-  off.width = PAGE_W;
-  off.height = PAGE_H;
-  const ctx = off.getContext("2d");
-  if (!ctx) return "";
-  paintPaperBackground(ctx, style);
-  for (const el of pageElements) {
-    if (el.pageIndex !== pageIndex) continue;
-    if (el.kind === "stroke")
-      paintSmoothStroke(ctx, el.points, el.color, el.width, el.opacity, el.tool === "highlighter", el.strokeStyle);
-    else if (el.kind === "shape") paintShape(ctx, el);
-    else if (el.kind === "text") paintText(ctx, el);
-    else if (el.kind === "image") {
-      const img = images.get(el.id);
-      if (img?.complete && img.naturalWidth > 0) paintImage(ctx, img, el);
-    }
-  }
-  return off.toDataURL("image/png");
+): Promise<string> {
+  const rendered = await renderBoardPageDataUrl({
+    pageIndex,
+    elements: pageElements,
+    images,
+    createCanvas: () => {
+      const off = document.createElement("canvas");
+      off.width = PAGE_W;
+      off.height = PAGE_H;
+      return off;
+    },
+    drawBase: (ctx) => {
+      paintPaperBackground(ctx, style);
+      for (const el of pageElements) {
+        if (el.pageIndex !== pageIndex || el.kind === "image") continue;
+        if (el.kind === "stroke")
+          paintSmoothStroke(ctx, el.points, el.color, el.width, el.opacity, el.tool === "highlighter", el.strokeStyle);
+        else if (el.kind === "shape") paintShape(ctx, el);
+        else paintText(ctx, el);
+      }
+    },
+    drawImage: (ctx, el, img) => paintImage(ctx, img, el),
+    load: (el) => loadBoardImage(el, images, () => repaintBoardRef.current(), legacyImageUrls.get(el.id)),
+  });
+  return rendered.dataUrl;
 }
 
 function paintToolCursor(
@@ -2440,7 +2430,7 @@ const STROKE_STYLES: { value: StrokeStyle; label: string; preview: string }[] = 
 
 const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhiteboardProps>(
   function ClassroomWhiteboard(
-    { role: _role, streamChannel = null, packageId = null, lessonId = null },
+    { role: _role, streamChannel = null, packageId = null, lessonId = null, notebookId = null },
     ref,
   ) {
     const [pages, setPages] = useState<PageInfo[]>(() => [{ id: nanoid(), pageNumber: 1 }]);
@@ -2608,6 +2598,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
         paintBoardRef.current();
       });
     };
+    repaintBoardRef.current = () => scheduleLivePaintRef.current();
 
     useEffect(() => {
       scheduleLivePaintRef.current();
@@ -2882,21 +2873,11 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
               const el = normalizeTextEl(raw as TextEl);
               setElements((prev) => upsertElement(prev, el));
             } else if (raw.kind === "image") {
-              const imgEl = raw as SyncImage;
-              const el: ImageEl = {
-                kind: "image",
-                id: imgEl.id,
-                url: imgEl.url,
-                x: imgEl.x,
-                y: imgEl.y,
-                w: imgEl.w,
-                h: imgEl.h,
-                rotation: imgEl.rotation ?? 0,
-                crop: imgEl.crop ?? null,
-                pageIndex: imgEl.pageIndex,
-              };
-              ensureImageInCache(el, imgCache.current);
-              setElements((prev) => upsertElement(prev, el));
+              const el = rememberLegacyImage(raw);
+              if (el) {
+                ensureImageInCache(el, imgCache.current);
+                setElements((prev) => upsertElement(prev, el));
+              }
             }
           }
           if (Array.isArray(ev.remove)) {
@@ -3665,75 +3646,80 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
       return () => document.removeEventListener("pointerdown", onDocPointerDown);
     }, [editText]);
 
+    const uploadBoardFile = useCallback(async (file: File): Promise<string | null> => {
+      if (!notebookId) {
+        setAiHint("המחברת עדיין לא מוכנה. נסו שוב בעוד רגע.");
+        return null;
+      }
+      try {
+        const formData = new FormData();
+        formData.append("file", file);
+        formData.append("notebookId", notebookId);
+        const res = await fetch("/api/upload", { method: "POST", body: formData });
+        if (!res.ok) {
+          console.error("[whiteboard] upload:", await res.text());
+          setAiHint("לא הצלחנו להעלות את התמונה. נסו שוב.");
+          return null;
+        }
+        const data = (await res.json()) as { id?: string };
+        if (typeof data.id !== "string" || data.id.length === 0) {
+          setAiHint("לא הצלחנו להעלות את התמונה. נסו שוב.");
+          return null;
+        }
+        return data.id;
+      } catch (err) {
+        console.error("[whiteboard] image error:", err);
+        setAiHint("לא הצלחנו להעלות את התמונה. נסו שוב.");
+        return null;
+      }
+    }, [notebookId]);
+
     const insertImageElement = useCallback(
-      async (imageId: string, url: string): Promise<boolean> => {
-        return new Promise<boolean>((resolve) => {
-          const img = new Image();
-          // data: URLs and same-origin mock paths don't need CORS; remote may.
-          if (!url.startsWith("data:") && !url.startsWith("/")) {
-            img.crossOrigin = "anonymous";
-          }
-          img.onerror = () => {
-            console.error("[whiteboard] failed to load image for canvas:", url.slice(0, 80));
-            resolve(false);
-          };
-          img.onload = () => {
-            const maxH = PAGE_H - 40;
-            const sc = Math.min(IMAGE_MAX_WIDTH / img.naturalWidth, maxH / img.naturalHeight, 1);
-            const w = Math.max(1, Math.floor(img.naturalWidth * sc));
-            const h = Math.max(1, Math.floor(img.naturalHeight * sc));
-            const el: ImageEl = {
-              kind: "image",
-              id: imageId,
-              url,
-              x: Math.max(20, (PAGE_W - w) / 2),
-              y: Math.max(20, (PAGE_H - h) / 2),
-              w,
-              h,
-              rotation: 0,
-              crop: null,
-              pageIndex: activePageIndex,
-            };
-            imgCache.current.set(el.id, img);
-            pushHistory({ id: nanoid(), removed: [], added: [el], updated: [] });
-            setElements((prev) => [...prev, el]);
-            const sync = toSyncEl(el);
-            if (sync) broadcastElement({ add: sync });
-            resolve(true);
-          };
-          img.src = url;
-        });
+      async (imageId: string): Promise<boolean> => {
+        const shell: ImageEl = {
+          kind: "image",
+          id: imageId,
+          imageId,
+          x: 0,
+          y: 0,
+          w: 1,
+          h: 1,
+          rotation: 0,
+          crop: null,
+          pageIndex: activePageIndex,
+        };
+        const img = await loadBoardImage(shell, imgCache.current, () => repaintBoardRef.current());
+        if (!img) {
+          setAiHint("לא הצלחנו להציג את התמונה. נסו שוב.");
+          return false;
+        }
+        const maxH = PAGE_H - 40;
+        const sc = Math.min(IMAGE_MAX_WIDTH / img.naturalWidth, maxH / img.naturalHeight, 1);
+        const w = Math.max(1, Math.floor(img.naturalWidth * sc));
+        const h = Math.max(1, Math.floor(img.naturalHeight * sc));
+        const el: ImageEl = {
+          ...shell,
+          x: Math.max(20, (PAGE_W - w) / 2),
+          y: Math.max(20, (PAGE_H - h) / 2),
+          w,
+          h,
+        };
+        pushHistory({ id: nanoid(), removed: [], added: [el], updated: [] });
+        setElements((prev) => [...prev, el]);
+        const sync = toSyncEl(el);
+        if (sync) broadcastElement({ add: sync });
+        return true;
       },
       [activePageIndex, broadcastElement, pushHistory],
     );
 
     const handleImageFile = useCallback(
       async (file: File): Promise<void> => {
-        const localId = `img_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-        try {
-          const formData = new FormData();
-          formData.append("file", file);
-          const res = await fetch("/api/upload", { method: "POST", body: formData });
-          if (res.ok) {
-            const data = (await res.json()) as { id?: string; url?: string };
-            if (typeof data.url === "string" && data.url.length > 0) {
-              const placed = await insertImageElement(typeof data.id === "string" ? data.id : localId, data.url);
-              if (placed) return;
-            }
-          } else {
-            console.error("[whiteboard] upload:", await res.text());
-          }
-        } catch (err) {
-          console.error("[whiteboard] image error:", err);
-        }
-        try {
-          const dataUrl = await blobToDataUrl(file);
-          await insertImageElement(localId, dataUrl);
-        } catch (fallbackError) {
-          console.error("[whiteboard] image fallback failed:", fallbackError);
-        }
+        const imageId = await uploadBoardFile(file);
+        if (!imageId) return;
+        await insertImageElement(imageId);
       },
-      [insertImageElement],
+      [insertImageElement, uploadBoardFile],
     );
 
     /** Resolve asset URL → canvas-ready source (remote URL, mock path, or DataURL). */
@@ -3829,7 +3815,16 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
             setAiHint("לא ניתן להזריק את הנכס ללוח — חסר URL או תוכן");
             return;
           }
-          const ok = await insertImageElement(`asset_${asset.id}_${nanoid(6)}`, src);
+          const fetched = await fetch(src);
+          if (!fetched.ok) {
+            setAiHint("לא הצלחנו להעלות את התמונה. נסו שוב.");
+            return;
+          }
+          const blob = await fetched.blob();
+          const file = new File([blob], "asset.png", { type: blob.type || "image/png" });
+          const imageId = await uploadBoardFile(file);
+          if (!imageId) return;
+          const ok = await insertImageElement(imageId);
           setAiHint(
             ok
               ? "החומר לפני השיעור הוזרק ללוח A4"
@@ -3842,7 +3837,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
           setInsertingAssetId(null);
         }
       },
-      [insertImageElement, resolveAssetImageSrc],
+      [insertImageElement, resolveAssetImageSrc, uploadBoardFile],
     );
 
     useEffect(() => {
@@ -4260,22 +4255,26 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
       performRedo,
     ]);
 
-    const collectExportFrames = useCallback((): ExportFrame[] => {
-      return pages
-        .map((page, idx) => ({
-          pageNumber: page.pageNumber,
+    const collectExportFrames = useCallback(async (): Promise<ExportFrame[]> => {
+      const frames: ExportFrame[] = [];
+      for (let idx = 0; idx < pages.length; idx += 1) {
+        const dataUrl = await renderPageDataUrl(idx, elements, imgCache.current, paperStyle);
+        if (!dataUrl) continue;
+        frames.push({
+          pageNumber: pages[idx].pageNumber,
           width: PAGE_W,
           height: PAGE_H,
-          dataUrl: renderPageDataUrl(idx, elements, imgCache.current, paperStyle),
-        }))
-        .filter((frame) => frame.dataUrl !== "");
+          dataUrl,
+        });
+      }
+      return frames;
     }, [elements, pages, paperStyle]);
 
     const exportBoardToPdf = useCallback(
       async (targetLessonId?: string): Promise<string | null> => {
         const storageLessonId = (targetLessonId ?? lessonId ?? "").trim();
         if (!storageLessonId) return null;
-        const frames = collectExportFrames();
+        const frames = await collectExportFrames();
         if (frames.length === 0) return null;
         try {
           const res = await fetch("/api/excalidraw/export", {
@@ -4335,7 +4334,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
       if (lessonId) {
         await exportBoardToPdf(lessonId);
       }
-      const frames = collectExportFrames();
+      const frames = await collectExportFrames();
       if (frames.length === 0) return;
       try {
         const res = await fetch("/api/excalidraw/export", {
@@ -4358,12 +4357,13 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
 
     const exportPngDirect = useCallback((): void => {
       const pageIndex = activePageIndex;
-      const dataUrl = renderPageDataUrl(pageIndex, elements, imgCache.current, paperStyle);
-      if (!dataUrl) return;
-      const a = document.createElement("a");
-      a.href = dataUrl;
-      a.download = `whiteboard-page-${pageIndex + 1}.png`;
-      a.click();
+      void renderPageDataUrl(pageIndex, elements, imgCache.current, paperStyle).then((dataUrl) => {
+        if (!dataUrl) return;
+        const a = document.createElement("a");
+        a.href = dataUrl;
+        a.download = `whiteboard-page-${pageIndex + 1}.png`;
+        a.click();
+      });
     }, [activePageIndex, elements, paperStyle]);
 
     const syncLabel = !streamChannel

@@ -86,6 +86,7 @@ interface LessonRoomUIProps {
     durationMinutes: number | null;
     packageId: string | null;
     lessonType?: string | null;
+    notebookId: string | null;
     chatChannel?: {
       streamChannelId: string;
     } | null;
@@ -275,6 +276,7 @@ export default function LessonRoomUI({
               streamChannel={boardChannel}
               packageId={lesson.packageId}
               lessonId={lesson.id}
+              notebookId={lesson.notebookId}
             />
           </div>
         </main>

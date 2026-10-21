@@ -14,6 +14,7 @@ import {
   ensureLiveStreamChannel,
   provisionMissingLessonChannel,
 } from "../../../lib/services/chat-healing.service";
+import { ensureNotebookForLesson } from "../../../lib/notebooks";
 import LessonRoomUI from "./LessonRoomUI";
 
 function canProvisionLessonChannel(lesson: {
@@ -167,6 +168,13 @@ export default async function LessonPage(props: {
   const streamApiKey =
     process.env.NEXT_PUBLIC_STREAM_API_KEY || process.env.STREAM_API_KEY || null;
 
+  let notebookId: string | null = null;
+  try {
+    notebookId = (await ensureNotebookForLesson(lesson.id))?.id ?? null;
+  } catch (error) {
+    console.error("Failed to ensure lesson notebook:", error);
+  }
+
   // Pedagogical Brief for Teacher / Manager / Admin
   let studentPedagogicalBrief: {
     studentName: string;
@@ -212,6 +220,7 @@ export default async function LessonPage(props: {
         durationMinutes: lesson.durationMinutes,
         packageId: lesson.packageId ?? null,
         lessonType: lesson.lessonType,
+        notebookId,
       }}
       user={{
         id: user.id,

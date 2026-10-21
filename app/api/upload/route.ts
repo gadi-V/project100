@@ -1,7 +1,14 @@
 import { NextResponse } from "next/server";
 import { nanoid } from "nanoid";
+import { consumeBoardUpload } from "../../../lib/board-upload-limit";
+import { getNotebookAccess } from "../../../lib/notebooks";
+import { prisma } from "../../../lib/prisma";
 import { getCurrentUser } from "../../../lib/session";
-import { STORAGE_UPLOAD_CLIENT_ERROR, uploadBoardImage } from "../../../lib/storage";
+import {
+  STORAGE_UPLOAD_CLIENT_ERROR,
+  boardImageObjectPath,
+  uploadBoardImage,
+} from "../../../lib/storage";
 
 const MAX_BYTES = 5 * 1024 * 1024;
 const ALLOWED = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
@@ -14,9 +21,18 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
 
     const formData = await request.formData();
+    const notebookId = formData.get("notebookId");
     const file = formData.get("file");
+    if (typeof notebookId !== "string" || notebookId.trim().length === 0) {
+      return NextResponse.json({ error: "חסר מזהה מחברת" }, { status: 400 });
+    }
     if (!(file instanceof File)) {
       return NextResponse.json({ error: "קובץ חסר" }, { status: 400 });
+    }
+
+    const notebook = await getNotebookAccess(user, notebookId.trim());
+    if (!notebook) {
+      return NextResponse.json({ error: "אין הרשאה למחברת הזו" }, { status: 403 });
     }
 
     if (!ALLOWED.has(file.type)) {
@@ -27,11 +43,30 @@ export async function POST(request: Request): Promise<NextResponse> {
       return NextResponse.json({ error: "הקובץ גדול מדי (מקס 5MB)" }, { status: 400 });
     }
 
+    const limit = consumeBoardUpload(user.id);
+    if (!limit.ok) {
+      return NextResponse.json(
+        { error: "אפשר להעלות עד 10 תמונות בדקה" },
+        { status: 429, headers: { "Retry-After": String(limit.retryAfter) } },
+      );
+    }
+
     const buffer = Buffer.from(await file.arrayBuffer());
     const imageId = nanoid(12);
-    const url = await uploadBoardImage(imageId, buffer, file.type);
+    const path = boardImageObjectPath(imageId, file.type);
+    await uploadBoardImage(imageId, buffer, file.type);
+    await prisma.boardImage.create({
+      data: {
+        id: imageId,
+        notebookId: notebook.id,
+        uploaderId: user.id,
+        path,
+        contentType: file.type,
+        bytes: buffer.length,
+      },
+    });
 
-    return NextResponse.json({ id: imageId, url });
+    return NextResponse.json({ id: imageId });
   } catch (error) {
     const reason = error instanceof Error ? error.name : "unknown";
     console.error("[upload] failed", { reason });

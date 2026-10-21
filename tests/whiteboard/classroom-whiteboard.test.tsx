@@ -238,21 +238,21 @@ describe("classroom whiteboard late-join sync", () => {
   });
 
   it("keeps a data-url image out of the stream snapshot", () => {
+    const legacy = {
+      kind: "image" as const,
+      id: "img-local",
+      imageId: "img-local",
+      url: `data:image/png;base64,${"A".repeat(900)}`,
+      x: 20,
+      y: 20,
+      w: 200,
+      h: 120,
+      rotation: 0,
+      crop: null,
+      pageIndex: 0,
+    };
     const chunks = buildSnapshotChunks(
-      [
-        {
-          kind: "image",
-          id: "img-local",
-          url: `data:image/png;base64,${"A".repeat(900)}`,
-          x: 20,
-          y: 20,
-          w: 200,
-          h: 120,
-          rotation: 0,
-          crop: null,
-          pageIndex: 0,
-        },
-      ],
+      [legacy] as unknown as Parameters<typeof buildSnapshotChunks>[0],
       "grid",
       "snap-image",
       "teacher-1"

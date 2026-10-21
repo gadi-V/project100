@@ -6,6 +6,8 @@ const db = vi.hoisted(() => ({
   notebookFindUnique: vi.fn(),
   notebookUpsert: vi.fn(),
   lessonFindFirst: vi.fn(),
+  lessonFindUnique: vi.fn(),
+  lessonUpdate: vi.fn(),
   teacherReferralFindFirst: vi.fn(),
 }));
 const session = vi.hoisted(() => ({ getCurrentUser: vi.fn() }));
@@ -16,14 +18,14 @@ vi.mock("../lib/prisma", () => ({
       findUnique: db.notebookFindUnique,
       upsert: db.notebookUpsert,
     },
-    lesson: { findFirst: db.lessonFindFirst },
+    lesson: { findFirst: db.lessonFindFirst, findUnique: db.lessonFindUnique, update: db.lessonUpdate },
     teacherReferral: { findFirst: db.teacherReferralFindFirst },
   },
 }));
 vi.mock("../lib/session", () => session);
 
 import { GET } from "../app/api/notebooks/[id]/route";
-import { ensureNotebookForStudent, getNotebookAccess } from "../lib/notebooks";
+import { ensureNotebookForLesson, ensureNotebookForStudent, getNotebookAccess } from "../lib/notebooks";
 
 const NOTEBOOK_ID = "nb-1";
 const OWNER_ID = "student-1";
@@ -156,6 +158,37 @@ describe("GET /api/notebooks/[id]", () => {
       expect(await res.json()).toMatchObject({ success: false });
     }
     expect(db.teacherReferralFindFirst).not.toHaveBeenCalled();
+  });
+});
+
+describe("ensureNotebookForLesson", () => {
+  it("creates the student notebook once and points the lesson at it", async () => {
+    const rows = new Map<string, { id: string; studentId: string }>();
+    db.notebookUpsert.mockImplementation(
+      async ({ where, create }: { where: { studentId: string }; create: { studentId: string } }) => {
+        const existing = rows.get(where.studentId);
+        if (existing) return existing;
+        const created = { id: "nb-1", studentId: create.studentId };
+        rows.set(where.studentId, created);
+        return created;
+      },
+    );
+    db.lessonFindUnique.mockResolvedValue({ id: "lesson-1", studentId: OWNER_ID, notebookId: null });
+    db.lessonUpdate.mockResolvedValue({ id: "lesson-1", notebookId: "nb-1" });
+
+    const first = await ensureNotebookForLesson("lesson-1");
+    db.lessonFindUnique.mockResolvedValue({ id: "lesson-1", studentId: OWNER_ID, notebookId: "nb-1" });
+    const second = await ensureNotebookForLesson("lesson-1");
+
+    expect(first?.id).toBe("nb-1");
+    expect(second?.id).toBe(first?.id);
+    expect(rows.size).toBe(1);
+    expect(db.lessonUpdate).toHaveBeenCalledTimes(1);
+    expect(db.notebookUpsert).toHaveBeenNthCalledWith(2, {
+      where: { studentId: OWNER_ID },
+      create: { studentId: OWNER_ID },
+      update: {},
+    });
   });
 });
 

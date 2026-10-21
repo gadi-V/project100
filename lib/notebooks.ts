@@ -31,6 +31,27 @@ export async function ensureNotebookForStudent(studentId: string, db: NotebookDb
 }
 
 /**
+ * Idempotent. Creates the student's notebook when it is missing and stores its id on the lesson.
+ * A second call for the same lesson does not write the lesson row again.
+ */
+export async function ensureNotebookForLesson(lessonId: string) {
+  const lesson = await prisma.lesson.findUnique({
+    where: { id: lessonId },
+    select: { id: true, studentId: true, notebookId: true },
+  });
+  if (!lesson) return null;
+
+  const notebook = await ensureNotebookForStudent(lesson.studentId);
+  if (lesson.notebookId !== notebook.id) {
+    await prisma.lesson.update({
+      where: { id: lesson.id },
+      data: { notebookId: notebook.id },
+    });
+  }
+  return notebook;
+}
+
+/**
  * Who may open a student's notebook.
  * Owner student; a teacher with at least one non-cancelled lesson with that student;
  * MANAGER and ADMIN. TeacherReferral does not grant access. Everyone else is refused.

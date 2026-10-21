@@ -240,6 +240,57 @@ export async function uploadLessonPdf(
     : createSignedUrl(cfg, objectPath);
 }
 
+/** Object key for a board image. GIF is stored with the existing jpg extension. */
+export function boardImageObjectPath(imageId: string, contentType: string): string {
+  const ext =
+    contentType.includes("webp") ? "webp" : contentType.includes("png") ? "png" : "jpg";
+  return `board-images/${imageId}.${ext}`;
+}
+
+/**
+ * Read a private board object for the same-origin image route.
+ * Supabase is fetched with the service key. Local dev reads `public/uploads/board`.
+ * Returns null when the object is missing.
+ */
+export async function readBoardObject(objectPath: string): Promise<Buffer | null> {
+  if (!objectPath || objectPath.includes("..") || objectPath.startsWith("/") || objectPath.includes("\\")) {
+    return null;
+  }
+
+  const cfg = getSupabaseStorageConfig();
+  if (cfg) {
+    try {
+      const response = await fetch(`${cfg.url}/storage/v1/object/${cfg.bucket}/${objectPath}`, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${cfg.serviceKey}`,
+          apikey: cfg.serviceKey,
+        },
+        signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
+      });
+      if (!response.ok) return null;
+      return Buffer.from(await response.arrayBuffer());
+    } catch (error) {
+      logStorageFailure("read", {
+        bucket: cfg.bucket,
+        reason: error instanceof Error ? error.name : "network",
+      });
+      return null;
+    }
+  }
+
+  if (!canUseLocalDiskStorage()) return null;
+  const filename = objectPath.split("/").pop() ?? "";
+  if (!/^[\w.-]+$/.test(filename)) return null;
+  try {
+    const { readFile } = await import("fs/promises");
+    const path = await import("path");
+    return await readFile(path.join(process.cwd(), "public", "uploads", "board", filename));
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Upload a whiteboard image (webp/jpeg/png) and return a resolvable URL.
  * Without Supabase: local `/uploads/board/…` in development only; throws on
@@ -250,9 +301,8 @@ export async function uploadBoardImage(
   imageBuffer: Buffer,
   contentType: string,
 ): Promise<string> {
-  const ext =
-    contentType.includes("webp") ? "webp" : contentType.includes("png") ? "png" : "jpg";
-  const objectPath = `board-images/${imageId}.${ext}`;
+  const objectPath = boardImageObjectPath(imageId, contentType);
+  const ext = objectPath.split(".").pop() ?? "jpg";
   const cfg = getSupabaseStorageConfig();
 
   if (!cfg) {
