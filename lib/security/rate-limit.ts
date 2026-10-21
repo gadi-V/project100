@@ -17,7 +17,7 @@
 import { Ratelimit } from "@upstash/ratelimit";
 import { getRedis, redisRestConfig } from "../redis";
 
-export type RateLimitType = "auth" | "booking" | "api";
+export type RateLimitType = "auth" | "booking" | "api" | "boardUpload";
 
 export type RateLimitResult = {
   success: boolean;
@@ -45,6 +45,8 @@ export const RATE_LIMITS: Record<RateLimitType, { requests: number; window: `${n
   auth: { requests: 15, window: "60 s" },
   booking: { requests: 10, window: "60 s" },
   api: { requests: 30, window: "60 s" },
+  /** Board images. Keyed by user id, not by IP. */
+  boardUpload: { requests: 10, window: "60 s" },
 };
 
 /**
@@ -112,7 +114,12 @@ function getLimiters(): Record<RateLimitType, Ratelimit> | null {
       });
     limiters = {
       key,
-      byType: { auth: build("auth"), booking: build("booking"), api: build("api") },
+      byType: {
+        auth: build("auth"),
+        booking: build("booking"),
+        api: build("api"),
+        boardUpload: build("boardUpload"),
+      },
     };
   }
   return limiters.byType;
@@ -146,13 +153,7 @@ function degradedResult(type: RateLimitType): RateLimitResult {
   };
 }
 
-export async function checkRateLimit(
-  req: Request,
-  type: RateLimitType = "api"
-): Promise<RateLimitResult> {
-  const pathname = new URL(req.url).pathname;
-  if (isRateLimitExempt(pathname)) return passThrough(type);
-
+async function runLimit(type: RateLimitType, identifier: string): Promise<RateLimitResult> {
   const byType = getLimiters();
   if (!byType) {
     if (process.env.NODE_ENV === "production") {
@@ -171,7 +172,6 @@ export async function checkRateLimit(
     return passThrough(type);
   }
 
-  const identifier = `${pathname}:${getClientIp(req)}`;
   try {
     const { success, limit, remaining, reset } = await byType[type].limit(identifier);
     return { success, limit, remaining, reset, bypassed: false, degraded: false };
@@ -180,4 +180,21 @@ export async function checkRateLimit(
     alertDegraded(`[rate-limit] DEGRADED: Upstash Redis error — failing open for ${type}:`, error);
     return { ...passThrough(type), degraded: true };
   }
+}
+
+export async function checkRateLimit(
+  req: Request,
+  type: RateLimitType = "api"
+): Promise<RateLimitResult> {
+  const pathname = new URL(req.url).pathname;
+  if (isRateLimitExempt(pathname)) return passThrough(type);
+  return runLimit(type, `${pathname}:${getClientIp(req)}`);
+}
+
+/** Sliding window for one user. Board uploads use `boardUpload`: 10 per minute. */
+export async function checkUserRateLimit(
+  userId: string,
+  type: RateLimitType = "boardUpload",
+): Promise<RateLimitResult> {
+  return runLimit(type, `user:${userId}`);
 }

@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import type { Role } from "@prisma/client";
+import { Prisma, type Role } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const db = vi.hoisted(() => ({
@@ -189,6 +189,43 @@ describe("ensureNotebookForLesson", () => {
       create: { studentId: OWNER_ID },
       update: {},
     });
+  });
+
+  it("resolves parallel joins when one insert loses the unique studentId race", async () => {
+    const conflict = new Prisma.PrismaClientKnownRequestError("Unique constraint failed on studentId", {
+      code: "P2002",
+      clientVersion: "test",
+    });
+    let inserts = 0;
+    db.notebookUpsert.mockImplementation(async () => {
+      inserts += 1;
+      if (inserts === 1) throw conflict;
+      return { id: "nb-race", studentId: OWNER_ID };
+    });
+    db.notebookFindUnique.mockResolvedValue({ id: "nb-race", studentId: OWNER_ID });
+    db.lessonFindUnique.mockResolvedValue({ id: "lesson-1", studentId: OWNER_ID, notebookId: null });
+    db.lessonUpdate.mockResolvedValue({ id: "lesson-1", notebookId: "nb-race" });
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const [first, second] = await Promise.all([
+      ensureNotebookForLesson("lesson-1"),
+      ensureNotebookForLesson("lesson-1"),
+    ]);
+
+    expect(first?.id).toBe("nb-race");
+    expect(second?.id).toBe("nb-race");
+    expect(logged).not.toHaveBeenCalled();
+  });
+
+  it("logs lessonId and studentId and returns null on an unexpected error", async () => {
+    db.lessonFindUnique.mockResolvedValue({ id: "lesson-9", studentId: "student-9", notebookId: null });
+    db.notebookUpsert.mockRejectedValue(new Error("db down"));
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(ensureNotebookForLesson("lesson-9")).resolves.toBeNull();
+
+    expect(JSON.stringify(logged.mock.calls)).toContain("lesson-9");
+    expect(JSON.stringify(logged.mock.calls)).toContain("student-9");
   });
 });
 

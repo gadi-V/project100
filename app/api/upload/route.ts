@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { nanoid } from "nanoid";
-import { consumeBoardUpload } from "../../../lib/board-upload-limit";
 import { getNotebookAccess } from "../../../lib/notebooks";
+import { checkUserRateLimit } from "../../../lib/security/rate-limit";
 import { prisma } from "../../../lib/prisma";
 import { getCurrentUser } from "../../../lib/session";
 import {
@@ -43,11 +43,12 @@ export async function POST(request: Request): Promise<NextResponse> {
       return NextResponse.json({ error: "הקובץ גדול מדי (מקס 5MB)" }, { status: 400 });
     }
 
-    const limit = consumeBoardUpload(user.id);
-    if (!limit.ok) {
+    const limit = await checkUserRateLimit(user.id, "boardUpload");
+    if (!limit.success) {
+      const retryAfter = Math.max(1, Math.ceil((limit.reset - Date.now()) / 1000));
       return NextResponse.json(
         { error: "אפשר להעלות עד 10 תמונות בדקה" },
-        { status: 429, headers: { "Retry-After": String(limit.retryAfter) } },
+        { status: 429, headers: { "Retry-After": String(retryAfter) } },
       );
     }
 

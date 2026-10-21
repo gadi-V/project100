@@ -79,7 +79,10 @@ function readCrop(value: unknown): BoardImageCrop | null {
   return { sx: crop.sx, sy: crop.sy, sWidth: crop.sWidth, sHeight: crop.sHeight };
 }
 
-/** Incoming events may still carry a legacy `url`. It is returned for one load and never copied onto the element. */
+/**
+ * Incoming events may still carry a legacy `url`. It is returned for one load and never copied onto the element.
+ * TODO: remove this legacy `url` read once Stage 3 is deployed and no connected client still sends a signed image URL.
+ */
 export function applySyncedImage(raw: unknown): { element: BoardImageEl; legacyUrl: string | null } | null {
   if (!raw || typeof raw !== "object") return null;
   const value = raw as Record<string, unknown>;

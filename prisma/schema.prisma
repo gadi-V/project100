@@ -324,8 +324,8 @@ model BoardImage {
   id          String   @id
   notebookId  String
   notebook    Notebook @relation(fields: [notebookId], references: [id], onDelete: Cascade)
-  uploaderId  String
-  uploader    User     @relation(fields: [uploaderId], references: [id], onDelete: Restrict)
+  uploaderId  String?
+  uploader    User?    @relation(fields: [uploaderId], references: [id], onDelete: SetNull)
   path        String
   contentType String
   bytes       Int

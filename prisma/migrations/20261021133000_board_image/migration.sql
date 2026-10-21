@@ -5,7 +5,7 @@
 CREATE TABLE IF NOT EXISTS "BoardImage" (
     "id" TEXT NOT NULL,
     "notebookId" TEXT NOT NULL,
-    "uploaderId" TEXT NOT NULL,
+    "uploaderId" TEXT,
     "path" TEXT NOT NULL,
     "contentType" TEXT NOT NULL,
     "bytes" INTEGER NOT NULL,
@@ -26,7 +26,7 @@ END $$;
 
 -- AddForeignKey
 DO $$ BEGIN
-    ALTER TABLE "BoardImage" ADD CONSTRAINT "BoardImage_uploaderId_fkey" FOREIGN KEY ("uploaderId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+    ALTER TABLE "BoardImage" ADD CONSTRAINT "BoardImage_uploaderId_fkey" FOREIGN KEY ("uploaderId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 EXCEPTION
     WHEN duplicate_object THEN null;
 END $$;

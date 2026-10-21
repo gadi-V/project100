@@ -30,9 +30,14 @@ export async function ensureNotebookForStudent(studentId: string, db: NotebookDb
   });
 }
 
+function isUniqueConstraint(error: unknown): boolean {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
+}
+
 /**
  * Idempotent. Creates the student's notebook when it is missing and stores its id on the lesson.
  * A second call for the same lesson does not write the lesson row again.
+ * Concurrent room joins share the unique studentId: the loser of the insert reads the winning row.
  */
 export async function ensureNotebookForLesson(lessonId: string) {
   const lesson = await prisma.lesson.findUnique({
@@ -41,14 +46,44 @@ export async function ensureNotebookForLesson(lessonId: string) {
   });
   if (!lesson) return null;
 
-  const notebook = await ensureNotebookForStudent(lesson.studentId);
-  if (lesson.notebookId !== notebook.id) {
-    await prisma.lesson.update({
-      where: { id: lesson.id },
-      data: { notebookId: notebook.id },
+  try {
+    const notebook = await ensureNotebookForStudent(lesson.studentId);
+    if (lesson.notebookId !== notebook.id) {
+      await prisma.lesson.update({
+        where: { id: lesson.id },
+        data: { notebookId: notebook.id },
+      });
+    }
+    return notebook;
+  } catch (error) {
+    try {
+      if (isUniqueConstraint(error)) {
+        const existing = await prisma.notebook.findUnique({ where: { studentId: lesson.studentId } });
+        if (existing) {
+          if (lesson.notebookId !== existing.id) {
+            await prisma.lesson.update({
+              where: { id: lesson.id },
+              data: { notebookId: existing.id },
+            });
+          }
+          return existing;
+        }
+      }
+    } catch (recoveryError) {
+      console.error("[notebook] ensureNotebookForLesson failed", {
+        lessonId,
+        studentId: lesson.studentId,
+        error: recoveryError,
+      });
+      return null;
+    }
+    console.error("[notebook] ensureNotebookForLesson failed", {
+      lessonId,
+      studentId: lesson.studentId,
+      error,
     });
+    return null;
   }
-  return notebook;
 }
 
 /**
