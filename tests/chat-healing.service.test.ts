@@ -338,7 +338,7 @@ describe("reconcile display names", () => {
 
     await expect(ensureLiveStreamChannel("lesson-1", CHANNEL)).resolves.toBe(CHANNEL);
     expect(client.upsert).not.toHaveBeenCalled();
-    expect(client.addMembers).not.toHaveBeenCalled();
+    expect(client.addMembers).toHaveBeenCalledWith([TEACHER, STUDENT]);
     expect(console.error).toHaveBeenCalledWith(
       "[ensureLiveStreamChannel] failed",
       expect.objectContaining({
@@ -346,6 +346,91 @@ describe("reconcile display names", () => {
         teacherId: TEACHER,
         studentId: STUDENT,
         code: 9,
+      })
+    );
+  });
+});
+
+describe("user lookup failure still repairs the channel", () => {
+  beforeEach(() => {
+    stream.hasStreamCredentials.mockReturnValue(true);
+    db.lessonFindUnique.mockResolvedValue({
+      teacherId: TEACHER,
+      studentId: STUDENT,
+      teacher: { id: TEACHER, name: "משה כהן" },
+      student: { id: STUDENT, name: "נועה לוי" },
+    });
+  });
+
+  it("(a) adds both members when queryUsers throws and the channel has zero members", async () => {
+    const failure = Object.assign(new Error("query users failed"), { code: 9 });
+    const client = installClient(
+      [{ id: CHANNEL, memberIds: [] }],
+      vi.fn().mockResolvedValue({}),
+      vi.fn().mockRejectedValue(failure)
+    );
+
+    await expect(ensureLiveStreamChannel("lesson-1", CHANNEL)).resolves.toBe(CHANNEL);
+
+    expect(client.upsert).not.toHaveBeenCalled();
+    expect(client.create).not.toHaveBeenCalled();
+    expect(client.addMembers).toHaveBeenCalledWith([TEACHER, STUDENT]);
+    expect(console.error).toHaveBeenCalledWith(
+      "[ensureLiveStreamChannel] failed",
+      expect.objectContaining({
+        lessonId: "lesson-1",
+        teacherId: TEACHER,
+        studentId: STUDENT,
+        code: 9,
+        error: "query users failed",
+      })
+    );
+  });
+
+  it("(b) creates a missing channel when queryUsers throws", async () => {
+    const failure = Object.assign(new Error("query users failed"), { code: 9 });
+    const client = installClient([], vi.fn().mockResolvedValue({}), vi.fn().mockRejectedValue(failure));
+
+    await ensureLiveStreamChannel("lesson-1", CHANNEL);
+
+    expect(client.upsert).not.toHaveBeenCalled();
+    expect(client.channel).toHaveBeenCalledWith("messaging", CHANNEL, {
+      members: [TEACHER, STUDENT],
+      created_by_id: TEACHER,
+    });
+    expect(client.create).toHaveBeenCalledTimes(1);
+    expect(client.addMembers).toHaveBeenCalledWith([TEACHER, STUDENT]);
+    expect(client.create.mock.invocationCallOrder[0]).toBeLessThan(
+      client.addMembers.mock.invocationCallOrder[0]
+    );
+  });
+
+  it("(c) logs a lookup failure and a membership failure without throwing", async () => {
+    const lookupFailure = Object.assign(new Error("query users failed"), { code: 9 });
+    const memberFailure = Object.assign(new Error("add members failed"), { code: 17 });
+    const client = installClient(
+      [{ id: CHANNEL, memberIds: [] }],
+      vi.fn().mockResolvedValue({}),
+      vi.fn().mockRejectedValue(lookupFailure)
+    );
+    client.addMembers.mockRejectedValue(memberFailure);
+
+    await expect(ensureLiveStreamChannel("lesson-1", CHANNEL)).resolves.toBe(CHANNEL);
+
+    expect(client.upsert).not.toHaveBeenCalled();
+    expect(console.error).toHaveBeenCalledTimes(2);
+    expect(console.error).toHaveBeenCalledWith(
+      "[ensureLiveStreamChannel] failed",
+      expect.objectContaining({ code: 9, error: "query users failed" })
+    );
+    expect(console.error).toHaveBeenCalledWith(
+      "[ensureLiveStreamChannel] failed",
+      expect.objectContaining({
+        lessonId: "lesson-1",
+        teacherId: TEACHER,
+        studentId: STUDENT,
+        code: 17,
+        error: "add members failed",
       })
     );
   });
