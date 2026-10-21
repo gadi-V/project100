@@ -143,6 +143,7 @@ async function createSignedUrl(
       method: "POST",
       headers: {
         Authorization: `Bearer ${cfg.serviceKey}`,
+        apikey: cfg.serviceKey,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ expiresIn: cfg.signedUrlTtlSeconds }),
@@ -184,6 +185,7 @@ async function supabasePut(
       method: "POST",
       headers: {
         Authorization: `Bearer ${cfg.serviceKey}`,
+        apikey: cfg.serviceKey,
         "Content-Type": contentType,
         "x-upsert": "true",
         "cache-control": "3600",
@@ -268,14 +270,12 @@ export async function readBoardObject(objectPath: string): Promise<Buffer | null
         },
         signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
       });
-      if (!response.ok) return null;
-      return Buffer.from(await response.arrayBuffer());
+      if (response.ok) return Buffer.from(await response.arrayBuffer());
     } catch (error) {
       logStorageFailure("read", {
         bucket: cfg.bucket,
         reason: error instanceof Error ? error.name : "network",
       });
-      return null;
     }
   }
 

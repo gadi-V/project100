@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const fsMock = vi.hoisted(() => ({ mkdir: vi.fn(), writeFile: vi.fn() }));
+const fsMock = vi.hoisted(() => ({ mkdir: vi.fn(), writeFile: vi.fn(), readFile: vi.fn() }));
 vi.mock("fs/promises", () => ({ ...fsMock, default: fsMock }));
 
 import {
@@ -9,6 +9,7 @@ import {
   StorageUploadError,
   canUseLocalDiskStorage,
   probeLessonBoardsStorage,
+  readBoardObject,
   uploadBoardImage,
   uploadLessonPdf,
 } from "../lib/storage";
@@ -28,6 +29,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   fsMock.mkdir.mockReset();
   fsMock.writeFile.mockReset();
+  fsMock.readFile.mockReset();
 });
 
 describe("board image storage without Supabase", () => {
@@ -75,7 +77,10 @@ describe("board image storage with Supabase", () => {
       "https://proj.supabase.co/storage/v1/object/lesson-boards/board-images/img1.png",
       expect.objectContaining({
         method: "POST",
-        headers: expect.objectContaining({ Authorization: "Bearer service-key" }),
+        headers: expect.objectContaining({
+          Authorization: "Bearer service-key",
+          apikey: "service-key",
+        }),
       })
     );
     expect(fsMock.writeFile).not.toHaveBeenCalled();
@@ -201,6 +206,31 @@ describe("board image storage with Supabase", () => {
     expect(url).toBe("/uploads/board/img-local.png");
     expect(fsMock.mkdir).toHaveBeenCalled();
     expect(fsMock.writeFile).toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it("serves the local file when Supabase has no object in development", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("SUPABASE_URL", "https://proj.supabase.co");
+    vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "service-key");
+    fsMock.readFile.mockResolvedValue(Buffer.from("local-bytes"));
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("missing", { status: 404 })));
+
+    const bytes = await readBoardObject("board-images/img-local.jpg");
+
+    expect(bytes?.toString()).toBe("local-bytes");
+    expect(fsMock.readFile).toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it("does not read local disk when Supabase is missing the object in production", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("SUPABASE_URL", "https://proj.supabase.co");
+    vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "service-key");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("missing", { status: 404 })));
+
+    await expect(readBoardObject("board-images/img-local.jpg")).resolves.toBeNull();
+    expect(fsMock.readFile).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
   });
 });
