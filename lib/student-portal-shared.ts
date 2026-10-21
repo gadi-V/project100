@@ -1,4 +1,4 @@
-import type { CommunicationAuthorRole, CommunicationType } from "./communication-templates";
+import type { CommunicationAuthorRole, CommunicationStructuredData, CommunicationType } from "./communication-templates";
 import type { EnrollmentPlans } from "./pedagogic-decision";
 import type { RescheduleBlock } from "./lesson-lifecycle";
 
@@ -279,6 +279,8 @@ export type CommunicationEntry = {
   authorName: string;
   authorRole: CommunicationAuthorRole;
   content: string;
+  /** Parsed template. Null for attendance notes and other general logs. Staff portal only. */
+  structuredData?: CommunicationStructuredData | null;
 };
 
 export type StandingOrderStatus = "ACTIVE" | "USED_UP" | "CANCELLED" | "NONE";

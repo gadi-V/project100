@@ -1,7 +1,17 @@
 /**
  * Client-safe rules for closing a lesson from the meetings tab: attendance outcome, teacher compensation,
- * direct-package credit and the management override for reschedules inside the 24 h window.
+ * direct-package credit, the structured lesson / mapping summary, and the management override for
+ * reschedules inside the 24 h window.
  */
+
+import {
+  getCommunicationTemplate,
+  renderStructuredSummary,
+  type CommunicationStructuredData,
+  type RankedTopic,
+  type StructuredValue,
+  type TemplateField,
+} from "./communication-templates";
 
 export const ATTENDANCE_OUTCOMES = ["ATTENDED", "STUDENT_NO_SHOW", "TEACHER_CANCELLED"] as const;
 export type AttendanceOutcome = (typeof ATTENDANCE_OUTCOMES)[number];
@@ -103,12 +113,156 @@ export function creditTakenAtBooking(lesson: { title: string | null }): boolean 
 
 type ParseResult<T> = { ok: true; data: T } | { ok: false; errors: string[] };
 
+/** Lesson close writes one of these two templates. GENERAL attendance notes stay a separate log. */
+export type LessonSummaryData = {
+  template: "LESSON_SUMMARY" | "MAPPING_SUMMARY";
+  fields: CommunicationStructuredData["fields"];
+};
+
 export type CompleteLessonInput = {
   attendanceStatus: AttendanceOutcome;
   internalNotes: string | null;
   /** Stored board PDF. Omitted when the room did not produce an http(s) URL. */
   boardPdfUrl?: string;
+  /** Present only for an attended lesson, after the structured summary passed validation. */
+  summaryData?: LessonSummaryData;
 };
+
+const SUMMARY_TEXT_MAX = 2000;
+
+function normalizeChoice(value: string): string {
+  return value.replace(/[״"]/g, '"').replace(/[׳']/g, "'").replace(/\s+/g, " ").trim();
+}
+
+function textField(value: unknown, label: string, required: boolean, errors: string[]): string | null {
+  if (value == null || value === "") {
+    if (required) errors.push(`חסר: ${label}`);
+    return null;
+  }
+  if (typeof value !== "string") {
+    errors.push(`${label}: ערך לא תקין`);
+    return null;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    if (required) errors.push(`חסר: ${label}`);
+    return null;
+  }
+  if (trimmed.length > SUMMARY_TEXT_MAX) errors.push(`${label}: עד ${SUMMARY_TEXT_MAX} תווים`);
+  return trimmed;
+}
+
+function choiceField(value: unknown, field: TemplateField, errors: string[]): string | null {
+  if (value == null || value === "") {
+    if (field.required) errors.push(`חסר: ${field.label}`);
+    return null;
+  }
+  if (typeof value !== "string") {
+    errors.push(`${field.label}: ערך לא תקין`);
+    return null;
+  }
+  const option = field.options?.find((item) => normalizeChoice(item) === normalizeChoice(value));
+  if (!option) {
+    errors.push(`${field.label}: בחרו אחת מהאפשרויות ${field.options?.join(" / ")}`);
+    return null;
+  }
+  return option;
+}
+
+function scoreField(value: unknown, label: string, errors: string[]): number | null {
+  if (value == null || (typeof value === "string" && value.trim() === "")) return null;
+  const score = typeof value === "number" ? value : typeof value === "string" ? Number(value.trim()) : Number.NaN;
+  if (!Number.isFinite(score) || score < 0 || score > 100) {
+    errors.push(`${label}: ציון בין 0 ל-100`);
+    return null;
+  }
+  return score;
+}
+
+function topicField(value: unknown, field: TemplateField, errors: string[]): RankedTopic[] {
+  if (value == null) return [];
+  if (!Array.isArray(value)) {
+    errors.push(`${field.label}: ערך לא תקין`);
+    return [];
+  }
+  const max = field.listSize ?? 4;
+  if (value.length > max) errors.push(`${field.label}: עד ${max} נושאים`);
+  const topics: RankedTopic[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      errors.push(`${field.label}: ערך לא תקין`);
+      continue;
+    }
+    const record = item as Record<string, unknown>;
+    const topic = typeof record.topic === "string" ? record.topic.trim() : "";
+    const blankScore = record.score == null || (typeof record.score === "string" && record.score.trim() === "");
+    if (!topic && blankScore) continue;
+    if (!topic) {
+      errors.push(`${field.label}: ציון בלי נושא`);
+      continue;
+    }
+    let score: number | null = null;
+    if (!blankScore) {
+      score = scoreField(record.score, field.label, errors);
+      if (score == null && errors.length > 0) continue;
+    }
+    if (topic.length > SUMMARY_TEXT_MAX) {
+      errors.push(`${field.label}: עד ${SUMMARY_TEXT_MAX} תווים`);
+      continue;
+    }
+    topics.push({ rank: topics.length + 1, topic, score });
+  }
+  return topics;
+}
+
+/**
+ * Validates the structured summary posted with an attended lesson.
+ * Regular lessons require "עבדנו על". Mapping lessons require grade, goal, format fit and subscription.
+ */
+export function parseLessonSummaryPayload(value: unknown): ParseResult<LessonSummaryData> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { ok: false, errors: ["סיכום השיעור חסר"] };
+  }
+  const record = value as Record<string, unknown>;
+  const template = record.template;
+  if (template !== "LESSON_SUMMARY" && template !== "MAPPING_SUMMARY") {
+    return { ok: false, errors: ["סוג הסיכום אינו מוכר"] };
+  }
+  const spec = getCommunicationTemplate(template);
+  const rawFields = record.fields;
+  if (!spec || !rawFields || typeof rawFields !== "object" || Array.isArray(rawFields)) {
+    return { ok: false, errors: ["שדות הסיכום חסרים"] };
+  }
+  const source = rawFields as Record<string, unknown>;
+  const errors: string[] = [];
+  const fields: Record<string, StructuredValue> = {};
+  for (const field of spec.fields) {
+    const raw = source[field.key];
+    if (field.kind === "list") fields[field.key] = topicField(raw, field, errors);
+    else if (field.kind === "choice") fields[field.key] = choiceField(raw, field, errors);
+    else if (field.kind === "score") fields[field.key] = scoreField(raw, field.label, errors);
+    else fields[field.key] = textField(raw, field.label, Boolean(field.required), errors);
+  }
+  if (errors.length > 0) return { ok: false, errors };
+  return { ok: true, data: { template, fields } };
+}
+
+/** Full Hebrew summary stored on `StudentCommunicationLog.content`. */
+export function formatSummaryText(template: LessonSummaryData["template"], fields: LessonSummaryData["fields"]): string {
+  return renderStructuredSummary({ template, fields });
+}
+
+const STUDENT_HIDDEN_LESSON_FIELDS = ["pedagogicalBrief", "content", "structuredData", "internalNotes"] as const;
+
+/**
+ * Student dashboard / lesson list payload. Keeps the board PDF and drops teacher notes and
+ * anything that belongs on `StudentCommunicationLog`.
+ */
+export function lessonVisibleToStudent<T extends object>(lesson: T): T {
+  const visible = { ...lesson } as T & Record<string, unknown>;
+  for (const key of STUDENT_HIDDEN_LESSON_FIELDS) delete visible[key];
+  return visible;
+}
 
 function readBoardPdfUrl(record: Record<string, unknown>): string | null {
   for (const key of ["boardPdfUrl", "boardUrl", "excalidrawPdfUrl", "pdfUrl"] as const) {
@@ -144,10 +298,23 @@ export function parseCompleteLessonInput(value: unknown): ParseResult<CompleteLe
     }
   }
   if (errors.length > 0 || !isAttendanceOutcome(attendanceStatus)) return { ok: false, errors };
+
+  let summaryData: LessonSummaryData | undefined;
+  if (attendanceStatus === "ATTENDED" && record.summaryData != null) {
+    const parsedSummary = parseLessonSummaryPayload(record.summaryData);
+    if (!parsedSummary.ok) return { ok: false, errors: parsedSummary.errors };
+    summaryData = parsedSummary.data;
+  }
+
   const boardPdfUrl = readBoardPdfUrl(record);
   return {
     ok: true,
-    data: boardPdfUrl ? { attendanceStatus, internalNotes, boardPdfUrl } : { attendanceStatus, internalNotes },
+    data: {
+      attendanceStatus,
+      internalNotes,
+      ...(boardPdfUrl ? { boardPdfUrl } : {}),
+      ...(summaryData ? { summaryData } : {}),
+    },
   };
 }
 
@@ -171,7 +338,7 @@ export type CompleteLessonResponse = {
   promptSummary?: boolean;
   /** No-show only: "חיסור לא מוצדק" was added to the student's CRM card. */
   absenceFlagged?: boolean;
-  /** No-show only: the notice reached the quad WhatsApp group. */
+  /** The quad-group notice was delivered (no-show alert, or the lesson summary with the board link). */
   whatsappDispatched?: boolean;
 };
 
@@ -187,16 +354,25 @@ export async function submitLessonCompletion(
     attendanceStatus: AttendanceOutcome;
     internalNotes: string | null;
     boardPdfUrl?: string | null;
+    summaryData?: LessonSummaryData;
   },
   fetchImpl: typeof fetch = fetch
 ): Promise<CompleteLessonResponse> {
-  const body: { attendanceStatus: AttendanceOutcome; internalNotes: string | null; boardPdfUrl?: string } = {
+  const body: {
+    attendanceStatus: AttendanceOutcome;
+    internalNotes: string | null;
+    boardPdfUrl?: string;
+    summaryData?: LessonSummaryData;
+  } = {
     attendanceStatus: params.attendanceStatus,
     internalNotes: params.internalNotes,
   };
   const boardPdfUrl = params.boardPdfUrl?.trim();
   if (boardPdfUrl && (boardPdfUrl.startsWith("http://") || boardPdfUrl.startsWith("https://"))) {
     body.boardPdfUrl = boardPdfUrl;
+  }
+  if (params.attendanceStatus === "ATTENDED" && params.summaryData) {
+    body.summaryData = params.summaryData;
   }
   const res = await fetchImpl(completeLessonEndpoint(params.studentId, params.lessonId), {
     method: "POST",

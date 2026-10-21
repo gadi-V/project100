@@ -135,6 +135,7 @@ export const COMMUNICATION_TEMPLATES: Record<CommunicationTemplate["type"], Comm
       { key: "personalConnection", label: "חיבור אישי", kind: "choice", options: LEVEL_M },
       { key: "topicRanking", label: "דירוג הנושאים", kind: "list", hint: "נושא וציון", listSize: 4 },
       { key: "mainGoal", label: "מטרה מרכזית", kind: "text", required: true },
+      { key: "startingLevel", label: "רמת פתיחה", kind: "choice", options: LEVEL_F },
       {
         key: "formatFit",
         label: "התאמה לפורמט",
@@ -283,6 +284,38 @@ export function parseTemplateContent(type: CommunicationType, content: string): 
 
   if (errors.length > 0) return { ok: false, errors };
   return { ok: true, structuredData: { template: template.type, fields } };
+}
+
+/** Staff dossier text for a summary that was already collected as fields (lesson close, not the free-text modal). */
+export function renderStructuredSummary(data: CommunicationStructuredData): string {
+  const template = getCommunicationTemplate(data.template);
+  if (!template) return "";
+  const lines: string[] = [];
+  for (const field of template.fields) {
+    const value = data.fields[field.key];
+    if (field.kind === "list") {
+      const items = Array.isArray(value) ? value.filter((item) => item.topic.trim()) : [];
+      if (items.length === 0) continue;
+      lines.push(fieldHeading(template, field));
+      for (const item of items) {
+        lines.push(item.score == null ? `${item.rank}. ${item.topic}` : `${item.rank}. ${item.topic} - ${item.score}`);
+      }
+      continue;
+    }
+    if (value == null || value === "") continue;
+    lines.push(`${fieldHeading(template, field)} ${value}`);
+  }
+  return lines.join("\n");
+}
+
+/** Accepts a stored JSON blob only when it is one of the summary templates. Attendance logs stay out. */
+export function asCommunicationStructuredData(value: unknown): CommunicationStructuredData | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const template = record.template;
+  if (template !== "POST_MAPPING_CALL" && template !== "LESSON_SUMMARY" && template !== "MAPPING_SUMMARY") return null;
+  if (!record.fields || typeof record.fields !== "object" || Array.isArray(record.fields)) return null;
+  return { template, fields: record.fields as CommunicationStructuredData["fields"] };
 }
 
 /** Sets one template line (used by the quick-choice buttons in the modal). Appends it when missing. */

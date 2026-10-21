@@ -134,7 +134,9 @@ export default function TeacherDashboard({
     setNotice(
       result.status === "CANCELLED"
         ? `השיעור של ${lesson.studentName} סומן כבוטל ולא ירד מיתרת התלמיד`
-        : `השיעור של ${lesson.studentName} נסגר. החיסור נרשם בתיק התלמיד`
+        : result.attendanceStatus === "ATTENDED"
+          ? `השיעור של ${lesson.studentName} נסגר והסיכום נשמר בתיק`
+          : `השיעור של ${lesson.studentName} נסגר. החיסור נרשם בתיק התלמיד`
     );
     void load(teacherId);
   };
@@ -327,6 +329,7 @@ export default function TeacherDashboard({
             title: completing.subject,
             scheduledAt: completing.scheduledAt,
             teacherName: data?.teacher.name ?? null,
+            lessonType: completing.lessonType,
           }}
           onClose={() => setCompleting(null)}
           onDone={(result) => onCompleted(completing, result)}

@@ -26,4 +26,6 @@ export type RecognizedShape =
   | { type: "freehand"; points: RawPoint[] }
   | { type: "line"; start: Point; end: Point }
   | { type: "circle"; center: Point; radius: number }
+  | { type: "ellipse"; center: Point; radiusX: number; radiusY: number }
+  | { type: "parabola"; vertex: Point; start: Point; end: Point }
   | { type: "polygon"; vertices: Point[] };

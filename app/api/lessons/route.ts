@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "../../../lib/prisma";
 import { requireAuth } from "../../../lib/api-auth";
+import { lessonVisibleToStudent } from "../../../lib/lesson-completion";
 import {
   createDailyRoom,
   dailyRoomNameForLesson,
@@ -17,6 +18,7 @@ import {
   ensureUnifiedPackageStreamChannel,
   resolveLessonStreamChannelId,
 } from "../../../lib/package-chat";
+import { ensureNotebookForStudent } from "../../../lib/notebooks";
 
 async function attachLessonCredentials<
   T extends {
@@ -145,8 +147,9 @@ export async function GET(request: Request) {
         auth.user.id,
         auth.user.role
       );
+      const visible = auth.user.role === "STUDENT" ? lessonVisibleToStudent(withCreds) : withCreds;
 
-      return NextResponse.json(withCreds, { status: 200 });
+      return NextResponse.json(visible, { status: 200 });
     }
 
     const where =
@@ -172,14 +175,17 @@ export async function GET(request: Request) {
     // Do not call resolveLessonStreamChannelId here — it queries managers and
     // may create a Stream channel per lesson (N+1, and it blocks the list).
     // Channel creation stays on POST booking and on the single-lesson join path.
-    const payload = lessons.map((lesson) => ({
-      ...lesson,
-      roomUrl: lesson.dailyRoomUrl,
-      streamChannelId:
-        lesson.package?.chat?.streamChannelId ??
-        lesson.chatChannel?.streamChannelId ??
-        null,
-    }));
+    const payload = lessons.map((lesson) => {
+      const row = {
+        ...lesson,
+        roomUrl: lesson.dailyRoomUrl,
+        streamChannelId:
+          lesson.package?.chat?.streamChannelId ??
+          lesson.chatChannel?.streamChannelId ??
+          null,
+      };
+      return auth.user.role === "STUDENT" ? lessonVisibleToStudent(row) : row;
+    });
 
     return NextResponse.json(payload, { status: 200 });
   } catch (error: unknown) {
@@ -305,6 +311,8 @@ export async function POST(request: Request) {
           data: { isBooked: true },
         });
 
+        const notebook = await ensureNotebookForStudent(auth.user.id, tx);
+
         const newLesson = await tx.lesson.create({
           data: {
             teacherId: slot.teacherId,
@@ -315,6 +323,7 @@ export async function POST(request: Request) {
             // Canonical lesson duration per platform rules: 50 min lesson + 10 min break = 60-min calendar block.
             durationMinutes: 50,
             packageId: resolvedPackageId,
+            notebookId: notebook.id,
           },
         });
 

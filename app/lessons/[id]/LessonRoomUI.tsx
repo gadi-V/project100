@@ -85,6 +85,7 @@ interface LessonRoomUIProps {
     createdAt: string;
     durationMinutes: number | null;
     packageId: string | null;
+    lessonType?: string | null;
     chatChannel?: {
       streamChannelId: string;
     } | null;
@@ -165,8 +166,9 @@ export default function LessonRoomUI({
     setShowCompleteModal(false);
     setCallEnded(true);
     if (result.status === "CANCELLED") toast("השיעור סומן כבוטל ביוזמת המורה");
+    else if (result.attendanceStatus === "STUDENT_NO_SHOW") toast.success("השיעור נסגר והחיסור נרשם בתיק התלמיד");
     else if (result.promptSummary) toast.success("השיעור הסתיים. עוברים לטופס סיכום השיעור");
-    else toast.success("השיעור נסגר והחיסור נרשם בתיק התלמיד");
+    else toast.success("השיעור הסתיים והסיכום נשמר");
     router.push(portalAfterCompletionHref(lesson.studentId, lesson.id, result));
   };
 
@@ -206,6 +208,7 @@ export default function LessonRoomUI({
             title: lesson.title?.trim() || "שיעור פרטי",
             scheduledAt: lesson.scheduledAt,
             teacherName: user.role === "TEACHER" ? user.name : null,
+            lessonType: lesson.lessonType === "MAPPING" ? "MAPPING" : "REGULAR",
           }}
           context="room"
           resolveBoardPdfUrl={resolveBoardPdfUrl}

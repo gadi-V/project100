@@ -6,7 +6,7 @@ export const GRID_STEP = 24;
 const QUARTER_TURN = Math.PI / 4;
 
 export interface SnappedShapeDraft {
-  shape: "line" | "ellipse" | "rectangle" | "triangle";
+  shape: "line" | "ellipse" | "rectangle" | "triangle" | "parabola";
   x: number;
   y: number;
   w: number;
@@ -34,6 +34,14 @@ export function snapPointToGrid(x: number, y: number, step = GRID_STEP): Point {
   return {
     x: Math.round(x / step) * step,
     y: Math.round(y / step) * step,
+  };
+}
+
+/** Quadratic control that places the vertex at the middle of the curve: 2V − ½(start + end). */
+export function parabolaControl(start: Point, vertex: Point, end: Point): Point {
+  return {
+    x: 2 * vertex.x - 0.5 * (start.x + end.x),
+    y: 2 * vertex.y - 0.5 * (start.y + end.y),
   };
 }
 
@@ -114,6 +122,24 @@ export function alignRecognizedShape(
     };
   }
 
+  if (shape.type === "ellipse") {
+    return {
+      type: "ellipse",
+      center: snapPointToGrid(shape.center.x, shape.center.y, step),
+      radiusX: snapRadiusToGrid(shape.radiusX, step),
+      radiusY: snapRadiusToGrid(shape.radiusY, step),
+    };
+  }
+
+  if (shape.type === "parabola") {
+    return {
+      type: "parabola",
+      vertex: snapPointToGrid(shape.vertex.x, shape.vertex.y, step),
+      start: snapPointToGrid(shape.start.x, shape.start.y, step),
+      end: snapPointToGrid(shape.end.x, shape.end.y, step),
+    };
+  }
+
   return {
     type: "polygon",
     vertices: shape.vertices.map((vertex) => snapPointToGrid(vertex.x, vertex.y, step)),
@@ -172,6 +198,29 @@ export function draftFromRecognized(
       y: aligned.center.y - aligned.radius,
       w: aligned.radius * 2,
       h: aligned.radius * 2,
+    };
+  }
+
+  if (aligned.type === "ellipse") {
+    if (!(aligned.radiusX > 0) || !(aligned.radiusY > 0)) return null;
+    return {
+      shape: "ellipse",
+      x: aligned.center.x - aligned.radiusX,
+      y: aligned.center.y - aligned.radiusY,
+      w: aligned.radiusX * 2,
+      h: aligned.radiusY * 2,
+    };
+  }
+
+  if (aligned.type === "parabola") {
+    const control = parabolaControl(aligned.start, aligned.vertex, aligned.end);
+    return {
+      shape: "parabola",
+      x: aligned.start.x,
+      y: aligned.start.y,
+      w: aligned.end.x - aligned.start.x,
+      h: aligned.end.y - aligned.start.y,
+      vertices: [aligned.start, control, aligned.end],
     };
   }
 

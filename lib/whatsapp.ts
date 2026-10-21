@@ -773,8 +773,17 @@ export type QuadCommunicationSummaryInput =
       workedOn: string;
       homework?: string | null;
       nextLesson?: string | null;
+      /** Public board PDF. Omitted from the message when it is not an http(s) URL. */
+      boardPdfUrl?: string | null;
     }
-  | { type: "MAPPING_SUMMARY"; studentName: string };
+  | { type: "MAPPING_SUMMARY"; studentName: string; boardPdfUrl?: string | null };
+
+/** Parents see the board link. Mapping scores and internal notes never go in this line. */
+function boardPdfLine(url: string | null | undefined): string {
+  const trimmed = url?.trim() ?? "";
+  if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) return "";
+  return `📄 קישור ללוח השיעור: ${trimmed}\n\n`;
+}
 
 const SUMMARY_BRAND = "Project 100";
 
@@ -785,6 +794,7 @@ export function buildQuadCommunicationSummaryMessage(input: QuadCommunicationSum
       `✅ *המיפוי הושלם - ${SUMMARY_BRAND}*\n` +
       `שלום לכולם, שיעור המיפוי של ${input.studentName.trim()} הסתיים בהצלחה.\n` +
       `המנהל/ת הפדגוגי/ת יחזרו אליכם בהקדם להצגת תוכנית הלמידה.\n\n` +
+      boardPdfLine(input.boardPdfUrl) +
       `צוות ${SUMMARY_BRAND}`
     );
   }
@@ -795,6 +805,7 @@ export function buildQuadCommunicationSummaryMessage(input: QuadCommunicationSum
     `📚 *סיכום שיעור - ${SUMMARY_BRAND}*\n` +
     `שלום לכולם, להלן סיכום השיעור שהסתיים כעת:\n\n` +
     `${lines.join("\n")}\n\n` +
+    boardPdfLine(input.boardPdfUrl) +
     `המשך למידה מעולה! צוות ${SUMMARY_BRAND}`
   );
 }

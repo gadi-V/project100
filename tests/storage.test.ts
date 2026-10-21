@@ -187,6 +187,22 @@ describe("board image storage with Supabase", () => {
     expect(fsMock.writeFile).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
   });
+
+  it("saves under public/uploads/board in development when Supabase rejects the upload", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("SUPABASE_URL", "https://proj.supabase.co");
+    vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "service-key");
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("unavailable", { status: 500 })));
+
+    const url = await uploadBoardImage("img-local", Buffer.from("png"), "image/png");
+
+    expect(url).toBe("/uploads/board/img-local.png");
+    expect(fsMock.mkdir).toHaveBeenCalled();
+    expect(fsMock.writeFile).toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
 });
 
 describe("lesson-boards storage probe", () => {

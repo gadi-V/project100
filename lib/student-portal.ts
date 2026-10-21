@@ -3,6 +3,7 @@ import { prisma } from "./prisma";
 import { isIntakeRecorderRole } from "./auth/staff-roles";
 import { normalizeToE164 } from "./utils/phone";
 import {
+  asCommunicationStructuredData,
   isCommunicationType,
   type CommunicationAuthorRole,
   type CommunicationStructuredData,
@@ -359,6 +360,7 @@ export async function listCommunicationEntries(studentId: string): Promise<Commu
       authorName: true,
       authorRole: true,
       content: true,
+      structuredData: true,
     },
   });
   return rows.map((row) => ({
@@ -369,6 +371,7 @@ export async function listCommunicationEntries(studentId: string): Promise<Commu
     authorName: row.authorName,
     authorRole: row.authorRole as CommunicationAuthorRole,
     content: row.content,
+    structuredData: asCommunicationStructuredData(row.structuredData),
   }));
 }
 

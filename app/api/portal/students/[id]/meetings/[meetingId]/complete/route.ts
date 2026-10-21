@@ -9,9 +9,11 @@ import {
   creditTakenAtBooking,
   isLessonManagementRole,
   lessonPayoutKey,
+  formatSummaryText,
   outcomeEffects,
   parseCompleteLessonInput,
   teacherCompensation,
+  type LessonSummaryData,
   TEACHER_HOURLY_RATE_ILS,
   type CompleteLessonResponse,
 } from "../../../../../../../../lib/lesson-completion";
@@ -23,7 +25,12 @@ import {
   resolveStudentAccess,
   studentHasDirectPackage,
 } from "../../../../../../../../lib/student-portal";
-import { formatQuadLessonDate, sendQuadGroupStudentNoShow } from "../../../../../../../../lib/whatsapp";
+import {
+  formatQuadLessonDate,
+  sendQuadGroupCommunicationSummary,
+  sendQuadGroupStudentNoShow,
+  type QuadCommunicationSummaryInput,
+} from "../../../../../../../../lib/whatsapp";
 import { schedulePayoutInTransaction } from "../../../../../../../../lib/services/PayoutService";
 import { writeLedgerEntryInTransaction } from "../../../../../../../../lib/services/LedgerService";
 
@@ -54,6 +61,89 @@ async function closeDailyRoom(lessonId: string, roomUrl: string | null): Promise
     await deleteDailyRoom(roomNameFromDailyUrl(roomUrl) ?? dailyRoomNameForLesson(lessonId));
   } catch (roomError: unknown) {
     console.error(`[lesson-completion] Daily room teardown for ${lessonId} failed:`, roomError);
+  }
+}
+
+function groupSummaryInput(
+  summary: LessonSummaryData,
+  studentName: string,
+  boardPdfUrl: string | null
+): QuadCommunicationSummaryInput | null {
+  if (summary.template === "MAPPING_SUMMARY") {
+    return { type: "MAPPING_SUMMARY", studentName, boardPdfUrl };
+  }
+  const workedOn = summary.fields.workedOn;
+  if (typeof workedOn !== "string" || !workedOn.trim()) return null;
+  const homework = summary.fields.homework;
+  const nextLesson = summary.fields.nextLesson;
+  return {
+    type: "LESSON_SUMMARY",
+    workedOn,
+    homework: typeof homework === "string" ? homework : null,
+    nextLesson: typeof nextLesson === "string" ? nextLesson : null,
+    boardPdfUrl,
+  };
+}
+
+/**
+ * Posts the parent-facing summary into the quad group. A gateway or network failure is logged and
+ * audited; it never rolls back the completed lesson or the teacher's payout.
+ */
+async function postLessonSummaryAlert(input: {
+  studentId: string;
+  lessonId: string;
+  lessonGroupId: string | null;
+  summary: LessonSummaryData;
+  boardPdfUrl: string | null;
+  actorId: string;
+}): Promise<boolean> {
+  let groupId = input.lessonGroupId?.trim() || null;
+  let studentName = "התלמיד";
+  try {
+    const student = await prisma.user.findUnique({
+      where: { id: input.studentId },
+      select: { name: true, whatsappGroupId: true },
+    });
+    if (!groupId) groupId = student?.whatsappGroupId?.trim() || null;
+    if (student?.name?.trim()) studentName = student.name.trim();
+  } catch (lookupError: unknown) {
+    console.error(
+      `[lesson-completion] summary group lookup for ${input.lessonId} failed:`,
+      lookupError instanceof Error ? lookupError.message : "lookup failed"
+    );
+  }
+
+  const messageInput = groupSummaryInput(input.summary, studentName, input.boardPdfUrl);
+  if (!groupId?.endsWith("@g.us") || !messageInput) {
+    console.error(`[lesson-completion] summary for ${input.lessonId} not sent: no quad group`);
+    return false;
+  }
+
+  try {
+    const result = await sendQuadGroupCommunicationSummary(groupId, messageInput);
+    if (!result.sent) {
+      console.error(`[lesson-completion] summary for ${input.lessonId} not sent: ${result.error}`);
+      await writeAuditLog({
+        actorId: input.actorId,
+        action: "LESSON_SUMMARY_WHATSAPP_FAILED",
+        entityType: "Lesson",
+        entityId: input.lessonId,
+        metadata: { studentId: input.studentId, template: messageInput.type, reason: result.error },
+      });
+      return false;
+    }
+    return true;
+  } catch (whatsappError: unknown) {
+    const reason = whatsappError instanceof Error ? whatsappError.message : "send failed";
+    console.error(`[lesson-completion] summary for ${input.lessonId} failed: ${reason}`);
+    await writeAuditLog({
+      actorId: input.actorId,
+      action: "LESSON_SUMMARY_WHATSAPP_FAILED",
+      entityType: "Lesson",
+      entityId: input.lessonId,
+      metadata: { studentId: input.studentId, reason },
+    });
+    return false;
   }
 }
 
@@ -99,7 +189,7 @@ export async function POST(request: Request, { params }: RouteContext) {
   }
   const parsed = parseCompleteLessonInput(body);
   if (!parsed.ok) return fail(parsed.errors.join(" · "), 400);
-  const { attendanceStatus, internalNotes, boardPdfUrl } = parsed.data;
+  const { attendanceStatus, internalNotes, boardPdfUrl, summaryData } = parsed.data;
 
   try {
     const authorRole = toCommunicationAuthorRole(auth.user.role);
@@ -132,6 +222,10 @@ export async function POST(request: Request, { params }: RouteContext) {
     const now = new Date();
     const startsAt = lesson.startTime ?? lesson.scheduledAt;
     if (startsAt > now) return fail("אפשר לסיים שיעור רק אחרי שהתחיל", 409);
+    if (summaryData) {
+      const expected = lesson.lessonType === "MAPPING" ? "MAPPING_SUMMARY" : "LESSON_SUMMARY";
+      if (summaryData.template !== expected) return fail("סוג הסיכום אינו תואם לסוג השיעור", 400);
+    }
 
     const effects = outcomeEffects(attendanceStatus);
     const prepaid = creditTakenAtBooking(lesson);
@@ -260,6 +354,21 @@ export async function POST(request: Request, { params }: RouteContext) {
           },
         });
 
+        if (summaryData) {
+          await tx.studentCommunicationLog.create({
+            data: {
+              studentId: id,
+              authorId: auth.user.id,
+              authorName: auth.user.name?.trim() || "מורה",
+              authorRole,
+              type: summaryData.template,
+              courseContext: subject,
+              content: formatSummaryText(summaryData.template, summaryData.fields),
+              structuredData: summaryData satisfies Prisma.InputJsonValue,
+            },
+          });
+        }
+
         await tx.auditLog.create({
           data: {
             actorId: auth.user.id,
@@ -297,6 +406,16 @@ export async function POST(request: Request, { params }: RouteContext) {
     await closeDailyRoom(lesson.id, lesson.dailyRoomUrl);
 
     let whatsappDispatched: boolean | undefined;
+    if (summaryData) {
+      whatsappDispatched = await postLessonSummaryAlert({
+        studentId: id,
+        lessonId: lesson.id,
+        lessonGroupId: lesson.whatsappGroupId,
+        summary: summaryData,
+        boardPdfUrl: boardPdfUrl ?? null,
+        actorId: auth.user.id,
+      });
+    }
     if (noShow) {
       let groupId = lesson.whatsappGroupId?.trim() || null;
       if (!groupId) {
@@ -330,8 +449,9 @@ export async function POST(request: Request, { params }: RouteContext) {
       creditCharged: outcome.creditCharged,
       creditRestored: outcome.creditRestored,
       lessonCredits: outcome.lessonCredits,
-      promptSummary: effects.promptSummary,
+      promptSummary: summaryData ? false : effects.promptSummary,
       ...(noShow ? { absenceFlagged: true, whatsappDispatched } : {}),
+      ...(summaryData ? { whatsappDispatched } : {}),
     } satisfies CompleteLessonResponse);
   } catch (error: unknown) {
     console.error("Lesson completion error:", error);

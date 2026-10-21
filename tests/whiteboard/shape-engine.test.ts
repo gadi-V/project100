@@ -340,6 +340,61 @@ describe("orthogonal polygons", () => {
   });
 });
 
+describe("ellipse and parabola", () => {
+  function ellipseSamples(cx: number, cy: number, radiusX: number, radiusY: number, count: number): Point[] {
+    const points: Point[] = [];
+    for (let i = 0; i < count; i++) {
+      const angle = (i / count) * Math.PI * 2;
+      points.push({
+        x: cx + radiusX * Math.cos(angle),
+        y: cy + radiusY * Math.sin(angle),
+      });
+    }
+    return points;
+  }
+
+  function parabolaSamples(): Point[] {
+    const points: Point[] = [];
+    for (let x = 20; x <= 220; x += 4) {
+      const dx = x - 120;
+      points.push({ x, y: 40 + dx * dx * 0.01 });
+    }
+    return points;
+  }
+
+  it("recognizes a closed elongated oval as an ellipse", () => {
+    const drawn = ellipseSamples(200, 200, 100, 35, 72);
+    const shape = recognizeShape(hold(withTime(drawn, 8)));
+    expect(shape.type).toBe("ellipse");
+    if (shape.type !== "ellipse") return;
+    expect(shape.center.x).toBeCloseTo(200, 0);
+    expect(shape.center.y).toBeCloseTo(200, 0);
+    expect(shape.radiusX).toBeGreaterThan(shape.radiusY);
+    expect(shape.radiusX).toBeCloseTo(100, 0);
+    expect(shape.radiusY).toBeCloseTo(35, 0);
+  });
+
+  it("recognizes a smooth open bow as a parabola", () => {
+    const drawn = parabolaSamples();
+    const shape = recognizeShape(hold(withTime(drawn, 8)));
+    expect(shape.type).toBe("parabola");
+    if (shape.type !== "parabola") return;
+    expect(shape.vertex.x).toBeCloseTo(120, 0);
+    expect(shape.vertex.y).toBeCloseTo(40, 0);
+    expect(shape.start.x).toBe(20);
+    expect(shape.end.x).toBe(220);
+  });
+
+  it("leaves a sharp V as freehand", () => {
+    const drawn = [
+      ...along({ x: 20, y: 20 }, { x: 120, y: 160 }, 6),
+      ...along({ x: 120, y: 160 }, { x: 220, y: 20 }, 6),
+    ];
+    const shape = recognizeShape(hold(withTime(drawn, 8)));
+    expect(shape.type).toBe("freehand");
+  });
+});
+
 describe("packed samples", () => {
   it("recognizes a Float32Array history the same way as RawPoint objects", () => {
     const points = hold(

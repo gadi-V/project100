@@ -32,9 +32,14 @@ const DESK_BG = "#f5f5f4";
 const HANDLE_R = 6;
 const ROT_HANDLE_OFFSET = 32;
 const BOARD_EVENT = "board_sync";
-const STREAM_LIMIT = 4000;
-/** Events are kept under this so a Stream payload never reaches STREAM_LIMIT. */
-export const STREAM_SAFE_LIMIT = 3500;
+/** Stream custom events fail above 2048 bytes (error code 22). */
+const STREAM_LIMIT = 2048;
+/** Events stay under this so a payload never reaches Stream's 2048-byte ceiling. */
+export const STREAM_SAFE_LIMIT = 1400;
+/** A single stroke is split once its event approaches this size. */
+const STREAM_PIECE_SPLIT = 1200;
+const IMAGE_MAX_WIDTH = 400;
+const IMAGE_URL_SYNC_MAX = 240;
 const PROTO_V = 6;
 const SNAPSHOT_CHUNK_CAP = 10;
 const LASER_FADE_MS = 1000;
@@ -99,7 +104,7 @@ type DrawTool =
   | "text"
   | "image"
   | "laser";
-type ShapeKind = "rectangle" | "ellipse" | "triangle" | "line" | "arrow";
+type ShapeKind = "rectangle" | "ellipse" | "triangle" | "line" | "arrow" | "parabola";
 type StrokeStyle = "solid" | "dashed" | "dotted";
 type EraserMode = "stroke" | "pixel";
 type LassoStyle = "rect" | "free";
@@ -351,8 +356,10 @@ interface SyncEvent {
   add?: unknown;
   remove?: unknown;
   pageCount?: unknown;
-  historyOp?: HistoryOp;
+  historyOp?: unknown;
   direction?: "forward" | "backward";
+  historyPart?: { index: number; total: number; opId: string };
+  strokePart?: number;
   layerOrder?: { pageIndex: number; ids: string[] };
 }
 
@@ -913,7 +920,7 @@ function sourceCropToDisplay(el: ImageEl, img: HTMLImageElement): Bounds {
   };
 }
 
-function pixelEraseStroke(stroke: StrokeEl, pt: Point, radius: number): StrokeEl[] {
+export function pixelEraseStroke(stroke: StrokeEl, pt: Point, radius: number): StrokeEl[] {
   const r2 = radius * radius;
   const segments: Point[][] = [];
   let current: Point[] = [];
@@ -1083,6 +1090,12 @@ function wrapCanvasText(
   return lines;
 }
 
+/** Short http(s) or same-origin paths only. Data URLs and blobs never ride a Stream event. */
+function isShortImageUrl(url: string): boolean {
+  if (!url || url.startsWith("data:") || url.startsWith("blob:")) return false;
+  return url.length <= IMAGE_URL_SYNC_MAX;
+}
+
 function toSyncEl(el: DrawEl): SyncEl | null {
   if (el.kind === "stroke")
     return {
@@ -1098,7 +1111,7 @@ function toSyncEl(el: DrawEl): SyncEl | null {
     };
   if (el.kind === "shape") return el;
   if (el.kind === "text") return el;
-  if (el.kind === "image") return el;
+  if (el.kind === "image") return isShortImageUrl(el.url) ? el : null;
   return null;
 }
 
@@ -1160,16 +1173,13 @@ function snapshotEnvelope(payload: Record<string, unknown>): string {
   return JSON.stringify({ type: BOARD_EVENT, v: PROTO_V, ...payload });
 }
 
-function syncPieceFits(
+function syncPieceBytes(
   piece: SyncEl,
   paperStyle: PaperStyle,
   snapshotId: string,
   senderId: string,
-): boolean {
-  return (
-    snapshotEnvelope(snapshotChunkBody(snapshotId, senderId, paperStyle, 998, 999, [piece])).length <=
-    STREAM_SAFE_LIMIT
-  );
+): number {
+  return snapshotEnvelope(snapshotChunkBody(snapshotId, senderId, paperStyle, 998, 999, [piece])).length;
 }
 
 /** Split a stroke until each piece fits in one Stream event. Same id is concatenated on assemble. */
@@ -1179,10 +1189,15 @@ function fitSyncPiece(
   snapshotId: string,
   senderId: string,
 ): SyncEl[] {
-  if (syncPieceFits(el, paperStyle, snapshotId, senderId)) return [el];
-  if (el.kind !== "stroke" || el.pts.length < 4) return [];
+  const bytes = syncPieceBytes(el, paperStyle, snapshotId, senderId);
+  if (bytes <= STREAM_PIECE_SPLIT) return [el];
+  if (el.kind !== "stroke" || el.pts.length < 4) {
+    return bytes <= STREAM_SAFE_LIMIT ? [el] : [];
+  }
   const mid = Math.floor(el.pts.length / 4) * 2;
-  if (mid < 2 || mid >= el.pts.length) return [];
+  if (mid < 2 || mid >= el.pts.length) {
+    return bytes <= STREAM_SAFE_LIMIT ? [el] : [];
+  }
   return [
     ...fitSyncPiece({ ...el, pts: el.pts.slice(0, mid) }, paperStyle, snapshotId, senderId),
     ...fitSyncPiece({ ...el, pts: el.pts.slice(mid) }, paperStyle, snapshotId, senderId),
@@ -1213,6 +1228,389 @@ function mergeSyncElements(parts: readonly SyncEl[]): DrawEl[] {
     if (el) drawn.push(el);
   }
   return drawn;
+}
+
+/** Same width as `nanoid()`, so a budgeted event still fits once real ids are filled in. */
+const SYNC_ID_BUDGET = "012345678901234567890";
+
+export function boardSyncEventBytes(payload: object): number {
+  return JSON.stringify({ type: BOARD_EVENT, v: PROTO_V, ...(payload as Record<string, unknown>) }).length;
+}
+
+/** Skip path for an event that cannot be sent. The counter is the caller's running total. */
+export function noteOverLimitPayload(
+  count: number,
+  bytes: number,
+): { skip: boolean; nextCount: number; status: "error" | "ok" } {
+  if (bytes > STREAM_SAFE_LIMIT || bytes > STREAM_LIMIT) {
+    const nextCount = count + 1;
+    console.warn(`[whiteboard] skipped over-limit payload #${nextCount} (${bytes}B)`);
+    return { skip: true, nextCount, status: "error" };
+  }
+  return { skip: false, nextCount: count, status: "ok" };
+}
+
+export function gateBoardPayload(
+  count: number,
+  payload: object,
+): { skip: boolean; nextCount: number; status: "error" | "ok"; bytes: number } {
+  const bytes = boardSyncEventBytes(payload);
+  return { ...noteOverLimitPayload(count, bytes), bytes };
+}
+
+function isNumberList(value: unknown): value is number[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "number");
+}
+
+function coerceSyncEl(raw: unknown): SyncEl | null {
+  if (!raw || typeof raw !== "object") return null;
+  const record = raw as Record<string, unknown>;
+  if (typeof record.id !== "string" || typeof record.kind !== "string") return null;
+  if (record.kind === "stroke") {
+    const el = raw as Partial<StrokeEl> & { pts?: unknown };
+    if (isNumberList(el.pts)) return raw as SyncStroke;
+    if (Array.isArray(el.points)) {
+      return {
+        kind: "stroke",
+        id: record.id,
+        tool: el.tool === "highlighter" ? "highlighter" : "pen",
+        color: typeof el.color === "string" ? el.color : "#0f172a",
+        width: typeof el.width === "number" ? el.width : 1,
+        opacity: typeof el.opacity === "number" ? el.opacity : 1,
+        strokeStyle: el.strokeStyle ?? "solid",
+        pts: el.points.flatMap((point) => [point.x, point.y]),
+        pageIndex: typeof el.pageIndex === "number" ? el.pageIndex : 0,
+      };
+    }
+    return null;
+  }
+  if (record.kind === "shape" || record.kind === "text" || record.kind === "image") return raw as SyncEl;
+  return null;
+}
+
+function packDrawEl(el: DrawEl): SyncEl {
+  if (el.kind !== "stroke") return el;
+  return {
+    kind: "stroke",
+    id: el.id,
+    tool: el.tool,
+    color: el.color,
+    width: el.width,
+    opacity: el.opacity,
+    strokeStyle: el.strokeStyle,
+    pts: el.points.flatMap((point) => [point.x, point.y]),
+    pageIndex: el.pageIndex,
+  };
+}
+
+function splitStrokeToBudget(el: SyncStroke, bytesOf: (candidate: SyncStroke) => number): SyncStroke[] {
+  if (bytesOf(el) <= STREAM_SAFE_LIMIT) return [el];
+  const mid = Math.floor(el.pts.length / 4) * 2;
+  if (mid < 2 || mid >= el.pts.length) return [el];
+  return [
+    ...splitStrokeToBudget({ ...el, pts: el.pts.slice(0, mid) }, bytesOf),
+    ...splitStrokeToBudget({ ...el, pts: el.pts.slice(mid) }, bytesOf),
+  ];
+}
+
+function liveStrokePieces(el: SyncStroke, paperStyle: PaperStyle, senderId: string): SyncStroke[] {
+  if (boardSyncEventBytes({ add: el, senderId }) <= STREAM_SAFE_LIMIT) return [el];
+  const fitted = fitSyncPiece(el, paperStyle, "live", senderId).filter(
+    (piece): piece is SyncStroke => piece.kind === "stroke",
+  );
+  const seeds = fitted.length > 0 ? fitted : [el];
+  return seeds.flatMap((piece) =>
+    splitStrokeToBudget(piece, (candidate) =>
+      boardSyncEventBytes({ add: candidate, strokePart: 999, senderId }),
+    ),
+  );
+}
+
+/** One pen stroke as `{add}` events that share `id` and each stay within STREAM_SAFE_LIMIT. */
+export function buildStrokeAddEvents(
+  stroke: StrokeEl,
+  paperStyle: PaperStyle = "grid",
+  senderId = SYNC_ID_BUDGET,
+): Array<{ add: SyncStroke; strokePart?: number; senderId: string }> {
+  const sync = toSyncEl(stroke);
+  if (!sync || sync.kind !== "stroke") return [];
+  const pieces = liveStrokePieces(sync, paperStyle, senderId);
+  if (pieces.length <= 1) return [{ add: pieces[0] ?? sync, senderId }];
+  return pieces.map((piece, index) => ({ add: piece, strokePart: index, senderId }));
+}
+
+/** Apply one live `{add}`. Later pieces of the same stroke id are concatenated. */
+export function applyLiveAdd(
+  elements: readonly DrawEl[],
+  event: { add?: unknown; strokePart?: number },
+): DrawEl[] {
+  const raw = coerceSyncEl(event.add);
+  if (!raw) return [...elements];
+  if (raw.kind === "stroke" && (event.strokePart ?? 0) > 0) {
+    const existing = elements.find((el) => el.id === raw.id);
+    if (existing?.kind === "stroke") {
+      const prev: SyncStroke = {
+        kind: "stroke",
+        id: existing.id,
+        tool: existing.tool,
+        color: existing.color,
+        width: existing.width,
+        opacity: existing.opacity,
+        strokeStyle: existing.strokeStyle,
+        pts: existing.points.flatMap((point) => [point.x, point.y]),
+        pageIndex: existing.pageIndex,
+      };
+      const merged = mergeSyncElements([prev, raw]);
+      return merged[0] ? upsertElement(elements, merged[0]) : [...elements];
+    }
+  }
+  const drawn = syncElToDraw(raw);
+  return drawn ? upsertElement(elements, drawn) : [...elements];
+}
+
+export type HistorySyncEvent = {
+  historyOp: {
+    id: string;
+    removed: SyncEl[];
+    added: SyncEl[];
+    updated: Array<{ id: string; before: SyncEl; after: SyncEl }>;
+  };
+  direction: "forward" | "backward";
+  senderId: string;
+  historyPart?: { index: number; total: number; opId: string };
+};
+
+type HistoryPiece =
+  | { bucket: "removed"; el: SyncEl }
+  | { bucket: "added"; el: SyncEl }
+  | { bucket: "updated"; update: HistorySyncEvent["historyOp"]["updated"][number] };
+
+function historySliceBytes(el: SyncStroke, senderId: string): number {
+  const empty: SyncStroke = { ...el, pts: [] };
+  return boardSyncEventBytes({
+    senderId,
+    historyOp: {
+      id: SYNC_ID_BUDGET,
+      removed: [] as SyncEl[],
+      added: [] as SyncEl[],
+      updated: [{ id: SYNC_ID_BUDGET, before: el, after: empty }],
+    },
+    direction: "forward",
+    historyPart: { index: 998, total: 999, opId: SYNC_ID_BUDGET },
+  });
+}
+
+function expandDrawEl(el: DrawEl, senderId: string): SyncEl[] {
+  const packed = packDrawEl(el);
+  if (packed.kind !== "stroke") return [packed];
+  const fitted = fitSyncPiece(packed, "grid", "hist", senderId).filter(
+    (piece): piece is SyncStroke => piece.kind === "stroke",
+  );
+  const seeds = fitted.length > 0 ? fitted : [packed];
+  return seeds.flatMap((piece) => splitStrokeToBudget(piece, (candidate) => historySliceBytes(candidate, senderId)));
+}
+
+function blankPartner(el: SyncEl): SyncEl {
+  return el.kind === "stroke" ? { ...el, pts: [] } : el;
+}
+
+function historyPieces(op: HistoryOp, senderId: string): HistoryPiece[] {
+  const pieces: HistoryPiece[] = [];
+  for (const el of op.removed) {
+    for (const part of expandDrawEl(el, senderId)) pieces.push({ bucket: "removed", el: part });
+  }
+  for (const el of op.added) {
+    for (const part of expandDrawEl(el, senderId)) pieces.push({ bucket: "added", el: part });
+  }
+  for (const update of op.updated) {
+    const beforeParts = expandDrawEl(update.before, senderId);
+    const afterParts = expandDrawEl(update.after, senderId);
+    const beforeBlank = blankPartner(beforeParts[0] ?? packDrawEl(update.before));
+    const afterBlank = blankPartner(afterParts[0] ?? packDrawEl(update.after));
+    for (const el of beforeParts) {
+      pieces.push({ bucket: "updated", update: { id: update.id, before: el, after: afterBlank } });
+    }
+    for (const el of afterParts) {
+      pieces.push({ bucket: "updated", update: { id: update.id, before: beforeBlank, after: el } });
+    }
+  }
+  return pieces;
+}
+
+function groupHistoryPayload(
+  opId: string,
+  direction: "forward" | "backward",
+  senderId: string,
+  group: readonly HistoryPiece[],
+  index: number,
+  total: number,
+): HistorySyncEvent {
+  return {
+    senderId,
+    direction,
+    historyOp: {
+      id: opId,
+      removed: group
+        .filter((piece): piece is { bucket: "removed"; el: SyncEl } => piece.bucket === "removed")
+        .map((piece) => piece.el),
+      added: group
+        .filter((piece): piece is { bucket: "added"; el: SyncEl } => piece.bucket === "added")
+        .map((piece) => piece.el),
+      updated: group
+        .filter(
+          (piece): piece is { bucket: "updated"; update: HistorySyncEvent["historyOp"]["updated"][number] } =>
+            piece.bucket === "updated",
+        )
+        .map((piece) => piece.update),
+    },
+    historyPart: { index, total, opId },
+  };
+}
+
+/** History ops travel with packed `pts`. Oversized ops are split and reassembled by id. */
+export function buildHistorySyncEvents(
+  op: HistoryOp,
+  direction: "forward" | "backward",
+  senderId = SYNC_ID_BUDGET,
+): HistorySyncEvent[] {
+  const single: HistorySyncEvent = {
+    senderId,
+    direction,
+    historyOp: {
+      id: op.id,
+      removed: op.removed.map(packDrawEl),
+      added: op.added.map(packDrawEl),
+      updated: op.updated.map((update) => ({
+        id: update.id,
+        before: packDrawEl(update.before),
+        after: packDrawEl(update.after),
+      })),
+    },
+  };
+  if (boardSyncEventBytes(single) <= STREAM_SAFE_LIMIT) return [single];
+
+  const pieces = historyPieces(op, senderId);
+  const groups: HistoryPiece[][] = [];
+  let current: HistoryPiece[] = [];
+  for (const piece of pieces) {
+    const trial = [...current, piece];
+    const overflows =
+      current.length > 0 &&
+      boardSyncEventBytes(groupHistoryPayload(op.id, direction, senderId, trial, groups.length, 999)) >
+        STREAM_SAFE_LIMIT;
+    if (overflows) {
+      groups.push(current);
+      current = [];
+    }
+    current.push(piece);
+  }
+  if (current.length > 0) groups.push(current);
+  if (groups.length === 0) groups.push([]);
+  return groups.map((group, index) => groupHistoryPayload(op.id, direction, senderId, group, index, groups.length));
+}
+
+type BufferedHistory = {
+  direction: "forward" | "backward";
+  historyOp: { id: string; removed: unknown[]; added: unknown[]; updated: unknown[] };
+};
+
+export type HistoryPartBuffer = Map<string, Array<BufferedHistory | undefined>>;
+
+function unpackHistoryOp(raw: {
+  id: string;
+  removed: unknown[];
+  added: unknown[];
+  updated: unknown[];
+}): HistoryOp {
+  const removed = mergeSyncElements(raw.removed.map(coerceSyncEl).filter((el): el is SyncEl => el !== null));
+  const added = mergeSyncElements(raw.added.map(coerceSyncEl).filter((el): el is SyncEl => el !== null));
+  const updateOrder: string[] = [];
+  const befores = new Map<string, SyncEl[]>();
+  const afters = new Map<string, SyncEl[]>();
+  for (const item of raw.updated) {
+    if (!item || typeof item !== "object") continue;
+    const update = item as { id?: unknown; before?: unknown; after?: unknown };
+    if (typeof update.id !== "string") continue;
+    const before = coerceSyncEl(update.before);
+    const after = coerceSyncEl(update.after);
+    if (!before || !after) continue;
+    if (!befores.has(update.id)) {
+      updateOrder.push(update.id);
+      befores.set(update.id, []);
+      afters.set(update.id, []);
+    }
+    befores.get(update.id)?.push(before);
+    afters.get(update.id)?.push(after);
+  }
+  const updated: HistoryUpdate[] = [];
+  for (const id of updateOrder) {
+    const before = mergeSyncElements(befores.get(id) ?? [])[0];
+    const after = mergeSyncElements(afters.get(id) ?? [])[0];
+    if (before && after) updated.push({ id, before, after });
+  }
+  return { id: raw.id, removed, added, updated };
+}
+
+function asHistoryBody(raw: unknown): BufferedHistory["historyOp"] | null {
+  if (!raw || typeof raw !== "object") return null;
+  const op = raw as { id?: unknown; removed?: unknown; added?: unknown; updated?: unknown };
+  if (typeof op.id !== "string" || !Array.isArray(op.removed) || !Array.isArray(op.added)) return null;
+  return {
+    id: op.id,
+    removed: op.removed,
+    added: op.added,
+    updated: Array.isArray(op.updated) ? op.updated : [],
+  };
+}
+
+export function noteHistorySyncEvent(
+  buffers: HistoryPartBuffer,
+  value: { historyOp?: unknown; direction?: unknown; historyPart?: unknown },
+): { op: HistoryOp; direction: "forward" | "backward" } | null {
+  if (value.direction !== "forward" && value.direction !== "backward") return null;
+  const historyOp = asHistoryBody(value.historyOp);
+  if (!historyOp) return null;
+  const direction = value.direction;
+  if (value.historyPart === undefined) return { op: unpackHistoryOp(historyOp), direction };
+
+  if (!value.historyPart || typeof value.historyPart !== "object") return null;
+  const part = value.historyPart as { index?: unknown; total?: unknown; opId?: unknown };
+  if (typeof part.opId !== "string" || typeof part.index !== "number" || typeof part.total !== "number") return null;
+  if (!Number.isInteger(part.index) || !Number.isInteger(part.total) || part.total <= 0) return null;
+  if (part.index < 0 || part.index >= part.total) return null;
+
+  const slots = buffers.get(part.opId) ?? Array.from({ length: part.total }, () => undefined);
+  if (slots.length !== part.total || slots[part.index]) return null;
+  slots[part.index] = { direction, historyOp };
+  buffers.set(part.opId, slots);
+  if (slots.some((slot) => !slot)) return null;
+
+  buffers.delete(part.opId);
+  const removed: unknown[] = [];
+  const added: unknown[] = [];
+  const updated: unknown[] = [];
+  for (const slot of slots) {
+    if (!slot) continue;
+    removed.push(...slot.historyOp.removed);
+    added.push(...slot.historyOp.added);
+    updated.push(...slot.historyOp.updated);
+  }
+  return { op: unpackHistoryOp({ id: part.opId, removed, added, updated }), direction };
+}
+
+export function buildClearCanvasEvents(
+  elements: readonly DrawEl[],
+  opId: string,
+  senderId = SYNC_ID_BUDGET,
+): Array<HistorySyncEvent | { action: "clear"; senderId: string }> {
+  const events: Array<HistorySyncEvent | { action: "clear"; senderId: string }> = [];
+  if (elements.length > 0) {
+    events.push(
+      ...buildHistorySyncEvents({ id: opId, removed: [...elements], added: [], updated: [] }, "forward", senderId),
+    );
+  }
+  events.push({ action: "clear", senderId });
+  return events;
 }
 
 /** Pack the board into Stream events that stay under STREAM_SAFE_LIMIT. */
@@ -1402,6 +1800,15 @@ function paintShape(ctx: CanvasRenderingContext2D, el: ShapeEl | ActiveShape): v
   ctx.lineWidth = el.width;
   ctx.lineCap = "round";
   setDash(ctx, el.strokeStyle, el.width);
+  if (el.shape === "parabola" && "vertices" in el && el.vertices && el.vertices.length >= 3) {
+    const [start, control, end] = el.vertices;
+    ctx.beginPath();
+    ctx.moveTo(start.x, start.y);
+    ctx.quadraticCurveTo(control.x, control.y, end.x, end.y);
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
   if ("vertices" in el && el.vertices && el.vertices.length >= 2) {
     const vertices = el.vertices;
     ctx.beginPath();
@@ -1446,6 +1853,8 @@ function paintShape(ctx: CanvasRenderingContext2D, el: ShapeEl | ActiveShape): v
       ctx.stroke();
       paintArrowhead(ctx, { x: x1, y: y1 }, { x: x2, y: y2 }, el.width * 4 + 8);
       break;
+    case "parabola":
+      break;
   }
   ctx.restore();
 }
@@ -1470,6 +1879,17 @@ function paintSnapGhost(
   } else if (shape.type === "circle") {
     ctx.beginPath();
     ctx.arc(shape.center.x, shape.center.y, shape.radius, 0, Math.PI * 2);
+    ctx.stroke();
+  } else if (shape.type === "ellipse") {
+    ctx.beginPath();
+    ctx.ellipse(shape.center.x, shape.center.y, shape.radiusX, shape.radiusY, 0, 0, Math.PI * 2);
+    ctx.stroke();
+  } else if (shape.type === "parabola") {
+    const controlX = 2 * shape.vertex.x - 0.5 * (shape.start.x + shape.end.x);
+    const controlY = 2 * shape.vertex.y - 0.5 * (shape.start.y + shape.end.y);
+    ctx.beginPath();
+    ctx.moveTo(shape.start.x, shape.start.y);
+    ctx.quadraticCurveTo(controlX, controlY, shape.end.x, shape.end.y);
     ctx.stroke();
   } else if (shape.type === "polygon" && shape.vertices.length >= 2) {
     ctx.beginPath();
@@ -2096,6 +2516,8 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
     const snapshotRequestedRef = useRef(false);
     const awaitingSnapshotRef = useRef(false);
     const snapshotBuffersRef = useRef(new Map<string, SnapshotChunkEvent[]>());
+    const historySyncBuffersRef = useRef<HistoryPartBuffer>(new Map());
+    const skippedSyncCountRef = useRef(0);
     const paperStyleRef = useRef<PaperStyle>(paperStyle);
     const shiftPressedRef = useRef(false);
 
@@ -2267,18 +2689,35 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
     }
 
     const broadcastElement = useCallback((payload: Record<string, unknown>): void => {
-      broadcastRef.current?.(payload);
+      const add = payload.add as SyncEl | undefined;
+      if (add?.kind === "stroke" && typeof payload.strokePart !== "number") {
+        const senderId = typeof payload.senderId === "string" ? payload.senderId : clientIdRef.current;
+        const pieces = liveStrokePieces(add, paperStyleRef.current, senderId);
+        const events =
+          pieces.length <= 1
+            ? [{ add: pieces[0] ?? add, senderId }]
+            : pieces.map((piece, index) => ({ add: piece, strokePart: index, senderId }));
+        for (const event of events) broadcastRef.current?.(event);
+        return;
+      }
+      const stamped =
+        typeof payload.senderId === "string" ? payload : { ...payload, senderId: clientIdRef.current };
+      broadcastRef.current?.(stamped);
     }, []);
+
+    const broadcastHistory = useCallback((op: HistoryOp, direction: "forward" | "backward"): void => {
+      for (const event of buildHistorySyncEvents(op, direction, clientIdRef.current)) {
+        broadcastElement(event as unknown as Record<string, unknown>);
+      }
+    }, [broadcastElement]);
 
     const pushHistory = useCallback(
       (op: HistoryOp, sync = false): void => {
         setUndoStack((prev) => [...prev, op]);
         setRedoStack([]);
-        if (sync) {
-          broadcastElement({ historyOp: op, direction: "forward" });
-        }
+        if (sync) broadcastHistory(op, "forward");
       },
-      [broadcastElement],
+      [broadcastHistory],
     );
 
     const applyHistoryRemote = useCallback((op: HistoryOp, direction: "forward" | "backward"): void => {
@@ -2296,8 +2735,8 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
       setElements((prev) => applyHistoryBackward(prev, op));
       setUndoStack((prev) => prev.slice(0, -1));
       setRedoStack((prev) => [...prev, op]);
-      broadcastElement({ historyOp: op, direction: "backward" });
-    }, [broadcastElement]);
+      broadcastHistory(op, "backward");
+    }, [broadcastHistory]);
 
     const performRedo = useCallback((): void => {
       const stack = redoStackRef.current;
@@ -2307,8 +2746,8 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
       setElements((prev) => applyHistoryForward(prev, op));
       setRedoStack((prev) => prev.slice(0, -1));
       setUndoStack((prev) => [...prev, op]);
-      broadcastElement({ historyOp: op, direction: "forward" });
-    }, [broadcastElement]);
+      broadcastHistory(op, "forward");
+    }, [broadcastHistory]);
 
     useEffect(() => {
       if (!streamChannel) {
@@ -2317,26 +2756,27 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
         snapshotRequestedRef.current = false;
         awaitingSnapshotRef.current = false;
         snapshotBuffersRef.current.clear();
+        historySyncBuffersRef.current.clear();
         return;
       }
       const emit = (payload: Record<string, unknown>): void => {
-        const json = JSON.stringify({ type: BOARD_EVENT, v: PROTO_V, ...payload });
-        if (json.length > STREAM_SAFE_LIMIT || json.length > STREAM_LIMIT) {
-          console.warn(`[whiteboard] payload ${json.length}B > safe limit, skipping`);
+        const gate = gateBoardPayload(skippedSyncCountRef.current, payload);
+        if (gate.skip) {
+          skippedSyncCountRef.current = gate.nextCount;
+          setSyncStatus("error");
           return;
         }
-        void streamChannel
-          .sendEvent({ type: BOARD_EVENT, v: PROTO_V, ...payload } as unknown as Parameters<
-            Channel["sendEvent"]
-          >[0])
-          .then(() => setSyncStatus("live"))
-          .catch((err: unknown) => {
-            const m = err instanceof Error ? err.message : String(err);
-            if (!/size|limit|payload|2000|4096/i.test(m)) {
-              console.error("[whiteboard]", err);
-              setSyncStatus("error");
-            }
-          });
+        const eventPayload = { type: BOARD_EVENT, v: PROTO_V, ...payload };
+        void (async () => {
+          try {
+            await streamChannel.sendEvent(eventPayload as unknown as Parameters<Channel["sendEvent"]>[0]);
+            setSyncStatus("live");
+          } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            console.warn("[Stream Whiteboard] Safe sendEvent failure caught:", message);
+            if (!/size|limit|payload|2000|4096/i.test(message)) setSyncStatus("error");
+          }
+        })();
       };
       emitBoardEventRef.current = emit;
       broadcastRef.current = makeThrottle((payload: Record<string, unknown>): void => {
@@ -2348,6 +2788,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
 
     useEffect(() => {
       if (!streamChannel) return;
+      historySyncBuffersRef.current.clear();
 
       const applySnapshot = (elements: DrawEl[], nextPaper: PaperStyle): void => {
         for (const el of elements) {
@@ -2416,24 +2857,25 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
             }
             return;
           }
-          if (ev.historyOp && (ev.direction === "forward" || ev.direction === "backward")) {
-            applyHistoryRemote(ev.historyOp, ev.direction);
+          if (ev.action === "clear") {
+            activeRef.current = null;
+            cursorRef.current = null;
+            elementsRef.current = [];
+            setActive(null);
+            setElements([]);
+            setSelectedIds(new Set());
+            setSelection(null);
+            setEditText(null);
+            setSyncStatus("live");
+            return;
           }
+          const historyReady = noteHistorySyncEvent(historySyncBuffersRef.current, ev);
+          if (historyReady) applyHistoryRemote(historyReady.op, historyReady.direction);
           if (ev.add !== undefined && ev.add !== null) {
             const raw = ev.add as SyncEl;
             if (raw.kind === "stroke") {
-              const el: StrokeEl = {
-                kind: "stroke",
-                id: raw.id,
-                tool: raw.tool,
-                color: raw.color,
-                width: raw.width,
-                opacity: raw.opacity,
-                strokeStyle: raw.strokeStyle ?? "solid",
-                points: fromSyncPts(raw.pts),
-                pageIndex: raw.pageIndex,
-              };
-              setElements((prev) => upsertElement(prev, el));
+              const strokePart = typeof ev.strokePart === "number" ? ev.strokePart : undefined;
+              setElements((prev) => applyLiveAdd(prev, { add: raw, strokePart }));
             } else if (raw.kind === "shape") {
               setElements((prev) => upsertElement(prev, raw as ShapeEl));
             } else if (raw.kind === "text") {
@@ -2560,11 +3002,6 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
         if (removedEls.length === 0 && addedEls.length === 0) return;
         pushHistory({ id: nanoid(), removed: removedEls, added: addedEls, updated: [] }, true);
         setElements([...nextEls, ...addedEls]);
-        if (removedEls.length) broadcastElement({ remove: removedEls.map((e) => e.id) });
-        addedEls.forEach((a) => {
-          const sync = toSyncEl(a);
-          if (sync) broadcastElement({ add: sync });
-        });
       },
       [eraserMode, broadcastElement, pushHistory],
     );
@@ -3241,17 +3678,16 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
             resolve(false);
           };
           img.onload = () => {
-            const maxW = PAGE_W - 80;
-            const maxH = PAGE_H - 160;
-            const sc = Math.min(maxW / img.naturalWidth, maxH / img.naturalHeight, 1);
-            const w = Math.floor(img.naturalWidth * sc);
-            const h = Math.floor(img.naturalHeight * sc);
+            const maxH = PAGE_H - 40;
+            const sc = Math.min(IMAGE_MAX_WIDTH / img.naturalWidth, maxH / img.naturalHeight, 1);
+            const w = Math.max(1, Math.floor(img.naturalWidth * sc));
+            const h = Math.max(1, Math.floor(img.naturalHeight * sc));
             const el: ImageEl = {
               kind: "image",
               id: imageId,
               url,
-              x: PAGE_W / 2 - w / 2,
-              y: 80,
+              x: Math.max(20, (PAGE_W - w) / 2),
+              y: Math.max(20, (PAGE_H - h) / 2),
               w,
               h,
               rotation: 0,
@@ -3262,10 +3698,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
             pushHistory({ id: nanoid(), removed: [], added: [el], updated: [] });
             setElements((prev) => [...prev, el]);
             const sync = toSyncEl(el);
-            if (sync) {
-              const json = JSON.stringify({ type: BOARD_EVENT, v: PROTO_V, add: sync });
-              if (json.length <= STREAM_LIMIT) broadcastElement({ add: sync });
-            }
+            if (sync) broadcastElement({ add: sync });
             resolve(true);
           };
           img.src = url;
@@ -3276,18 +3709,28 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
 
     const handleImageFile = useCallback(
       async (file: File): Promise<void> => {
+        const localId = `img_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
         try {
           const formData = new FormData();
           formData.append("file", file);
           const res = await fetch("/api/upload", { method: "POST", body: formData });
-          if (!res.ok) {
+          if (res.ok) {
+            const data = (await res.json()) as { id?: string; url?: string };
+            if (typeof data.url === "string" && data.url.length > 0) {
+              const placed = await insertImageElement(typeof data.id === "string" ? data.id : localId, data.url);
+              if (placed) return;
+            }
+          } else {
             console.error("[whiteboard] upload:", await res.text());
-            return;
           }
-          const data = (await res.json()) as { id: string; url: string };
-          await insertImageElement(data.id, data.url);
         } catch (err) {
           console.error("[whiteboard] image error:", err);
+        }
+        try {
+          const dataUrl = await blobToDataUrl(file);
+          await insertImageElement(localId, dataUrl);
+        } catch (fallbackError) {
+          console.error("[whiteboard] image fallback failed:", fallbackError);
         }
       },
       [insertImageElement],
@@ -3563,8 +4006,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
         if (el.kind === "image") ensureImageInCache(el, imgCache.current);
         const sync = toSyncEl(el);
         if (sync) {
-          const json = JSON.stringify({ type: BOARD_EVENT, v: PROTO_V, add: sync });
-          if (json.length <= STREAM_LIMIT) broadcastElement({ add: sync });
+          broadcastElement({ add: sync });
         }
       });
     }, [activePageIndex, broadcastElement, pushHistory]);
@@ -3863,15 +4305,22 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
       }
       activeRef.current = null;
       cursorRef.current = null;
+      const removed = elementsRef.current.slice();
+      const opId = nanoid();
       elementsRef.current = [];
       setActive(null);
       setElements([]);
       setSelectedIds(new Set());
       setSelection(null);
       setEditText(null);
-      setUndoStack([]);
-      setRedoStack([]);
-    }, []);
+      if (removed.length > 0) {
+        setUndoStack((prev) => [...prev, { id: opId, removed, added: [], updated: [] }]);
+        setRedoStack([]);
+      }
+      for (const event of buildClearCanvasEvents(removed, opId, clientIdRef.current)) {
+        broadcastElement(event as unknown as Record<string, unknown>);
+      }
+    }, [broadcastElement]);
 
     useImperativeHandle(
       ref,

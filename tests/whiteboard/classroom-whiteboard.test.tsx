@@ -1,12 +1,23 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   STREAM_SAFE_LIMIT,
+  applyLiveAdd,
+  boardSyncEventBytes,
+  buildClearCanvasEvents,
+  buildHistorySyncEvents,
   buildRequestSnapshot,
   buildSnapshotChunks,
+  buildStrokeAddEvents,
+  gateBoardPayload,
+  noteHistorySyncEvent,
+  noteOverLimitPayload,
   noteSnapshotChunk,
+  pixelEraseStroke,
   readPaperStyleChange,
   readWhiteboardShortcut,
   shouldRequestSnapshot,
+  type HistoryPartBuffer,
+  type HistorySyncEvent,
   type SnapshotChunkEvent,
 } from "../../components/ClassroomWhiteboard";
 import { applyHistoryBackward, applyHistoryForward } from "../../lib/whiteboard/display-list";
@@ -15,6 +26,7 @@ import {
   alignRecognizedShape,
   constrainLineEnd,
   draftFromRecognized,
+  parabolaControl,
   shouldSnapRecognizedToGrid,
   snapPointToGrid,
   snapRadiusToGrid,
@@ -215,6 +227,53 @@ describe("classroom whiteboard late-join sync", () => {
     expect(ready?.elements.map((el) => el.id)).toEqual(elements.map((el) => el.id));
   });
 
+  it("never lets a snapshot chunk exceed 1400 bytes", () => {
+    expect(STREAM_SAFE_LIMIT).toBe(1400);
+    const chunks = buildSnapshotChunks([zigzagStroke("long-stroke", 500)], "grid", "snap-limit", "teacher-1");
+    expect(chunks.length).toBeGreaterThan(1);
+    for (const chunk of chunks) {
+      expect(chunkBytes(chunk)).toBeLessThanOrEqual(1400);
+      expect(chunkBytes(chunk)).toBeLessThanOrEqual(STREAM_SAFE_LIMIT);
+    }
+  });
+
+  it("keeps a data-url image out of the stream snapshot", () => {
+    const chunks = buildSnapshotChunks(
+      [
+        {
+          kind: "image",
+          id: "img-local",
+          url: `data:image/png;base64,${"A".repeat(900)}`,
+          x: 20,
+          y: 20,
+          w: 200,
+          h: 120,
+          rotation: 0,
+          crop: null,
+          pageIndex: 0,
+        },
+      ],
+      "grid",
+      "snap-image",
+      "teacher-1"
+    );
+    expect(JSON.stringify(chunks)).not.toContain("data:image");
+    for (const chunk of chunks) expect(chunkBytes(chunk)).toBeLessThanOrEqual(1400);
+  });
+
+  it("draws a parabola through the quadratic control 2V − ½(start + end)", () => {
+    const shape: RecognizedShape = {
+      type: "parabola",
+      vertex: { x: 120, y: 40 },
+      start: { x: 20, y: 140 },
+      end: { x: 220, y: 140 },
+    };
+    const draft = draftFromRecognized(shape);
+    expect(draft?.shape).toBe("parabola");
+    expect(draft?.vertices?.[1]).toEqual(parabolaControl(shape.start, shape.vertex, shape.end));
+    expect(draft?.vertices?.[1]).toEqual({ x: 120, y: -60 });
+  });
+
   it("applies a paper style change and ignores an unknown style", () => {
     expect(readPaperStyleChange({ action: "paper_style_change", paperStyle: "dotted" })).toBe("dotted");
     expect(readPaperStyleChange({ action: "paper_style_change", paperStyle: "blank" })).toBe("blank");
@@ -337,5 +396,109 @@ describe("grid snap and shift-locked lines", () => {
     const change = { removed: [], added: [restored], updated: [] };
     expect(readWhiteboardShortcut({ key: "z", metaKey: true, ctrlKey: false, shiftKey: true })).toBe("redo");
     expect(applyHistoryForward([], change)).toEqual([restored]);
+  });
+});
+
+const SENDER = "123456789012345678901";
+
+function isHistorySyncEvent(event: HistorySyncEvent | { action: "clear"; senderId: string }): event is HistorySyncEvent {
+  return "historyOp" in event;
+}
+
+describe("classroom whiteboard live stroke sync", () => {
+  it("delivers a 600-point stroke intact as several add events under 1400 bytes", () => {
+    const stroke = zigzagStroke("stroke-600", 600);
+    const events = buildStrokeAddEvents(stroke, "grid", SENDER);
+
+    expect(events.length).toBeGreaterThan(1);
+    expect(events.every((event) => event.add.id === "stroke-600")).toBe(true);
+    for (const event of events) expect(boardSyncEventBytes(event)).toBeLessThanOrEqual(STREAM_SAFE_LIMIT);
+
+    let remote = applyLiveAdd([], events[0]);
+    for (const event of events.slice(1)) remote = applyLiveAdd(remote, event);
+
+    expect(remote).toHaveLength(1);
+    expect(remote[0]).toMatchObject({ id: "stroke-600", kind: "stroke", tool: "pen", pageIndex: 0 });
+    if (remote[0]?.kind !== "stroke") return;
+    expect(remote[0].points).toHaveLength(600);
+    expect(remote[0].points).toEqual(stroke.points);
+  });
+
+  it("syncs a pixel erase of a long stroke so the peer matches the local board", () => {
+    const stroke = zigzagStroke("erase-me", 600);
+    const parts = pixelEraseStroke(stroke, stroke.points[300], 1);
+    expect(parts.length).toBeGreaterThan(1);
+    const op = { id: "erase-1", removed: [stroke], added: parts, updated: [] };
+    const local = applyHistoryForward([stroke], op);
+    const events = buildHistorySyncEvents(op, "forward", SENDER);
+
+    expect(events.length).toBeGreaterThan(1);
+    for (const event of events) {
+      expect(boardSyncEventBytes(event)).toBeLessThanOrEqual(STREAM_SAFE_LIMIT);
+      expect(JSON.stringify(event)).not.toContain('"points"');
+      expect(JSON.stringify(event)).toContain('"pts"');
+    }
+
+    const buffers: HistoryPartBuffer = new Map();
+    let remote: { id: string }[] = [stroke];
+    let applied = 0;
+    for (const event of events) {
+      const ready = noteHistorySyncEvent(buffers, event);
+      if (!ready) continue;
+      applied += 1;
+      remote = applyHistoryForward(remote, ready.op);
+    }
+    expect(applied).toBe(1);
+    expect(buffers.size).toBe(0);
+    expect(remote).toEqual(local);
+  });
+
+  it("broadcasts clear as an undoable history op that empties the peer", () => {
+    const stroke = zigzagStroke("keep", 600);
+    const events = buildClearCanvasEvents([stroke], "clear-1", SENDER);
+    expect(events.at(-1)).toEqual({ action: "clear", senderId: SENDER });
+    expect(events.length).toBeGreaterThan(2);
+    for (const event of events) expect(boardSyncEventBytes(event)).toBeLessThanOrEqual(STREAM_SAFE_LIMIT);
+
+    const buffers: HistoryPartBuffer = new Map();
+    let board: { id: string }[] = [stroke];
+    let undoOp: NonNullable<ReturnType<typeof noteHistorySyncEvent>>["op"] | null = null;
+    for (const event of events) {
+      if (!isHistorySyncEvent(event)) {
+        board = [];
+        continue;
+      }
+      const ready = noteHistorySyncEvent(buffers, event);
+      if (!ready) continue;
+      undoOp = ready.op;
+      board = applyHistoryForward(board, ready.op);
+    }
+    expect(board).toEqual([]);
+    expect(undoOp).not.toBeNull();
+    if (!undoOp) return;
+    expect(applyHistoryBackward([], undoOp)).toEqual([stroke]);
+  });
+
+  it("surfaces an error and a counter when an over-limit payload is skipped", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const atLimit = noteOverLimitPayload(4, STREAM_SAFE_LIMIT);
+      expect(atLimit).toEqual({ skip: false, nextCount: 4, status: "ok" });
+
+      const huge = gateBoardPayload(4, { add: { pts: "x".repeat(2000) } });
+      expect(huge.bytes).toBeGreaterThan(STREAM_SAFE_LIMIT);
+      expect(huge.skip).toBe(true);
+      expect(huge.status).toBe("error");
+      expect(huge.nextCount).toBe(5);
+
+      const again = noteOverLimitPayload(huge.nextCount, STREAM_SAFE_LIMIT + 1);
+      expect(again).toEqual({ skip: true, nextCount: 6, status: "error" });
+      expect(warn.mock.calls.map((call) => String(call[0]))).toEqual([
+        expect.stringContaining("#5"),
+        expect.stringContaining("#6"),
+      ]);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

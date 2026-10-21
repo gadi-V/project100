@@ -169,6 +169,7 @@ export default async function LessonPage(props: {
           : lesson.chatChannel,
         durationMinutes: lesson.durationMinutes,
         packageId: lesson.packageId ?? null,
+        lessonType: lesson.lessonType,
       }}
       user={{
         id: user.id,

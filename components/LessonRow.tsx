@@ -24,6 +24,7 @@ interface LessonRowLesson {
   canceledById?: string;
   teacherId: string;
   appealStatus?: string;
+  excalidrawPdfUrl?: string | null;
   teacher: { id: string; name: string };
   student: { id: string; name: string };
 }
@@ -114,6 +115,13 @@ export default function LessonRow({ lesson, userRole, onRefresh }: LessonRowProp
       ? "אזהרה: הביטול הוא פחות מ-24 שעות. הקרדיט לא יוחזר."
       : "השיעור יבוטל והקרדיט יוחזר במלואו.";
 
+  const boardPdfUrl = lesson.excalidrawPdfUrl?.trim() ?? "";
+  const boardHref =
+    userRole === "STUDENT" &&
+    lesson.status === "COMPLETED" &&
+    (boardPdfUrl.startsWith("https://") || boardPdfUrl.startsWith("http://"))
+      ? boardPdfUrl
+      : null;
   const peerLabel = isTeacher ? "תלמיד" : "מורה";
   const peerName = isTeacher ? lesson.student.name : lesson.teacher.name;
   const liveButtonText = isTeacher ? "התחל שיעור בלייב" : "כניסה לשיעור בלייב";
@@ -267,6 +275,11 @@ export default function LessonRow({ lesson, userRole, onRefresh }: LessonRowProp
         {(lesson.status === "SCHEDULED" || lesson.status === "IN_PROGRESS") && (
           <a href={`/lessons/${lesson.id}`} className={primaryCta}>
             {liveButtonText}
+          </a>
+        )}
+        {boardHref && (
+          <a href={boardHref} target="_blank" rel="noopener noreferrer" className={`${primaryCta} py-2 text-center`}>
+            📄 צפה בלוח השיעור (PDF)
           </a>
         )}
       </div>

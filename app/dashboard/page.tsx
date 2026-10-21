@@ -105,6 +105,7 @@ interface Lesson {
   canceledById?: string;
   teacherId: string;
   appealStatus?: string;
+  excalidrawPdfUrl?: string | null;
   teacher: { id: string; name: string };
   student: { id: string; name: string };
 }

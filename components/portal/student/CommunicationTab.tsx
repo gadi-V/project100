@@ -14,10 +14,13 @@ import {
   parseCommunicationInput,
   renderCommunicationTemplate,
   setTemplateFieldValue,
+  type CommunicationStructuredData,
   type CommunicationType,
+  type StructuredValue,
+  type TemplateField,
 } from "../../../lib/communication-templates";
 import { formatIsraelDateTime, type CommunicationEntry } from "../../../lib/student-portal-shared";
-import { badgeNeutral, emptyState, fieldClass, frostPanel, primaryCta, secondaryCta } from "../../../lib/ui";
+import { badgeNeutral, badgeSuccess, emptyState, fieldClass, frostPanel, primaryCta, secondaryCta } from "../../../lib/ui";
 
 type CommunicationTabProps = {
   studentId: string;
@@ -35,6 +38,52 @@ type ApiResponse<T> = { success: boolean; data?: T; error?: string };
 type SaveResponse = ApiResponse<CommunicationEntry> & { whatsappDispatched?: boolean };
 
 const PREVIEW_LINES = 4;
+const STAFF_ROLES = new Set(["TEACHER", "ADMIN", "MANAGER", "REPRESENTATIVE"]);
+
+function renderSummaryValue(field: TemplateField, value: StructuredValue) {
+  if (Array.isArray(value)) {
+    return (
+      <ul className="w-full space-y-1">
+        {value.map((item) => (
+          <li key={`${item.rank}-${item.topic}`} className="flex flex-wrap items-center gap-2 text-sm text-neutral-800">
+            <span>
+              {item.rank}. {item.topic}
+            </span>
+            {item.score != null && <span className={badgeNeutral}>{item.score}</span>}
+          </li>
+        ))}
+      </ul>
+    );
+  }
+  if (field.kind === "choice" || field.kind === "score") {
+    const badge = field.key === "subscriptionRecommendation" ? badgeSuccess : badgeNeutral;
+    return <span className={badge}>{String(value)}</span>;
+  }
+  return <span className="text-sm text-neutral-800 whitespace-pre-line">{String(value)}</span>;
+}
+
+/** Staff-only card for a saved lesson or mapping summary. Students never receive this payload. */
+function StructuredSummaryCard({ data }: { data: CommunicationStructuredData }) {
+  if (data.template !== "LESSON_SUMMARY" && data.template !== "MAPPING_SUMMARY") return null;
+  const template = getCommunicationTemplate(data.template);
+  if (!template) return null;
+  const rows = template.fields.flatMap((field) => {
+    const value = data.fields[field.key];
+    if (value == null || value === "" || (Array.isArray(value) && value.length === 0)) return [];
+    return [{ field, value }];
+  });
+  if (rows.length === 0) return null;
+  return (
+    <div className="mb-3 space-y-2 rounded-2xl border border-neutral-200 bg-neutral-50/80 p-3">
+      {rows.map(({ field, value }) => (
+        <div key={field.key} className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-medium text-neutral-500">{field.label}</span>
+          {renderSummaryValue(field, value)}
+        </div>
+      ))}
+    </div>
+  );
+}
 
 /** Summary types that can be posted to the quad WhatsApp group. */
 const GROUP_SUMMARY_TYPES: readonly CommunicationType[] = ["LESSON_SUMMARY", "MAPPING_SUMMARY"];
@@ -317,10 +366,19 @@ export default function CommunicationTab({
                       </span>
                     </td>
                     <td className="px-5 py-4 text-neutral-800">
+                      {STAFF_ROLES.has(viewerRole) &&
+                        entry.structuredData &&
+                        entry.structuredData.template === entry.type && (
+                          <StructuredSummaryCard data={entry.structuredData} />
+                        )}
                       <p className="whitespace-pre-line leading-6">
-                        {isLong && !isOpen ? lines.slice(0, PREVIEW_LINES).join("\n") : entry.content}
+                        {viewerRole === "STUDENT"
+                          ? "—"
+                          : isLong && !isOpen
+                            ? lines.slice(0, PREVIEW_LINES).join("\n")
+                            : entry.content}
                       </p>
-                      {isLong && (
+                      {isLong && viewerRole !== "STUDENT" && (
                         <button
                           type="button"
                           className="mt-1 text-xs font-medium text-neutral-500 hover:text-neutral-900 underline underline-offset-4"

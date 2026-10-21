@@ -259,26 +259,38 @@ export async function uploadBoardImage(
     if (!canUseLocalDiskStorage()) {
       throw unconfiguredStorageError("image");
     }
-    try {
-      const { mkdir, writeFile } = await import("fs/promises");
-      const path = await import("path");
-      const dir = path.join(process.cwd(), "public", "uploads", "board");
-      await mkdir(dir, { recursive: true });
-      const filename = `${imageId}.${ext}`;
-      await writeFile(path.join(dir, filename), imageBuffer);
-      console.log(`[storage] mock board image saved: /uploads/board/${filename}`);
-      return `/uploads/board/${filename}`;
-    } catch (error) {
-      logStorageFailure("local-disk", {
-        reason: error instanceof Error ? error.name : "io",
-      });
-      throw new StorageUploadError();
-    }
+    return writeBoardImageToDisk(imageId, imageBuffer, ext);
   }
 
-  await supabasePut(cfg, objectPath, imageBuffer, contentType);
+  try {
+    await supabasePut(cfg, objectPath, imageBuffer, contentType);
+  } catch (error) {
+    if (process.env.NODE_ENV === "development" && canUseLocalDiskStorage()) {
+      console.warn("[storage] Supabase board upload failed, saving under public/uploads/board");
+      return writeBoardImageToDisk(imageId, imageBuffer, ext);
+    }
+    throw error;
+  }
 
   return cfg.publicBucket
     ? publicObjectUrl(cfg, objectPath)
     : createSignedUrl(cfg, objectPath);
+}
+
+async function writeBoardImageToDisk(imageId: string, imageBuffer: Buffer, ext: string): Promise<string> {
+  try {
+    const { mkdir, writeFile } = await import("fs/promises");
+    const path = await import("path");
+    const dir = path.join(process.cwd(), "public", "uploads", "board");
+    await mkdir(dir, { recursive: true });
+    const filename = `${imageId}.${ext}`;
+    await writeFile(path.join(dir, filename), imageBuffer);
+    console.log(`[storage] mock board image saved: /uploads/board/${filename}`);
+    return `/uploads/board/${filename}`;
+  } catch (error) {
+    logStorageFailure("local-disk", {
+      reason: error instanceof Error ? error.name : "io",
+    });
+    throw new StorageUploadError();
+  }
 }

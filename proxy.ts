@@ -210,6 +210,8 @@ export async function proxy(request: NextRequest) {
     pathname.startsWith("/dashboard/") ||
     pathname === "/lessons" ||
     pathname.startsWith("/lessons/") ||
+    pathname === "/notebook" ||
+    pathname.startsWith("/notebook/") ||
     pathname === "/admin" ||
     pathname.startsWith("/admin/");
 
@@ -260,6 +262,8 @@ export const config = {
     "/dashboard/:path*",
     "/lessons",
     "/lessons/:path*",
+    "/notebook",
+    "/notebook/:path*",
     "/admin",
     "/admin/:path*",
     "/login",

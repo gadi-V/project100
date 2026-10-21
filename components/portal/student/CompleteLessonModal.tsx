@@ -5,16 +5,23 @@ import {
   ATTENDANCE_OUTCOME_LABELS,
   ATTENDANCE_OUTCOMES,
   INTERNAL_NOTES_MAX,
+  parseLessonSummaryPayload,
   submitLessonCompletion,
   type AttendanceOutcome,
   type CompleteLessonResponse,
+  type LessonSummaryData,
 } from "../../../lib/lesson-completion";
+import { getCommunicationTemplate, type TemplateField } from "../../../lib/communication-templates";
 import { formatIsraelDateTime, type MeetingRow } from "../../../lib/student-portal-shared";
 import { fieldClass, primaryCta, secondaryCta } from "../../../lib/ui";
 
+type LessonKind = "MAPPING" | "REGULAR";
+
 type CompleteLessonModalProps = {
   studentId: string;
-  meeting: Pick<MeetingRow, "id" | "title" | "scheduledAt" | "teacherName">;
+  meeting: Pick<MeetingRow, "id" | "title" | "scheduledAt" | "teacherName"> & {
+    lessonType?: LessonKind;
+  };
   /** "room": opened from the Daily classroom, which closes the call and moves on to the portal. */
   context?: "portal" | "room";
   /** Room-only: upload the board PDF before attendance is posted. A null result must not block completion. */
@@ -35,6 +42,167 @@ const OUTCOME_NOTES: Record<AttendanceOutcome, string> = {
   TEACHER_CANCELLED: "השיעור יסומן כבוטל, המורה לא יתוגמל עליו והשיעור לא ירד מיתרת התלמיד",
 };
 
+const LONG_TEXT = new Set(["workedOn", "homework", "nextLesson", "mainGoal", "additionalNotes"]);
+const EMPTY_TOPICS = [
+  { topic: "", score: "" },
+  { topic: "", score: "" },
+  { topic: "", score: "" },
+  { topic: "", score: "" },
+];
+
+function RequiredMark() {
+  return (
+    <span className="text-red-600" aria-hidden="true">
+      {" "}
+      *
+    </span>
+  );
+}
+
+function collectSummary(
+  template: LessonSummaryData["template"],
+  values: Record<string, string>,
+  topics: { topic: string; score: string }[]
+): unknown {
+  const spec = getCommunicationTemplate(template);
+  if (!spec) return null;
+  const fields: Record<string, unknown> = {};
+  for (const field of spec.fields) {
+    if (field.kind === "list") {
+      fields[field.key] = topics
+        .map((row) => ({
+          topic: row.topic,
+          score: row.score.trim() === "" ? null : Number(row.score),
+        }))
+        .filter((row) => row.topic.trim() || row.score != null);
+      continue;
+    }
+    const raw = values[field.key]?.trim() ?? "";
+    if (field.kind === "score") fields[field.key] = raw === "" ? null : Number(raw);
+    else fields[field.key] = raw === "" ? null : raw;
+  }
+  return { template, fields };
+}
+
+function SummaryQuestionnaire({
+  lessonType,
+  values,
+  topics,
+  disabled,
+  onValue,
+  onTopic,
+}: {
+  lessonType: LessonKind;
+  values: Record<string, string>;
+  topics: { topic: string; score: string }[];
+  disabled: boolean;
+  onValue: (key: string, value: string) => void;
+  onTopic: (index: number, patch: { topic?: string; score?: string }) => void;
+}) {
+  const templateName = lessonType === "MAPPING" ? "MAPPING_SUMMARY" : "LESSON_SUMMARY";
+  const template = getCommunicationTemplate(templateName);
+  if (!template) return null;
+
+  const control = (field: TemplateField) => {
+    if (field.kind === "list") {
+      return (
+        <div key={field.key} className="space-y-2 sm:col-span-2">
+          <span className="text-xs font-medium text-neutral-600">
+            {field.label}
+            {field.hint ? ` (${field.hint})` : ""}
+          </span>
+          {topics.map((row, index) => (
+            <div key={index} className="grid grid-cols-[auto_1fr_6rem] items-center gap-2">
+              <span className="text-xs text-neutral-500">{index + 1}.</span>
+              <input
+                className={fieldClass}
+                value={row.topic}
+                disabled={disabled}
+                placeholder="נושא"
+                onChange={(event) => onTopic(index, { topic: event.target.value })}
+              />
+              <input
+                className={fieldClass}
+                inputMode="numeric"
+                value={row.score}
+                disabled={disabled}
+                placeholder="ציון"
+                onChange={(event) => onTopic(index, { score: event.target.value })}
+              />
+            </div>
+          ))}
+        </div>
+      );
+    }
+    if (field.kind === "choice") {
+      return (
+        <label key={field.key} className="block space-y-1.5">
+          <span className="text-xs font-medium text-neutral-600">
+            {field.label}
+            {field.required && <RequiredMark />}
+          </span>
+          <select
+            className={fieldClass}
+            value={values[field.key] ?? ""}
+            disabled={disabled}
+            onChange={(event) => onValue(field.key, event.target.value)}
+          >
+            <option value="">בחירה</option>
+            {field.options?.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
+      );
+    }
+    const long = LONG_TEXT.has(field.key);
+    return (
+      <label key={field.key} className={`block space-y-1.5${long ? " sm:col-span-2" : ""}`}>
+        <span className="text-xs font-medium text-neutral-600">
+          {field.label}
+          {field.hint ? ` (${field.hint})` : ""}
+          {field.required && <RequiredMark />}
+        </span>
+        {long ? (
+          <textarea
+            className={fieldClass}
+            rows={2}
+            value={values[field.key] ?? ""}
+            disabled={disabled}
+            onChange={(event) => onValue(field.key, event.target.value)}
+          />
+        ) : (
+          <input
+            className={fieldClass}
+            type={field.kind === "score" ? "number" : "text"}
+            min={field.kind === "score" ? 0 : undefined}
+            max={field.kind === "score" ? 100 : undefined}
+            value={values[field.key] ?? ""}
+            disabled={disabled}
+            onChange={(event) => onValue(field.key, event.target.value)}
+          />
+        )}
+      </label>
+    );
+  };
+
+  return (
+    <fieldset className="space-y-3" disabled={disabled}>
+      <legend className="mb-1 text-xs font-medium text-neutral-600">
+        {lessonType === "MAPPING" ? "סיכום שיעור מיפוי" : "סיכום השיעור"}
+      </legend>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">{template.fields.map(control)}</div>
+      <p className="text-xs text-neutral-500">
+        {lessonType === "MAPPING"
+          ? "הסיכום נשמר בתיק התלמיד. לקבוצת הוואטסאפ נשלחת הודעה קצרה וקישור ללוח, בלי ציונים והערות פנימיות."
+          : "הסיכום נשמר בתיק התלמיד ונשלח לקבוצת הוואטסאפ יחד עם קישור ללוח."}
+      </p>
+    </fieldset>
+  );
+}
+
 const ROOM_OUTCOME_NOTES: Record<AttendanceOutcome, string> = {
   ATTENDED: "עם אישור סיום השיעור, שכר המורה יועבר לרישום, השיחה תסתיים ותעברו לטופס סיכום השיעור לוואטסאפ",
   STUDENT_NO_SHOW:
@@ -51,8 +219,11 @@ export default function CompleteLessonModal({
   onDone,
 }: CompleteLessonModalProps) {
   const notesByOutcome = context === "room" ? ROOM_OUTCOME_NOTES : OUTCOME_NOTES;
+  const lessonType: LessonKind = meeting.lessonType === "MAPPING" ? "MAPPING" : "REGULAR";
   const [outcome, setOutcome] = useState<AttendanceOutcome | null>(null);
   const [notes, setNotes] = useState("");
+  const [summaryValues, setSummaryValues] = useState<Record<string, string>>({});
+  const [topics, setTopics] = useState(EMPTY_TOPICS);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -71,6 +242,16 @@ export default function CompleteLessonModal({
       setError("יש לבחור מה קרה בשיעור");
       return;
     }
+    let summaryData: LessonSummaryData | undefined;
+    if (outcome === "ATTENDED") {
+      const template = lessonType === "MAPPING" ? "MAPPING_SUMMARY" : "LESSON_SUMMARY";
+      const parsedSummary = parseLessonSummaryPayload(collectSummary(template, summaryValues, topics));
+      if (!parsedSummary.ok) {
+        setError(parsedSummary.errors.join(" · "));
+        return;
+      }
+      summaryData = parsedSummary.data;
+    }
     setSubmitting(true);
     try {
       let boardPdfUrl: string | null = null;
@@ -88,6 +269,7 @@ export default function CompleteLessonModal({
         attendanceStatus: outcome,
         internalNotes: notes.trim() || null,
         boardPdfUrl,
+        summaryData,
       });
       onDone(result);
     } catch (submitError: unknown) {
@@ -107,7 +289,7 @@ export default function CompleteLessonModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="complete-lesson-title"
-        className="liquid-glass rounded-3xl bg-white/90 w-full max-w-lg p-6"
+        className="liquid-glass max-h-[90dvh] w-full max-w-2xl overflow-y-auto rounded-3xl bg-white/90 p-6"
       >
         <form onSubmit={submit} className="space-y-5">
           <div className="space-y-1">
@@ -157,6 +339,19 @@ export default function CompleteLessonModal({
               disabled={submitting}
             />
           </label>
+
+          {outcome === "ATTENDED" && (
+            <SummaryQuestionnaire
+              lessonType={lessonType}
+              values={summaryValues}
+              topics={topics}
+              disabled={submitting}
+              onValue={(key, value) => setSummaryValues((current) => ({ ...current, [key]: value }))}
+              onTopic={(index, patch) =>
+                setTopics((current) => current.map((row, rowIndex) => (rowIndex === index ? { ...row, ...patch } : row)))
+              }
+            />
+          )}
 
           <p className="rounded-xl bg-neutral-50 px-4 py-2.5 text-sm text-neutral-700">
             {notesByOutcome[outcome ?? "ATTENDED"]}

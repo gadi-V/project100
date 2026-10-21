@@ -5,6 +5,7 @@ import DailyIframe, { DailyCall } from "@daily-co/daily-js";
 import {
   DailyProvider,
   useLocalParticipant,
+  useLocalSessionId,
   useVideoTrack,
   useAudioTrack,
   useParticipantIds,
@@ -16,23 +17,42 @@ type VideoRoomProps = {
   token: string | null;
 };
 
+const CALL_AUDIO_CONSTRAINTS: MediaTrackConstraints = {
+  echoCancellation: true,
+  noiseSuppression: true,
+  autoGainControl: true,
+};
+
 const ParticipantTile = ({ id }: { id: string }) => {
+  const localSessionId = useLocalSessionId();
+  const isLocal = id === localSessionId;
   const videoTrack = useVideoTrack(id);
   const audioTrack = useAudioTrack(id);
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
 
   useEffect(() => {
-    if (videoRef.current && videoTrack?.persistentTrack) {
-      videoRef.current.srcObject = new MediaStream([videoTrack.persistentTrack]);
-    }
+    const video = videoRef.current;
+    if (!video || !videoTrack?.persistentTrack) return;
+    video.srcObject = new MediaStream([videoTrack.persistentTrack]);
+    video.muted = true;
+    video.volume = 0;
   }, [videoTrack]);
 
   useEffect(() => {
-    if (audioRef.current && audioTrack?.persistentTrack) {
-      audioRef.current.srcObject = new MediaStream([audioTrack.persistentTrack]);
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (isLocal) {
+      audio.srcObject = null;
+      audio.muted = true;
+      audio.volume = 0;
+      return;
     }
-  }, [audioTrack]);
+    if (audioTrack?.persistentTrack) {
+      audio.srcObject = new MediaStream([audioTrack.persistentTrack]);
+      audio.muted = false;
+    }
+  }, [audioTrack, isLocal]);
 
   return (
     <div className="relative bg-neutral-900 rounded-xl overflow-hidden aspect-video sm:aspect-square md:aspect-video flex items-center justify-center">
@@ -47,7 +67,7 @@ const ParticipantTile = ({ id }: { id: string }) => {
       ) : (
         <div className="text-neutral-400 font-medium text-sm">מצלמה כבויה</div>
       )}
-      <audio ref={audioRef} autoPlay />
+      <audio ref={audioRef} autoPlay muted={isLocal} />
     </div>
   );
 };
@@ -187,8 +207,17 @@ export default function VideoRoom({ roomUrl, token }: VideoRoomProps) {
 
       const existing = DailyIframe.getCallInstance();
       const co =
-        existing && !existing.isDestroyed() ? existing : DailyIframe.createCallObject();
+        existing && !existing.isDestroyed()
+          ? existing
+          : DailyIframe.createCallObject({
+              audioSource: true,
+              videoSource: true,
+              inputSettings: { audio: { settings: CALL_AUDIO_CONSTRAINTS } },
+            });
       callObjectRef.current = co;
+      void co
+        .updateInputSettings({ audio: { settings: CALL_AUDIO_CONSTRAINTS } })
+        .catch(() => undefined);
 
       if (cancelled) {
         teardownRef.current = destroyDailyCall(co);
@@ -200,7 +229,7 @@ export default function VideoRoom({ roomUrl, token }: VideoRoomProps) {
       // Best-effort media permission warm-up (failure is non-blocking).
       if (navigator.mediaDevices?.getUserMedia) {
         navigator.mediaDevices
-          .getUserMedia({ video: true, audio: true })
+          .getUserMedia({ video: true, audio: CALL_AUDIO_CONSTRAINTS })
           .catch((err: unknown) => {
             console.warn("[VideoRoom] Media permission denied:", err);
           });

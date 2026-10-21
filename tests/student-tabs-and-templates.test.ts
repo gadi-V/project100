@@ -248,7 +248,7 @@ describe("summary templates", () => {
     ]);
 
     const mapping = renderCommunicationTemplate("MAPPING_SUMMARY");
-    for (const label of ["כיתה והקבצה:", "ציון אחרון בביה״ס (0-100):", "למידה בכיתה בביה״ס:", "למידה בבית:", "מוטיבציה:", "חיבור אישי:", "דירוג הנושאים (נושא וציון):", "מטרה מרכזית:", "התאמה לפורמט:", "המלצה למנוי:", "הערות נוספות:"]) {
+    for (const label of ["כיתה והקבצה:", "ציון אחרון בביה״ס (0-100):", "למידה בכיתה בביה״ס:", "למידה בבית:", "מוטיבציה:", "חיבור אישי:", "דירוג הנושאים (נושא וציון):", "מטרה מרכזית:", "רמת פתיחה:", "התאמה לפורמט:", "המלצה למנוי:", "הערות נוספות:"]) {
       expect(mapping).toContain(label);
     }
     expect(mapping).toMatch(/\n1\. \n2\. \n3\. \n4\. \n/);
@@ -361,6 +361,7 @@ describe("POST /api/portal/students/[id]/communication", () => {
           { rank: 4, topic: "טריגונומטריה", score: null },
         ],
         mainGoal: "לעלות ל-90 בבגרות",
+        startingLevel: null,
         formatFit: "ש.פ במקביל",
         subscriptionRecommendation: "דו שבועי",
         additionalNotes: "צריך חיזוק בביטחון",

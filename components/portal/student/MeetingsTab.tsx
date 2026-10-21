@@ -89,8 +89,18 @@ function completionBanner(result: CompleteLessonResponse): Banner {
       };
     case "TEACHER_CANCELLED":
       return { tone: "warning", text: `השיעור סומן כבוטל ביוזמת המורה, ללא תגמול למורה${credit}` };
-    default:
-      return { tone: "success", text: `השיעור הסתיים${pay}${credit}` };
+    default: {
+      const groupNote =
+        result.whatsappDispatched === true
+          ? " והסיכום נשלח לקבוצת הוואטסאפ"
+          : result.whatsappDispatched === false
+            ? ". הסיכום נשמר בתיק, אבל לא נשלח לקבוצת הוואטסאפ"
+            : "";
+      return {
+        tone: result.whatsappDispatched === false ? "warning" : "success",
+        text: `השיעור הסתיים${pay}${credit}${groupNote}`,
+      };
+    }
   }
 }
 

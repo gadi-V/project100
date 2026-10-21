@@ -71,6 +71,7 @@ model User {
 
   givenLessons               Lesson[]                  @relation("TeacherLessons")
   takenLessons               Lesson[]                  @relation("StudentLessons")
+  notebook                   Notebook?
   availabilities             TeacherAvailability[]
   diagnosticQuizzes          DiagnosticQuiz[]
   payments                   Payment[]
@@ -277,11 +278,43 @@ model Lesson {
   /// Quad WhatsApp group (`…@g.us`) that was opened or notified when this lesson was scheduled.
   whatsappGroupId String?
 
+  /// Student's persistent notebook. Null on lessons booked before notebooks existed.
+  notebookId String?
+  notebook   Notebook? @relation(fields: [notebookId], references: [id], onDelete: SetNull)
+  /// First and last notebook page this lesson occupies. Null until pages are appended.
+  startPage  Int?
+  endPage    Int?
+
   chatChannel ChatChannel?
   payouts     TeacherPayout[]
 
   createdAt       DateTime         @default(now())
   preLessonAssets PreLessonAsset[]
+
+  @@index([notebookId])
+}
+
+/// One notebook per student. Lessons append pages later; this row is created at booking.
+model Notebook {
+  id        String   @id @default(uuid())
+  studentId String   @unique
+  student   User     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  pages     NotebookPage[]
+  lessons   Lesson[]
+  createdAt DateTime @default(now())
+}
+
+model NotebookPage {
+  id              String   @id @default(uuid())
+  notebookId      String
+  notebook        Notebook @relation(fields: [notebookId], references: [id], onDelete: Cascade)
+  pageIndex       Int
+  /// grid | ruled | dotted | blank — stored as text so the board can add styles without a migration.
+  paperStyle      String
+  snapshotPath    String?
+  snapshotVersion Int      @default(0)
+
+  @@unique([notebookId, pageIndex])
 }
 
 model ChatChannel {

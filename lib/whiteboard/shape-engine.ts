@@ -22,6 +22,12 @@ export const LINE_EPSILON_PX = 3.5;
 export const CLOSE_DISTANCE_PX = 15;
 /** Isoperimetric quotient at or above this snaps a closed stroke to a circle. */
 export const CIRCULARITY_MIN = 0.82;
+/** Closed strokes in this band, with no sharp corners, snap to an ellipse. */
+export const ELLIPSE_Q_MIN = 0.45;
+/** Endpoint gap at or under this may still close an ellipse. */
+export const ELLIPSE_CLOSE_PX = 20;
+/** Open strokes farther apart than this may snap to a parabola. */
+export const PARABOLA_OPEN_GAP_PX = 35;
 /** Inclusive corner-angle band that is forced to 90°. */
 export const ORTHOGONAL_MIN_DEG = 82;
 export const ORTHOGONAL_MAX_DEG = 98;
@@ -436,10 +442,125 @@ function pointsUntil(xs: Float64Array, ys: Float64Array, end: number): Point[] {
   return points;
 }
 
+const PARABOLA_MIN_BOW_PX = 12;
+
+function boundsOf(points: readonly Point[]): { minX: number; minY: number; maxX: number; maxY: number } {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const point of points) {
+    if (point.x < minX) minX = point.x;
+    if (point.y < minY) minY = point.y;
+    if (point.x > maxX) maxX = point.x;
+    if (point.y > maxY) maxY = point.y;
+  }
+  return { minX, minY, maxX, maxY };
+}
+
+/** Closed, corner-free stroke whose circularity sits between an oval and a circle. */
+function ellipseFrom(points: readonly Point[]): RecognizedShape | null {
+  const box = boundsOf(points);
+  const radiusX = (box.maxX - box.minX) / 2;
+  const radiusY = (box.maxY - box.minY) / 2;
+  if (!(radiusX > 1) || !(radiusY > 1)) return null;
+  return {
+    type: "ellipse",
+    center: polygonCentroid(points),
+    radiusX,
+    radiusY,
+  };
+}
+
+function signedChordOffset(points: readonly Point[], index: number): number {
+  const start = points[0];
+  const end = points[points.length - 1];
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const length = Math.hypot(dx, dy);
+  if (!(length > 0)) return 0;
+  return (dx * (points[index].y - start.y) - dy * (points[index].x - start.x)) / length;
+}
+
+/** Mean radius error against the circle through the ends and the midpoint. An arc is ~0. */
+function circleFitDeviation(points: readonly Point[]): number {
+  const a = points[0];
+  const b = points[Math.floor(points.length / 2)];
+  const c = points[points.length - 1];
+  const determinant = 2 * (a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y));
+  if (Math.abs(determinant) < 1e-6) return Number.POSITIVE_INFINITY;
+  const a2 = a.x * a.x + a.y * a.y;
+  const b2 = b.x * b.x + b.y * b.y;
+  const c2 = c.x * c.x + c.y * c.y;
+  const ux = (a2 * (b.y - c.y) + b2 * (c.y - a.y) + c2 * (a.y - b.y)) / determinant;
+  const uy = (a2 * (c.x - b.x) + b2 * (a.x - c.x) + c2 * (b.x - a.x)) / determinant;
+  const radius = Math.hypot(a.x - ux, a.y - uy);
+  if (!(radius > 0)) return Number.POSITIVE_INFINITY;
+  let sum = 0;
+  for (const point of points) sum += Math.abs(Math.hypot(point.x - ux, point.y - uy) - radius);
+  return sum / points.length;
+}
+
+function hasSharpOpenCorner(points: readonly Point[]): boolean {
+  for (let i = 1; i < points.length - 1; i++) {
+    const angle = directionAngleDeg(
+      points[i].x - points[i - 1].x,
+      points[i].y - points[i - 1].y,
+      points[i + 1].x - points[i].x,
+      points[i + 1].y - points[i].y
+    );
+    if (Number.isFinite(angle) && angle >= CORNER_MIN_ANGLE_DEG) return true;
+  }
+  return false;
+}
+
+/**
+ * One interior bow, with no sharp kink. The vertex is the sample farthest from
+ * the chord between the stroke ends.
+ */
+function parabolaFrom(points: readonly Point[]): RecognizedShape | null {
+  const n = points.length;
+  if (n < 5 || hasSharpOpenCorner(points) || circleFitDeviation(points) < 2) return null;
+
+  const offsets = new Float64Array(n);
+  let peak = 0;
+  for (let i = 1; i < n - 1; i++) {
+    offsets[i] = signedChordOffset(points, i);
+    const magnitude = Math.abs(offsets[i]);
+    if (magnitude > peak) peak = magnitude;
+  }
+  if (peak < PARABOLA_MIN_BOW_PX) return null;
+
+  const threshold = peak * 0.35;
+  const peaks: number[] = [];
+  for (let i = 1; i < n - 1; i++) {
+    const magnitude = Math.abs(offsets[i]);
+    if (magnitude < threshold) continue;
+    if (magnitude < Math.abs(offsets[i - 1]) || magnitude < Math.abs(offsets[i + 1])) continue;
+    const previous = peaks.length > 0 ? peaks[peaks.length - 1] : -1;
+    if (previous >= 0 && i - previous <= 3) {
+      if (magnitude > Math.abs(offsets[previous])) peaks[peaks.length - 1] = i;
+      continue;
+    }
+    peaks.push(i);
+  }
+  if (peaks.length !== 1) return null;
+
+  const vertex = points[peaks[0]];
+  const start = points[0];
+  const end = points[n - 1];
+  return {
+    type: "parabola",
+    vertex: { x: vertex.x, y: vertex.y },
+    start: { x: start.x, y: start.y },
+    end: { x: end.x, y: end.y },
+  };
+}
+
 /**
  * Classify a finished stroke.
  * Snapping runs only after a dwell. The still tail is excluded from the fit,
- * so a hold at the end does not bend the line, circle, or polygon.
+ * so a hold at the end does not bend the line, circle, ellipse, or polygon.
  */
 export function recognizeShape(samples: SampleSource): RecognizedShape {
   const loaded = loadBuffers(samples);
@@ -452,11 +573,12 @@ export function recognizeShape(samples: SampleSource): RecognizedShape {
   if (end < 1) return freehand(samples);
 
   const active = pointsUntil(xs, ys, end);
-  const closed = endpointGap(active) <= CLOSE_DISTANCE_PX;
+  const gap = endpointGap(active);
+  const closed = gap <= CLOSE_DISTANCE_PX;
 
-  if (closed && active.length >= 3) {
+  if (gap <= ELLIPSE_CLOSE_PX && active.length >= 3) {
     const quotient = circularityQuotient(active);
-    if (quotient >= CIRCULARITY_MIN && shoelaceArea(active) > 0) {
+    if (closed && quotient >= CIRCULARITY_MIN && shoelaceArea(active) > 0) {
       const perimeter = euclideanPerimeter(active, true);
       return {
         type: "circle",
@@ -465,10 +587,29 @@ export function recognizeShape(samples: SampleSource): RecognizedShape {
       };
     }
 
-    const corners = detectCorners(active);
-    if (corners.length >= 3) {
-      return { type: "polygon", vertices: snapOrthogonalPolygon(corners) };
+    if (
+      quotient >= ELLIPSE_Q_MIN &&
+      quotient < CIRCULARITY_MIN &&
+      shoelaceArea(active) > 0 &&
+      // A flat ellipse bends hard at both ends. Those two turns are curvature,
+      // not a polygon: a square or triangle still has three or more corners.
+      detectCorners(active).length < 3
+    ) {
+      const ellipse = ellipseFrom(active);
+      if (ellipse) return ellipse;
     }
+
+    if (closed) {
+      const corners = detectCorners(active);
+      if (corners.length >= 3) {
+        return { type: "polygon", vertices: snapOrthogonalPolygon(corners) };
+      }
+    }
+  }
+
+  if (gap > PARABOLA_OPEN_GAP_PX) {
+    const parabola = parabolaFrom(active);
+    if (parabola) return parabola;
   }
 
   if (!closed && meanPerpendicularDistance(active) < LINE_EPSILON_PX) {
