@@ -1,4 +1,5 @@
 import { prisma } from "../prisma";
+import { streamDisplayName } from "../stream-display-name";
 import {
   createStreamChannel,
   getStreamServerClient,
@@ -105,9 +106,10 @@ function enrolledIds(channel: {
 }
 
 /**
- * Upsert the lesson's current teacher and student, then add them to an
- * existing channel. A missing channel is created first. Members already on
- * the channel are left in place.
+ * Create Stream users that do not exist yet, then add the current teacher
+ * and student to the channel. Users Stream already has are not written, so
+ * an existing display name stays as it is. A missing channel is created
+ * first. Members already on the channel are left in place.
  */
 async function reconcileRealChannel(lessonId: string, channelId: string): Promise<void> {
   let teacherId: string | null = null;
@@ -123,7 +125,12 @@ async function reconcileRealChannel(lessonId: string, channelId: string): Promis
 
     const lesson = await prisma.lesson.findUnique({
       where: { id: lessonId },
-      select: { teacherId: true, studentId: true },
+      select: {
+        teacherId: true,
+        studentId: true,
+        teacher: { select: { id: true, name: true } },
+        student: { select: { id: true, name: true } },
+      },
     });
     teacherId = lesson?.teacherId ?? null;
     studentId = lesson?.studentId ?? null;
@@ -135,13 +142,26 @@ async function reconcileRealChannel(lessonId: string, channelId: string): Promis
     }
 
     const memberIds = [teacherId, studentId];
+    const participants = [
+      { id: teacherId, name: lesson?.teacher?.name },
+      { id: studentId, name: lesson?.student?.name },
+    ];
     const client = getStreamServerClient();
-    await client.upsertUsers(
-      memberIds.map((id) => ({
-        id,
-        name: `User ${id.slice(0, 4)}`,
-      }))
+    // A failed lookup must not fall through to upsertUsers: that call replaces
+    // the user payload and would wipe a display name we could not see.
+    const listed = await client.queryUsers({ id: { $in: memberIds } });
+    const presentUserIds = new Set(
+      (listed.users ?? []).flatMap((user) => (user.id ? [user.id] : []))
     );
+    const missing = participants.filter((person) => !presentUserIds.has(person.id));
+    if (missing.length > 0) {
+      await client.upsertUsers(
+        missing.map((person) => ({
+          id: person.id,
+          name: streamDisplayName(person.name, person.id),
+        }))
+      );
+    }
 
     const found = await client.queryChannels(
       { type: "messaging", cid: `messaging:${channelId}` },

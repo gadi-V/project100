@@ -26,6 +26,7 @@ vi.mock("../lib/prisma", () => ({
 vi.mock("../lib/stream", () => stream);
 
 import { ensureLiveStreamChannel } from "../lib/services/chat-healing.service";
+import { streamDisplayName } from "../lib/stream-display-name";
 
 const TEACHER = "teacher-1";
 const STUDENT = "student-1";
@@ -97,7 +98,11 @@ type FakeChannel = {
   memberIds: string[];
 };
 
-function installClient(channels: FakeChannel[], upsert: ReturnType<typeof vi.fn> = vi.fn().mockResolvedValue({})) {
+function installClient(
+  channels: FakeChannel[],
+  upsert: ReturnType<typeof vi.fn> = vi.fn().mockResolvedValue({}),
+  queryUsers: ReturnType<typeof vi.fn> = vi.fn().mockResolvedValue({ users: [] })
+) {
   const addMembers = vi.fn().mockResolvedValue({});
   const create = vi.fn().mockResolvedValue({});
   const removeMembers = vi.fn().mockResolvedValue({});
@@ -113,8 +118,13 @@ function installClient(channels: FakeChannel[], upsert: ReturnType<typeof vi.fn>
       }))
   );
   const channel = vi.fn(() => ({ create, addMembers, removeMembers }));
-  stream.getStreamServerClient.mockReturnValue({ upsertUsers: upsert, queryChannels, channel });
-  return { addMembers, create, removeMembers, upsert, queryChannels, channel };
+  stream.getStreamServerClient.mockReturnValue({
+    upsertUsers: upsert,
+    queryUsers,
+    queryChannels,
+    channel,
+  });
+  return { addMembers, create, removeMembers, upsert, queryUsers, queryChannels, channel };
 }
 
 describe("ensureLiveStreamChannel real channels", () => {
@@ -204,6 +214,138 @@ describe("ensureLiveStreamChannel real channels", () => {
         teacherId: TEACHER,
         studentId: STUDENT,
         code: 17,
+      })
+    );
+  });
+});
+
+describe("streamDisplayName", () => {
+  it("uses the first word and the id prefix", () => {
+    expect(streamDisplayName("משה כהן", TEACHER)).toBe("משה (teac)");
+    expect(streamDisplayName("  נועה   לוי  ", STUDENT)).toBe("נועה (stud)");
+  });
+
+  it("falls back when the name is missing or blank", () => {
+    expect(streamDisplayName(null, TEACHER)).toBe("User teac");
+    expect(streamDisplayName(undefined, STUDENT)).toBe("User stud");
+    expect(streamDisplayName("", TEACHER)).toBe("User teac");
+    expect(streamDisplayName("   ", STUDENT)).toBe("User stud");
+  });
+});
+
+describe("reconcile display names", () => {
+  const namedLesson = {
+    teacherId: TEACHER,
+    studentId: STUDENT,
+    teacher: { id: TEACHER, name: "משה כהן" },
+    student: { id: STUDENT, name: "נועה לוי" },
+  };
+
+  beforeEach(() => {
+    stream.hasStreamCredentials.mockReturnValue(true);
+    db.lessonFindUnique.mockResolvedValue(namedLesson);
+  });
+
+  it("(a) does not upsert when both users already exist in Stream", async () => {
+    const queryUsers = vi.fn().mockResolvedValue({
+      users: [{ id: TEACHER, name: "משה (teac)" }, { id: STUDENT, name: "נועה (stud)" }],
+    });
+    const client = installClient(
+      [{ id: CHANNEL, memberIds: [TEACHER, STUDENT] }],
+      vi.fn().mockResolvedValue({}),
+      queryUsers
+    );
+
+    await ensureLiveStreamChannel("lesson-1", CHANNEL);
+
+    expect(queryUsers).toHaveBeenCalledWith({ id: { $in: [TEACHER, STUDENT] } });
+    expect(client.upsert).not.toHaveBeenCalled();
+    expect(client.queryChannels).toHaveBeenCalledTimes(1);
+    expect(client.addMembers).not.toHaveBeenCalled();
+    expect(client.removeMembers).not.toHaveBeenCalled();
+  });
+
+  it("(b) upserts only the user Stream does not have, with the formatted name", async () => {
+    const queryUsers = vi.fn().mockResolvedValue({
+      users: [{ id: TEACHER, name: "משה (teac)" }],
+    });
+    const client = installClient([{ id: CHANNEL, memberIds: [] }], vi.fn().mockResolvedValue({}), queryUsers);
+
+    await ensureLiveStreamChannel("lesson-1", CHANNEL);
+
+    expect(client.upsert).toHaveBeenCalledTimes(1);
+    expect(client.upsert).toHaveBeenCalledWith([{ id: STUDENT, name: "נועה (stud)" }]);
+    expect(client.addMembers).toHaveBeenCalledWith([TEACHER, STUDENT]);
+  });
+
+  it("(c) upserts both missing users before querying the channel", async () => {
+    const client = installClient([]);
+
+    await ensureLiveStreamChannel("lesson-1", CHANNEL);
+
+    expect(db.lessonFindUnique).toHaveBeenCalledWith({
+      where: { id: "lesson-1" },
+      select: {
+        teacherId: true,
+        studentId: true,
+        teacher: { select: { id: true, name: true } },
+        student: { select: { id: true, name: true } },
+      },
+    });
+    expect(client.upsert).toHaveBeenCalledWith([
+      { id: TEACHER, name: "משה (teac)" },
+      { id: STUDENT, name: "נועה (stud)" },
+    ]);
+    expect(client.queryUsers.mock.invocationCallOrder[0]).toBeLessThan(
+      client.upsert.mock.invocationCallOrder[0]
+    );
+    expect(client.upsert.mock.invocationCallOrder[0]).toBeLessThan(
+      client.queryChannels.mock.invocationCallOrder[0]
+    );
+    expect(client.queryChannels.mock.invocationCallOrder[0]).toBeLessThan(
+      client.addMembers.mock.invocationCallOrder[0]
+    );
+  });
+
+  it.each([
+    { teacherName: "", studentName: null },
+    { teacherName: null, studentName: "   " },
+  ])("(d) falls back when a stored name is empty (%j)", async ({ teacherName, studentName }) => {
+    db.lessonFindUnique.mockResolvedValue({
+      teacherId: TEACHER,
+      studentId: STUDENT,
+      teacher: { id: TEACHER, name: teacherName },
+      student: { id: STUDENT, name: studentName },
+    });
+    const client = installClient([{ id: CHANNEL, memberIds: [TEACHER, STUDENT] }]);
+
+    await ensureLiveStreamChannel("lesson-1", CHANNEL);
+
+    expect(client.upsert).toHaveBeenCalledWith([
+      { id: TEACHER, name: "User teac" },
+      { id: STUDENT, name: "User stud" },
+    ]);
+  });
+
+  it("(e) logs a queryUsers failure and still returns the channel id", async () => {
+    const failure = Object.assign(new Error("query users failed"), { code: 9 });
+    const queryUsers = vi.fn().mockRejectedValue(failure);
+    const client = installClient(
+      [{ id: CHANNEL, memberIds: [] }],
+      vi.fn().mockResolvedValue({}),
+      queryUsers
+    );
+
+    await expect(ensureLiveStreamChannel("lesson-1", CHANNEL)).resolves.toBe(CHANNEL);
+    expect(client.upsert).not.toHaveBeenCalled();
+    expect(client.addMembers).not.toHaveBeenCalled();
+    expect(console.error).toHaveBeenCalledWith(
+      "[ensureLiveStreamChannel] failed",
+      expect.objectContaining({
+        lessonId: "lesson-1",
+        teacherId: TEACHER,
+        studentId: STUDENT,
+        code: 9,
       })
     );
   });
