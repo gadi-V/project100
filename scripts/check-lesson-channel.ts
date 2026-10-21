@@ -2,11 +2,12 @@
  * Read-only check of a lesson's Stream channel.
  * Usage: npx tsx scripts/check-lesson-channel.ts <lessonId>
  *
- * Prints created_by and the current member ids. Does not create the channel,
- * change membership, or write to the database.
+ * Prints created_by, the current member ids, and the ChatChannel row.
+ * Does not create the channel, change membership, or write to the database.
  */
 import { config as loadEnv } from "dotenv";
 import { resolve } from "node:path";
+import { prisma } from "../lib/prisma";
 import { getStreamServerClient, hasStreamCredentials, streamChannelIdForLesson } from "../lib/stream";
 
 loadEnv({ path: resolve(process.cwd(), ".env") });
@@ -27,13 +28,33 @@ function createdById(
   return createdByIdField ?? null;
 }
 
+async function storedChatChannel(id: string) {
+  const row = await prisma.chatChannel.findUnique({
+    where: { lessonId: id },
+    select: { id: true, lessonId: true, streamChannelId: true, createdAt: true },
+  });
+  if (!row) return null;
+  return {
+    id: row.id,
+    lessonId: row.lessonId,
+    streamChannelId: row.streamChannelId,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
 async function main(): Promise<void> {
+  const chatChannel = await storedChatChannel(lessonId);
+  const channelId = streamChannelIdForLesson(lessonId);
+
   if (!hasStreamCredentials()) {
     console.error("Stream credentials are not configured");
-    process.exit(1);
+    console.log(
+      JSON.stringify({ channelId, exists: false, created_by: null, members: [], chatChannel }, null, 2)
+    );
+    process.exitCode = 1;
+    return;
   }
 
-  const channelId = streamChannelIdForLesson(lessonId);
   const client = getStreamServerClient();
   const found = await client.queryChannels(
     { type: "messaging", cid: `messaging:${channelId}` },
@@ -42,7 +63,9 @@ async function main(): Promise<void> {
   );
   const channel = found[0];
   if (!channel) {
-    console.log(JSON.stringify({ channelId, exists: false, created_by: null, members: [] }, null, 2));
+    console.log(
+      JSON.stringify({ channelId, exists: false, created_by: null, members: [], chatChannel }, null, 2)
+    );
     return;
   }
 
@@ -58,6 +81,7 @@ async function main(): Promise<void> {
         exists: true,
         created_by: createdById(channel.data?.created_by, channel.data?.created_by_id),
         members,
+        chatChannel,
       },
       null,
       2
@@ -65,8 +89,10 @@ async function main(): Promise<void> {
   );
 }
 
-main().catch((error: unknown) => {
-  const message = error instanceof Error ? error.message : String(error);
-  console.error(message.replace(/Bearer\s+\S+/gi, "Bearer [redacted]"));
-  process.exit(1);
-});
+main()
+  .catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(message.replace(/Bearer\s+\S+/gi, "Bearer [redacted]"));
+    process.exitCode = 1;
+  })
+  .finally(() => prisma.$disconnect());

@@ -8,10 +8,29 @@ import {
   generateDailyToken,
   roomNameFromDailyUrl,
 } from "../../../lib/daily";
-import { generateStreamToken } from "../../../lib/stream";
+import { generateStreamToken, hasStreamCredentials } from "../../../lib/stream";
 import { resolveLessonStreamChannelId } from "../../../lib/package-chat";
-import { ensureLiveStreamChannel } from "../../../lib/services/chat-healing.service";
+import {
+  ensureLiveStreamChannel,
+  provisionMissingLessonChannel,
+} from "../../../lib/services/chat-healing.service";
 import LessonRoomUI from "./LessonRoomUI";
+
+function canProvisionLessonChannel(lesson: {
+  packageId: string | null;
+  status: string;
+  teacherId: string;
+  studentId: string;
+  chatChannel: { streamChannelId: string } | null;
+}): boolean {
+  return (
+    lesson.packageId == null &&
+    lesson.chatChannel == null &&
+    (lesson.status === "SCHEDULED" || lesson.status === "IN_PROGRESS") &&
+    Boolean(lesson.teacherId) &&
+    Boolean(lesson.studentId)
+  );
+}
 
 export default async function LessonPage(props: {
   params: Promise<{ id: string }> | { id: string };
@@ -57,6 +76,23 @@ export default async function LessonPage(props: {
           ? (error as { code: unknown }).code
           : null;
       console.error("[lesson-room] Stream membership reconciliation failed", {
+        lessonId: lesson.id,
+        teacherId: lesson.teacherId,
+        studentId: lesson.studentId,
+        userId: user.id,
+        code,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  } else if (canProvisionLessonChannel(lesson) && hasStreamCredentials()) {
+    try {
+      streamChannelId = await provisionMissingLessonChannel(lesson.id);
+    } catch (error) {
+      const code =
+        typeof error === "object" && error !== null && "code" in error
+          ? (error as { code: unknown }).code
+          : null;
+      console.error("[lesson-room] Stream channel provisioning failed", {
         lessonId: lesson.id,
         teacherId: lesson.teacherId,
         studentId: lesson.studentId,

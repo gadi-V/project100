@@ -25,7 +25,10 @@ vi.mock("../lib/prisma", () => ({
 
 vi.mock("../lib/stream", () => stream);
 
-import { ensureLiveStreamChannel } from "../lib/services/chat-healing.service";
+import {
+  ensureLiveStreamChannel,
+  provisionMissingLessonChannel,
+} from "../lib/services/chat-healing.service";
 import { streamDisplayName } from "../lib/stream-display-name";
 
 const TEACHER = "teacher-1";
@@ -433,5 +436,84 @@ describe("user lookup failure still repairs the channel", () => {
         error: "add members failed",
       })
     );
+  });
+});
+
+describe("provisionMissingLessonChannel", () => {
+  const channelRow = {
+    where: { id: "lesson-1" },
+    data: {
+      chatChannel: {
+        upsert: {
+          create: { streamChannelId: CHANNEL },
+          update: { streamChannelId: CHANNEL },
+        },
+      },
+    },
+  };
+
+  beforeEach(() => {
+    stream.hasStreamCredentials.mockReturnValue(true);
+    db.lessonFindUnique.mockResolvedValue({
+      teacherId: TEACHER,
+      studentId: STUDENT,
+      teacher: { id: TEACHER, name: "משה כהן" },
+      student: { id: STUDENT, name: "נועה לוי" },
+    });
+    db.lessonUpdate.mockResolvedValue({ id: "lesson-1" });
+  });
+
+  it("(a) creates the Stream channel, adds both members, then upserts the row", async () => {
+    const client = installClient([]);
+
+    await expect(provisionMissingLessonChannel("lesson-1")).resolves.toBe(CHANNEL);
+
+    expect(client.create).toHaveBeenCalledTimes(1);
+    expect(client.addMembers).toHaveBeenCalledWith([TEACHER, STUDENT]);
+    expect(client.addMembers.mock.invocationCallOrder[0]).toBeLessThan(
+      db.lessonUpdate.mock.invocationCallOrder[0]
+    );
+    expect(db.lessonUpdate).toHaveBeenCalledWith(channelRow);
+  });
+
+  it("(b) concurrent calls both upsert the same lesson row", async () => {
+    installClient([{ id: CHANNEL, memberIds: [TEACHER, STUDENT] }]);
+
+    await Promise.all([
+      provisionMissingLessonChannel("lesson-1"),
+      provisionMissingLessonChannel("lesson-1"),
+    ]);
+
+    expect(db.lessonUpdate).toHaveBeenCalledTimes(2);
+    expect(db.lessonUpdate).toHaveBeenNthCalledWith(1, channelRow);
+    expect(db.lessonUpdate).toHaveBeenNthCalledWith(2, channelRow);
+  });
+
+  it("(c) writes nothing when a participant is missing", async () => {
+    db.lessonFindUnique.mockResolvedValue({ teacherId: null, studentId: STUDENT, teacher: null, student: null });
+    installClient([]);
+
+    await expect(provisionMissingLessonChannel("lesson-1")).resolves.toBeNull();
+    expect(db.lessonUpdate).not.toHaveBeenCalled();
+  });
+
+  it("(e) writes nothing when Stream channel creation fails", async () => {
+    const client = installClient([]);
+    client.create.mockRejectedValue(Object.assign(new Error("stream down"), { code: 9 }));
+
+    await expect(provisionMissingLessonChannel("lesson-1")).resolves.toBeNull();
+    expect(db.lessonUpdate).not.toHaveBeenCalled();
+    expect(console.error).toHaveBeenCalledWith(
+      "[ensureLiveStreamChannel] failed",
+      expect.objectContaining({ lessonId: "lesson-1", code: 9, error: "stream down" })
+    );
+  });
+
+  it("writes nothing when Stream credentials are missing", async () => {
+    stream.hasStreamCredentials.mockReturnValue(false);
+
+    await expect(provisionMissingLessonChannel("lesson-1")).resolves.toBeNull();
+    expect(stream.getStreamServerClient).not.toHaveBeenCalled();
+    expect(db.lessonUpdate).not.toHaveBeenCalled();
   });
 });

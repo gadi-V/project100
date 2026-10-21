@@ -4,9 +4,16 @@ const order: string[] = [];
 
 const session = vi.hoisted(() => ({ getCurrentUser: vi.fn() }));
 const lessons = vi.hoisted(() => ({ getAuthorizedLessonById: vi.fn() }));
-const healing = vi.hoisted(() => ({ ensureLiveStreamChannel: vi.fn() }));
+const healing = vi.hoisted(() => ({
+  ensureLiveStreamChannel: vi.fn(),
+  provisionMissingLessonChannel: vi.fn(),
+}));
 const packageChat = vi.hoisted(() => ({ resolveLessonStreamChannelId: vi.fn() }));
-const stream = vi.hoisted(() => ({ generateStreamToken: vi.fn() }));
+const stream = vi.hoisted(() => ({
+  generateStreamToken: vi.fn(),
+  hasStreamCredentials: vi.fn(() => true),
+  streamChannelIdForLesson: (lessonId: string) => `lesson_${lessonId}`,
+}));
 const daily = vi.hoisted(() => ({
   ensureDailyRoom: vi.fn(),
   generateDailyToken: vi.fn(),
@@ -116,5 +123,113 @@ describe("lesson room stream order", () => {
         code: 17,
       })
     );
+  });
+});
+
+function renderedChannel(page: unknown): { streamChannelId: string } | null {
+  return (
+    page as { props: { lesson: { chatChannel: { streamChannelId: string } | null } } }
+  ).props.lesson.chatChannel;
+}
+
+describe("lesson without a ChatChannel row", () => {
+  beforeEach(() => {
+    packageChat.resolveLessonStreamChannelId.mockResolvedValue(null);
+    stream.hasStreamCredentials.mockReturnValue(true);
+  });
+
+  it("(a) provisions a SCHEDULED lesson and passes the channel id on the first render", async () => {
+    lessons.getAuthorizedLessonById.mockResolvedValue({
+      ...lesson(),
+      status: "SCHEDULED",
+      chatChannel: null,
+    });
+    healing.provisionMissingLessonChannel.mockImplementation(async () => {
+      order.push("provision");
+      return CHANNEL;
+    });
+
+    const page = await LessonPage({ params: { id: "lesson-1" } });
+
+    expect(healing.provisionMissingLessonChannel).toHaveBeenCalledWith("lesson-1");
+    expect(healing.ensureLiveStreamChannel).not.toHaveBeenCalled();
+    expect(renderedChannel(page)).toEqual({ streamChannelId: CHANNEL });
+    expect(order).toEqual(["provision", "token"]);
+  });
+
+  it.each(["CANCELLED", "COMPLETED", "CANCELLED_LATE"])(
+    "(c) does not provision a %s lesson",
+    async (status) => {
+      lessons.getAuthorizedLessonById.mockResolvedValue({
+        ...lesson(),
+        status,
+        chatChannel: null,
+      });
+
+      const page = await LessonPage({ params: { id: "lesson-1" } });
+
+      expect(healing.provisionMissingLessonChannel).not.toHaveBeenCalled();
+      expect(renderedChannel(page)).toBeNull();
+    }
+  );
+
+  it("(c) does not provision when a participant id is missing", async () => {
+    lessons.getAuthorizedLessonById.mockResolvedValue({
+      ...lesson(),
+      status: "SCHEDULED",
+      studentId: "",
+      chatChannel: null,
+    });
+
+    const page = await LessonPage({ params: { id: "lesson-1" } });
+
+    expect(healing.provisionMissingLessonChannel).not.toHaveBeenCalled();
+    expect(renderedChannel(page)).toBeNull();
+  });
+
+  it("(d) keeps a package lesson on the package channel", async () => {
+    lessons.getAuthorizedLessonById.mockResolvedValue({
+      ...lesson(),
+      status: "SCHEDULED",
+      packageId: "pkg-1",
+      chatChannel: null,
+    });
+    packageChat.resolveLessonStreamChannelId.mockResolvedValue("package-pkg-1");
+    healing.ensureLiveStreamChannel.mockImplementation(async (_lessonId: string, channelId: string) => channelId);
+
+    const page = await LessonPage({ params: { id: "lesson-1" } });
+
+    expect(healing.ensureLiveStreamChannel).toHaveBeenCalledWith("lesson-1", "package-pkg-1");
+    expect(healing.provisionMissingLessonChannel).not.toHaveBeenCalled();
+    expect(renderedChannel(page)).toEqual({ streamChannelId: "package-pkg-1" });
+  });
+
+  it("(e) still renders when provisioning returns null and passes no channel", async () => {
+    lessons.getAuthorizedLessonById.mockResolvedValue({
+      ...lesson(),
+      status: "IN_PROGRESS",
+      chatChannel: null,
+    });
+    healing.provisionMissingLessonChannel.mockResolvedValue(null);
+
+    const page = await LessonPage({ params: { id: "lesson-1" } });
+
+    expect(page).toBeTruthy();
+    expect(renderedChannel(page)).toBeNull();
+    expect(order).toEqual(["token"]);
+  });
+
+  it("does not provision when Stream credentials are missing", async () => {
+    stream.hasStreamCredentials.mockReturnValue(false);
+    lessons.getAuthorizedLessonById.mockResolvedValue({
+      ...lesson(),
+      status: "SCHEDULED",
+      chatChannel: null,
+    });
+
+    const page = await LessonPage({ params: { id: "lesson-1" } });
+
+    expect(healing.provisionMissingLessonChannel).not.toHaveBeenCalled();
+    expect(renderedChannel(page)).toBeNull();
   });
 });

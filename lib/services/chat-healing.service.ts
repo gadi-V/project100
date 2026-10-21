@@ -26,6 +26,41 @@ export async function ensureLiveStreamChannel(
   return currentChannelId;
 }
 
+/**
+ * Active lesson with no ChatChannel row: create the Stream channel and
+ * enroll the current teacher and student, then store the row. A failed
+ * Stream call returns null and writes nothing.
+ */
+export async function provisionMissingLessonChannel(lessonId: string): Promise<string | null> {
+  if (!hasStreamCredentials()) return null;
+
+  const channelId = streamChannelIdForLesson(lessonId);
+  const reconciled = await reconcileRealChannel(lessonId, channelId);
+  if (!reconciled) return null;
+
+  try {
+    await prisma.lesson.update({
+      where: { id: lessonId },
+      data: {
+        chatChannel: {
+          upsert: {
+            create: { streamChannelId: channelId },
+            update: { streamChannelId: channelId },
+          },
+        },
+      },
+    });
+  } catch (error) {
+    console.error("[ensureLiveStreamChannel] failed", {
+      lessonId,
+      code: streamErrorCode(error),
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  return channelId;
+}
+
 async function healMockChannel(lessonId: string, currentChannelId: string): Promise<string> {
   if (!hasStreamCredentials()) {
     console.warn(
@@ -111,7 +146,7 @@ function enrolledIds(channel: {
  * an existing display name stays as it is. A missing channel is created
  * first. Members already on the channel are left in place.
  */
-async function reconcileRealChannel(lessonId: string, channelId: string): Promise<void> {
+async function reconcileRealChannel(lessonId: string, channelId: string): Promise<boolean> {
   let teacherId: string | null = null;
   let studentId: string | null = null;
 
@@ -120,7 +155,7 @@ async function reconcileRealChannel(lessonId: string, channelId: string): Promis
       console.warn(
         `[chat-healing] Stream credentials unset — keeping ${channelId} for lesson ${lessonId}`
       );
-      return;
+      return false;
     }
 
     const lesson = await prisma.lesson.findUnique({
@@ -138,7 +173,7 @@ async function reconcileRealChannel(lessonId: string, channelId: string): Promis
       console.warn(
         `[chat-healing] lesson ${lessonId} is missing participants — keeping ${channelId}`
       );
-      return;
+      return false;
     }
 
     const memberIds = [teacherId, studentId];
@@ -186,12 +221,13 @@ async function reconcileRealChannel(lessonId: string, channelId: string): Promis
       });
       await created.create();
       await created.addMembers(memberIds);
-      return;
+      return true;
     }
 
     const present = enrolledIds(found[0]);
-    if (memberIds.every((id) => present.has(id))) return;
+    if (memberIds.every((id) => present.has(id))) return true;
     await found[0].addMembers(memberIds);
+    return true;
   } catch (error) {
     console.error("[ensureLiveStreamChannel] failed", {
       lessonId,
@@ -200,5 +236,6 @@ async function reconcileRealChannel(lessonId: string, channelId: string): Promis
       code: streamErrorCode(error),
       error: error instanceof Error ? error.message : String(error),
     });
+    return false;
   }
 }
