@@ -166,6 +166,7 @@ describe("limits", () => {
     expect(RATE_LIMITS.booking).toEqual({ requests: 10, window: "60 s" });
     expect(RATE_LIMITS.api).toEqual({ requests: 30, window: "60 s" });
     expect(RATE_LIMITS.boardUpload).toEqual({ requests: 10, window: "60 s" });
+    expect(RATE_LIMITS.boardSnapshot).toEqual({ requests: 20, window: "60 s" });
   });
 
   it("limits board uploads to 10 per minute for one user id", async () => {

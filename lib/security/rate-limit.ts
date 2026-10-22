@@ -17,7 +17,7 @@
 import { Ratelimit } from "@upstash/ratelimit";
 import { getRedis, redisRestConfig } from "../redis";
 
-export type RateLimitType = "auth" | "booking" | "api" | "boardUpload";
+export type RateLimitType = "auth" | "booking" | "api" | "boardUpload" | "boardSnapshot";
 
 export type RateLimitResult = {
   success: boolean;
@@ -47,6 +47,8 @@ export const RATE_LIMITS: Record<RateLimitType, { requests: number; window: `${n
   api: { requests: 30, window: "60 s" },
   /** Board images. Keyed by user id, not by IP. */
   boardUpload: { requests: 10, window: "60 s" },
+  /** Notebook page snapshots. Keyed by user id, not by IP. */
+  boardSnapshot: { requests: 20, window: "60 s" },
 };
 
 /**
@@ -119,6 +121,7 @@ function getLimiters(): Record<RateLimitType, Ratelimit> | null {
         booking: build("booking"),
         api: build("api"),
         boardUpload: build("boardUpload"),
+        boardSnapshot: build("boardSnapshot"),
       },
     };
   }
