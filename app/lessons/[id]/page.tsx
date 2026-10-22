@@ -15,6 +15,7 @@ import {
   provisionMissingLessonChannel,
 } from "../../../lib/services/chat-healing.service";
 import { ensureNotebookForLesson } from "../../../lib/notebooks";
+import { allocateLessonStartPage } from "../../../lib/notebooks/page-allocation";
 import LessonRoomUI from "./LessonRoomUI";
 
 function canProvisionLessonChannel(lesson: {
@@ -169,8 +170,15 @@ export default async function LessonPage(props: {
     process.env.NEXT_PUBLIC_STREAM_API_KEY || process.env.STREAM_API_KEY || null;
 
   let notebookId: string | null = null;
+  let startPage: number | null = null;
+  let endPage: number | null = null;
   try {
     notebookId = (await ensureNotebookForLesson(lesson.id))?.id ?? null;
+    if (notebookId) {
+      const allocated = await allocateLessonStartPage(lesson.id);
+      startPage = allocated?.startPage ?? null;
+      endPage = allocated?.endPage ?? null;
+    }
   } catch (error) {
     console.error("Failed to ensure lesson notebook:", error);
   }
@@ -221,6 +229,8 @@ export default async function LessonPage(props: {
         packageId: lesson.packageId ?? null,
         lessonType: lesson.lessonType,
         notebookId,
+        startPage,
+        endPage,
       }}
       user={{
         id: user.id,

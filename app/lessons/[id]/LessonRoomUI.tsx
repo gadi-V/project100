@@ -16,6 +16,7 @@ import {
   portalAfterCompletionHref,
   type CompleteLessonResponse,
 } from "../../../lib/lesson-completion";
+import { flushBeforeLeave } from "../../../lib/whiteboard/save-scheduler";
 import { frostCard, frostHeader, primaryCta } from "../../../lib/ui";
 
 function LoadingSkeleton({ label }: { label: string }) {
@@ -87,6 +88,8 @@ interface LessonRoomUIProps {
     packageId: string | null;
     lessonType?: string | null;
     notebookId: string | null;
+    startPage: number | null;
+    endPage: number | null;
     chatChannel?: {
       streamChannelId: string;
     } | null;
@@ -162,15 +165,21 @@ export default function LessonRoomUI({
 
   const closeCompleteModal = useCallback(() => setShowCompleteModal(false), []);
 
-  /** Unmounting VideoRoom leaves and destroys the Daily call before moving on to the portal. */
+  /** Save the notebook, then unmount VideoRoom and leave. A slow save never traps the teacher. */
   const handleLessonCompleted = (result: CompleteLessonResponse) => {
-    setShowCompleteModal(false);
-    setCallEnded(true);
-    if (result.status === "CANCELLED") toast("השיעור סומן כבוטל ביוזמת המורה");
-    else if (result.attendanceStatus === "STUDENT_NO_SHOW") toast.success("השיעור נסגר והחיסור נרשם בתיק התלמיד");
-    else if (result.promptSummary) toast.success("השיעור הסתיים. עוברים לטופס סיכום השיעור");
-    else toast.success("השיעור הסתיים והסיכום נשמר");
-    router.push(portalAfterCompletionHref(lesson.studentId, lesson.id, result));
+    void (async () => {
+      const outcome = await flushBeforeLeave(
+        () => whiteboardRef.current?.flushSnapshots() ?? Promise.resolve(),
+      );
+      if (outcome !== "ok") console.error("[whiteboard] leaving after snapshot", outcome);
+      setShowCompleteModal(false);
+      setCallEnded(true);
+      if (result.status === "CANCELLED") toast("השיעור סומן כבוטל ביוזמת המורה");
+      else if (result.attendanceStatus === "STUDENT_NO_SHOW") toast.success("השיעור נסגר והחיסור נרשם בתיק התלמיד");
+      else if (result.promptSummary) toast.success("השיעור הסתיים. עוברים לטופס סיכום השיעור");
+      else toast.success("השיעור הסתיים והסיכום נשמר");
+      router.push(portalAfterCompletionHref(lesson.studentId, lesson.id, result));
+    })();
   };
 
   const handleRatingSubmit = async (rating: number, comment: string) => {
@@ -277,6 +286,8 @@ export default function LessonRoomUI({
               packageId={lesson.packageId}
               lessonId={lesson.id}
               notebookId={lesson.notebookId}
+              startPage={lesson.startPage}
+              endPage={lesson.endPage}
             />
           </div>
         </main>

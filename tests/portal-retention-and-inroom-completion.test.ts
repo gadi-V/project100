@@ -474,6 +474,8 @@ describe("LessonRoomUI — closing the lesson from the Daily room", () => {
     durationMinutes: 50,
     packageId: null,
     notebookId: null,
+    startPage: null,
+    endPage: null,
     chatChannel: null,
     ...overrides,
   });

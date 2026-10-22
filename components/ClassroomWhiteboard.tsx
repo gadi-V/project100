@@ -48,6 +48,12 @@ import {
   pagePointFromClient,
   type CanvasHit,
 } from "../lib/whiteboard/board-dnd";
+import {
+  peerSnapshotAction,
+  shouldAnswerSnapshotRequest,
+  shouldRequestPeerSnapshot,
+} from "../lib/whiteboard/snapshot-lifecycle";
+import { useWhiteboardSnapshots } from "../lib/whiteboard/useWhiteboardSnapshots";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -391,6 +397,8 @@ export interface ClassroomWhiteboardHandle {
   /** Upload every A4 page and return the stored PDF URL. Null when export or storage does not yield one. */
   exportBoardToPdf: (targetLessonId?: string) => Promise<string | null>;
   clearCanvas: () => void;
+  /** Persist notebook pages. Resolves even when the network fails. */
+  flushSnapshots: () => Promise<void>;
 }
 
 export type ClassroomWhiteboardRef = ClassroomWhiteboardHandle;
@@ -404,6 +412,9 @@ type ClassroomWhiteboardProps = {
   packageId?: string | null;
   lessonId?: string | null;
   notebookId?: string | null;
+  /** First notebook page for this lesson. Local page i is stored at startPage + i. */
+  startPage?: number | null;
+  endPage?: number | null;
 };
 
 type PreLessonAssetPanelItem = {
@@ -2453,7 +2464,15 @@ function clampOnPage(value: number, size: number, page: number): number {
 
 const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhiteboardProps>(
   function ClassroomWhiteboard(
-    { role: _role, streamChannel = null, packageId = null, lessonId = null, notebookId = null },
+    {
+      role,
+      streamChannel = null,
+      packageId = null,
+      lessonId = null,
+      notebookId = null,
+      startPage = null,
+      endPage = null,
+    },
     ref,
   ) {
     const [pages, setPages] = useState<PageInfo[]>(() => [{ id: nanoid(), pageNumber: 1 }]);
@@ -2492,6 +2511,8 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
     const [aiHint, setAiHint] = useState<string | null>(null);
     const [isDraggingOver, setIsDraggingOver] = useState(false);
     const [syncStatus, setSyncStatus] = useState<"idle" | "live" | "error">("idle");
+    const [snapshotSync, setSnapshotSync] = useState<"idle" | "saving" | "saved" | "error">("idle");
+    const [snapshotsReady, setSnapshotsReady] = useState(notebookId == null || startPage == null);
     const [activePageIndex, setActivePageIndex] = useState(0);
     const [preLessonAssets, setPreLessonAssets] = useState<PreLessonAssetPanelItem[]>([]);
     const [assetsPanelOpen, setAssetsPanelOpen] = useState(false);
@@ -2507,6 +2528,8 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
     const commitTextRef = useRef<() => void>(() => {});
     const activeRef = useRef<ActiveDrawing>(null);
     const elementsRef = useRef<DrawEl[]>(elements);
+    const pagesRef = useRef(pages);
+    const snapshotHydratingRef = useRef(false);
     const selectedRef = useRef<ReadonlySet<string>>(selectedIds);
     const erasingRef = useRef(false);
     const applyRemote = useRef(false);
@@ -2554,6 +2577,9 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
       elementsRef.current = elements;
     }, [elements]);
     useEffect(() => {
+      pagesRef.current = pages;
+    }, [pages]);
+    useEffect(() => {
       paperStyleRef.current = paperStyle;
     }, [paperStyle]);
     useEffect(() => {
@@ -2562,6 +2588,57 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
     useEffect(() => {
       zoomRef.current = zoom;
     }, [zoom]);
+
+    const { phase: snapshotPhase, noteMutation: noteSnapshotMutation, flush: flushSnapshots } =
+      useWhiteboardSnapshots<DrawEl>({
+        role,
+        notebookId,
+        lessonId,
+        startPage,
+        endPage,
+        readBoard: () => ({
+          paperStyle: paperStyleRef.current,
+          pageCount: pagesRef.current.length,
+          elements: elementsRef.current,
+        }),
+        applyServer: ({ elements: nextElements, paperStyle: nextPaper, pageCount }) => {
+          snapshotHydratingRef.current = true;
+          for (const el of nextElements) {
+            if (el.kind === "image") ensureImageInCache(el, imgCache.current);
+          }
+          elementsRef.current = nextElements;
+          if (isPaperStyle(nextPaper)) paperStyleRef.current = nextPaper;
+          setElements(nextElements);
+          if (isPaperStyle(nextPaper)) setPaperStyle(nextPaper);
+          setPages((prev) => {
+            if (prev.length >= pageCount) return prev;
+            return [
+              ...prev,
+              ...Array.from({ length: pageCount - prev.length }, (_, index) => ({
+                id: nanoid(),
+                pageNumber: prev.length + index + 1,
+              })),
+            ];
+          });
+          scheduleLivePaintRef.current();
+        },
+        onStatus: setSnapshotSync,
+        onReady: () => setSnapshotsReady(true),
+      });
+    const noteSnapshotMutationRef = useRef(noteSnapshotMutation);
+    noteSnapshotMutationRef.current = noteSnapshotMutation;
+    const snapshotBaselineRef = useRef(false);
+    useEffect(() => {
+      if (!snapshotBaselineRef.current) {
+        snapshotBaselineRef.current = true;
+        return;
+      }
+      if (snapshotHydratingRef.current) {
+        snapshotHydratingRef.current = false;
+        return;
+      }
+      noteSnapshotMutationRef.current();
+    }, [elements, paperStyle, pages]);
 
     useEffect(() => {
       const session = new SnapSession((preview) => {
@@ -2829,6 +2906,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
       };
 
       const publishSnapshot = (): void => {
+        if (!shouldAnswerSnapshotRequest(elementsRef.current.length)) return;
         const chunks = buildSnapshotChunks(
           elementsRef.current,
           paperStyleRef.current,
@@ -2854,12 +2932,10 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
               const ready = noteSnapshotChunk(snapshotBuffersRef.current, chunk);
               if (ready) {
                 awaitingSnapshotRef.current = false;
-                if (ready.elements.length === 0 && elementsRef.current.length > 0) {
-                  paperStyleRef.current = ready.paperStyle;
-                  setPaperStyle(ready.paperStyle);
-                } else {
-                  applySnapshot(ready.elements, ready.paperStyle);
+                if (peerSnapshotAction(ready.elements.length, elementsRef.current.length) === "ignore") {
+                  return;
                 }
+                applySnapshot(ready.elements, ready.paperStyle);
               }
             }
             return;
@@ -2934,7 +3010,16 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
       };
 
       const unbound = streamChannel.on(BOARD_EVENT as "message.new", onEvent as never);
-      if (shouldRequestSnapshot(elementsRef.current.length, snapshotRequestedRef.current)) {
+      const waitingForServer = Boolean(notebookId && startPage != null && !snapshotsReady);
+      const serverHydrated = Boolean(notebookId && startPage != null && snapshotsReady);
+      if (
+        shouldRequestPeerSnapshot({
+          serverHydrated,
+          waitingForServer,
+          alreadyRequested: snapshotRequestedRef.current,
+          elementCount: elementsRef.current.length,
+        })
+      ) {
         snapshotRequestedRef.current = true;
         awaitingSnapshotRef.current = true;
         emitBoardEventRef.current(buildRequestSnapshot(clientIdRef.current, Date.now()));
@@ -2947,7 +3032,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
           streamChannel.off(BOARD_EVENT as "message.new", onEvent as never);
         }
       };
-    }, [streamChannel, applyHistoryRemote]);
+    }, [streamChannel, applyHistoryRemote, snapshotsReady, notebookId, startPage]);
 
     const removeElements = useCallback(
       (ids: string[], withHistory = true): void => {
@@ -4484,8 +4569,9 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
       () => ({
         exportBoardToPdf,
         clearCanvas,
+        flushSnapshots: () => flushSnapshots("complete"),
       }),
-      [clearCanvas, exportBoardToPdf],
+      [clearCanvas, exportBoardToPdf, flushSnapshots],
     );
 
     const exportPdfDirect = useCallback(async (): Promise<void> => {
@@ -4524,13 +4610,18 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
       });
     }, [activePageIndex, elements, paperStyle]);
 
-    const syncLabel = !streamChannel
-      ? "לוח מקומי"
-      : syncStatus === "live"
-        ? "מסונכרן"
-        : syncStatus === "error"
-          ? "שגיאה"
-          : "מתחבר";
+    const syncLabel =
+      snapshotSync === "error"
+        ? "השמירה לא הצליחה"
+        : snapshotSync === "saving"
+          ? "שומרים את המחברת"
+          : !streamChannel
+            ? "לוח מקומי"
+            : syncStatus === "live"
+              ? "מסונכרן"
+              : syncStatus === "error"
+                ? "שגיאה"
+                : "מתחבר";
 
     const pagePaperStyle = paperBackgroundStyle(paperStyle);
 
@@ -4885,6 +4976,35 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
       setOpenMenu(null);
     };
 
+    if (snapshotPhase === "skeleton") {
+      return (
+        <div
+          role="status"
+          aria-live="polite"
+          dir="ltr"
+          className="relative flex h-full min-h-[140px] w-full items-center justify-center overflow-hidden bg-[#fafaf9]"
+        >
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-0"
+            style={{
+              backgroundColor: "#ffffff",
+              backgroundImage:
+                "linear-gradient(to right, #f1f5f9 1px, transparent 1px), linear-gradient(to bottom, #f1f5f9 1px, transparent 1px)",
+              backgroundSize: "24px 24px",
+            }}
+          />
+          <div className="relative flex items-center gap-2 rounded-full border border-neutral-200/80 bg-white/85 px-4 py-2 text-sm font-medium text-neutral-600 shadow-sm">
+            <span
+              aria-hidden
+              className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-neutral-200 border-t-neutral-900"
+            />
+            טוענים את המחברת
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div
         ref={containerRef}
@@ -5021,11 +5141,13 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
               <span title={syncLabel} className="shrink-0 flex items-center ms-1">
                 <span
                   className={`block w-2 h-2 rounded-full ${
-                    syncStatus === "live"
-                      ? "bg-emerald-400 animate-pulse"
-                      : syncStatus === "error"
-                        ? "bg-red-400"
-                        : "bg-neutral-400"
+                    snapshotSync === "error" || syncStatus === "error"
+                      ? "bg-red-400"
+                      : snapshotSync === "saving"
+                        ? "bg-amber-400"
+                        : syncStatus === "live" || snapshotSync === "saved"
+                          ? "bg-emerald-400 animate-pulse"
+                          : "bg-neutral-400"
                   }`}
                 />
               </span>
