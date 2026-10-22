@@ -75,6 +75,16 @@ import {
   type StrokePartStore,
 } from "../lib/whiteboard/stroke-parts";
 import { planBoardDelivery } from "../lib/whiteboard/transport-policy";
+import {
+  SNAPSHOT_CHUNK_TIMEOUT_MS,
+  beginSnapshotWait,
+  bufferSnapshotDelta,
+  createSnapshotWait,
+  finishSnapshotWait,
+  noteSnapshotRetry,
+  snapshotTimeoutStep,
+  type SnapshotWait,
+} from "../lib/whiteboard/snapshot-transfer";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -2601,6 +2611,10 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
     const reorderTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const applyRemoteOpsRef = useRef<(ops: readonly RemoteBoardOp[]) => void>(() => {});
     const ingestRemoteEventRef = useRef<(event: RemoteBoardEvent) => void>(() => {});
+    const snapshotWaitRef = useRef<SnapshotWait<RemoteBoardEvent>>(createSnapshotWait());
+    const snapshotTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const armSnapshotTimeoutRef = useRef<() => void>(() => {});
+    const replayBufferedDeltasRef = useRef<() => void>(() => {});
     const snapshotRequestedRef = useRef(false);
     const awaitingSnapshotRef = useRef(false);
     const snapshotBuffersRef = useRef(new Map<string, SnapshotChunkEvent[]>());
@@ -2733,7 +2747,35 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
       }, 25);
     }
 
+    replayBufferedDeltasRef.current = () => {
+      if (snapshotTimerRef.current !== null) {
+        clearTimeout(snapshotTimerRef.current);
+        snapshotTimerRef.current = null;
+      }
+      awaitingSnapshotRef.current = false;
+      const queued = finishSnapshotWait(snapshotWaitRef.current);
+      for (const event of queued) ingestRemoteEventRef.current(event);
+    };
+
+    armSnapshotTimeoutRef.current = () => {
+      if (snapshotTimerRef.current !== null) clearTimeout(snapshotTimerRef.current);
+      snapshotTimerRef.current = setTimeout(() => {
+        snapshotTimerRef.current = null;
+        if (snapshotTimeoutStep(snapshotWaitRef.current.attempt) === "retry") {
+          noteSnapshotRetry(snapshotWaitRef.current);
+          snapshotBuffersRef.current.clear();
+          awaitingSnapshotRef.current = true;
+          emitBoardEventRef.current(buildRequestSnapshot(senderIdRef.current, Date.now()));
+          armSnapshotTimeoutRef.current();
+          return;
+        }
+        snapshotBuffersRef.current.clear();
+        replayBufferedDeltasRef.current();
+      }, SNAPSHOT_CHUNK_TIMEOUT_MS);
+    };
+
     ingestRemoteEventRef.current = (event) => {
+      if (bufferSnapshotDelta(snapshotWaitRef.current, event)) return;
       const released = pushSenderDelta(deltaStateRef.current, event, Date.now());
       for (const item of released) applyRemoteOpsRef.current(item.ops);
       if (hasHeldDeltas(deltaStateRef.current)) armReorderFlush();
@@ -2744,6 +2786,10 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
         if (reorderTimerRef.current !== null) {
           clearTimeout(reorderTimerRef.current);
           reorderTimerRef.current = null;
+        }
+        if (snapshotTimerRef.current !== null) {
+          clearTimeout(snapshotTimerRef.current);
+          snapshotTimerRef.current = null;
         }
       };
     }, []);
@@ -2772,6 +2818,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
           if (el.kind === "image") ensureImageInCache(el, imgCache.current);
         }
         elementsRef.current = drawn;
+        strokePartsRef.current.clear();
         paperStyleRef.current = nextPaper;
         setElements(drawn);
         setPaperStyle(nextPaper);
@@ -2789,6 +2836,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
         });
         setSyncStatus("live");
         scheduleLivePaintRef.current();
+        replayBufferedDeltasRef.current();
       },
       onBoardDelta: (delta) => {
         ingestRemoteEventRef.current({
@@ -3071,6 +3119,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
       historySyncBuffersRef.current.clear();
 
       const applySnapshot = (elements: DrawEl[], nextPaper: PaperStyle): void => {
+        strokePartsRef.current.clear();
         for (const el of elements) {
           if (el.kind === "image") ensureImageInCache(el, imgCache.current);
         }
@@ -3119,11 +3168,9 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
             if (chunk) {
               const ready = noteSnapshotChunk(snapshotBuffersRef.current, chunk);
               if (ready) {
-                awaitingSnapshotRef.current = false;
-                if (peerSnapshotAction(ready.elements.length, elementsRef.current.length) === "ignore") {
-                  return;
-                }
-                applySnapshot(ready.elements, ready.paperStyle);
+                const replace = peerSnapshotAction(ready.elements.length, elementsRef.current.length) !== "ignore";
+                if (replace) applySnapshot(ready.elements, ready.paperStyle);
+                replayBufferedDeltasRef.current();
               }
             }
             return;
@@ -3223,11 +3270,17 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
         })
       ) {
         snapshotRequestedRef.current = true;
+        beginSnapshotWait(snapshotWaitRef.current);
         awaitingSnapshotRef.current = true;
         emitBoardEventRef.current(buildRequestSnapshot(senderIdRef.current, Date.now()));
+        armSnapshotTimeoutRef.current();
       }
       setSyncStatus("live");
       return () => {
+        if (snapshotTimerRef.current !== null) {
+          clearTimeout(snapshotTimerRef.current);
+          snapshotTimerRef.current = null;
+        }
         if (typeof unbound === "object" && unbound && "unsubscribe" in unbound) {
           (unbound as { unsubscribe: () => void }).unsubscribe();
         } else {

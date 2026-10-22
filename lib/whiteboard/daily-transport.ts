@@ -6,6 +6,19 @@
 
 export const DAILY_EVENT_MAX_BYTES = 2048;
 
+/**
+ * Payload ceiling enforced by the installed `@daily-co/daily-js` 0.91.0 client.
+ * Verified in `node_modules/@daily-co/daily-js/dist/daily.js` (single-line bundle):
+ * `ko=4096` is the default `_maxAppMessageSize`, and `sendAppMessage` throws when
+ * `JSON.stringify(data).length` exceeds it. A joined call may replace the default
+ * from `event.internal._maxAppMessageSize`. The type signature at
+ * `node_modules/@daily-co/daily-js/index.d.ts:2479` does not document a size.
+ * Events here stay at 2048 bytes so the same delta also fits a Stream custom event.
+ *
+ * Rate limit: not declared in that bundle or in the typings. Unverified.
+ */
+export const DAILY_CLIENT_MAX_APP_MESSAGE_CHARS = 4096;
+
 const PAPER_STYLES = new Set(["grid", "ruled", "dotted", "blank"]);
 const DROPPED_KEYS = new Set([
   "url",
