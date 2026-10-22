@@ -39,8 +39,10 @@ import {
   applyPasteDecision,
   dataTransferHasFiles,
   decideImageDrop,
+  clipboardDataHasBoardShapeMarker,
   decidePasteAction,
   inspectImageDataTransfer,
+  issueBoardShapeMarker,
   isTargetEditable,
   mostVisiblePageIndex,
   pagePointFromClient,
@@ -2511,6 +2513,8 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
     const imgCache = useRef<Map<string, HTMLImageElement>>(new Map());
     const zoomRef = useRef(zoom);
     const clipboardRef = useRef<DrawEl[]>([]);
+    const shapeMarkerRef = useRef("");
+    const shapeCopyArmedRef = useRef(false);
     const laserTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const snapRef = useRef<SnapSession | null>(null);
     const cursorRef = useRef<(Point & { pageIndex: number }) | null>(null);
@@ -4258,6 +4262,18 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
     }, []);
 
     useEffect(() => {
+      const publishShapeMarker = (armCopyEvent: boolean): void => {
+        if (clipboardRef.current.length === 0) return;
+        const marker = issueBoardShapeMarker();
+        shapeMarkerRef.current = marker;
+        if (armCopyEvent) shapeCopyArmedRef.current = true;
+        try {
+          const pending = navigator.clipboard?.writeText(marker);
+          if (pending && typeof pending.catch === "function") void pending.catch(() => {});
+        } catch {
+          // The copy event handler writes the marker when this API is unavailable.
+        }
+      };
       const onKeyDown = (e: KeyboardEvent): void => {
         if (e.key === "Shift") {
           if (!shiftPressedRef.current) {
@@ -4268,12 +4284,18 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
         }
         const action = readWhiteboardShortcut(e);
         if (action === "copy") {
-          e.preventDefault();
+          if (isTargetEditable(e.target) || editText) return;
+          if (selectedRef.current.size === 0) return;
           copySelection();
+          publishShapeMarker(true);
         } else if (action === "cut") {
           e.preventDefault();
           if (editText) cutEditText();
-          else cutSelection();
+          else {
+            const hadSelection = selectedRef.current.size > 0;
+            cutSelection();
+            if (hadSelection) publishShapeMarker(false);
+          }
         } else if (action === "paste") {
           return;
         } else if (action === "duplicate") {
@@ -4342,6 +4364,20 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
     }, []);
 
     useEffect(() => {
+      const onCopy = (event: ClipboardEvent): void => {
+        if (!shapeCopyArmedRef.current) return;
+        shapeCopyArmedRef.current = false;
+        if (isTargetEditable(event.target) || editText) return;
+        if (clipboardRef.current.length === 0) return;
+        const marker = shapeMarkerRef.current;
+        if (!marker) return;
+        try {
+          event.clipboardData?.setData("text/plain", marker);
+          event.preventDefault();
+        } catch {
+          // keydown writeText is the fallback when clipboardData cannot be set
+        }
+      };
       const onPaste = (event: ClipboardEvent): void => {
         const report = inspectImageDataTransfer(event.clipboardData);
         const targetEditable = isTargetEditable(event.target) || editText !== null;
@@ -4349,6 +4385,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
           imageFiles: report.accepted,
           internalClipboardCount: clipboardRef.current.length,
           targetEditable,
+          hasInternalMarker: clipboardDataHasBoardShapeMarker(event.clipboardData),
         });
         if (action !== "ignore") event.preventDefault();
         const viewport = scrollRef.current?.getBoundingClientRect();
@@ -4368,8 +4405,12 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
           notify: setAiHint,
         });
       };
+      window.addEventListener("copy", onCopy);
       window.addEventListener("paste", onPaste);
-      return () => window.removeEventListener("paste", onPaste);
+      return () => {
+        window.removeEventListener("copy", onCopy);
+        window.removeEventListener("paste", onPaste);
+      };
     }, [activePageIndex, editText, handleImageFile, notebookId, pasteClipboard, readCanvasHits]);
 
     const collectExportFrames = useCallback(async (): Promise<ExportFrame[]> => {

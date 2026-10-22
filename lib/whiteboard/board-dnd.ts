@@ -339,19 +339,46 @@ export function extractImageFromClipboard(event: ClipboardEvent | null | undefin
 
 export type PasteAction = "images" | "internal" | "ignore";
 
+/** Plain-text prefix written to the OS clipboard when shapes are copied inside the board. */
+export const BOARD_SHAPE_MARKER_PREFIX = "project100-board-shapes:";
+
+let shapeCopySerial = 0;
+
+/** A new marker for one internal copy. The counter keeps two copies distinguishable. */
+export function issueBoardShapeMarker(): string {
+  shapeCopySerial += 1;
+  return `${BOARD_SHAPE_MARKER_PREFIX}${shapeCopySerial}`;
+}
+
+export function clipboardHasBoardShapeMarker(text: string | null | undefined): boolean {
+  return typeof text === "string" && text.startsWith(BOARD_SHAPE_MARKER_PREFIX);
+}
+
+export function clipboardDataHasBoardShapeMarker(data: DataTransfer | null | undefined): boolean {
+  if (!data || typeof data.getData !== "function") return false;
+  try {
+    return clipboardHasBoardShapeMarker(data.getData("text/plain"));
+  } catch {
+    return false;
+  }
+}
+
 /**
- * Image files win over copied shapes. An editable target is left to the browser.
- * No image file and a non-empty internal clipboard keeps the existing shape paste.
+ * An editable target is ignored so the board never writes the shape marker into a text box.
+ * A marker from a later internal copy wins over a stale OS image. Otherwise image files win,
+ * and a non-empty internal clipboard pastes when the OS clipboard has no image.
  */
 export function decidePasteAction(input: {
   imageFiles: readonly unknown[];
   internalClipboardCount: number;
   targetEditable: boolean;
+  hasInternalMarker?: boolean;
 }): PasteAction {
   if (input.targetEditable) return "ignore";
+  const count = typeof input.internalClipboardCount === "number" ? input.internalClipboardCount : 0;
+  if (input.hasInternalMarker === true && count > 0) return "internal";
   if (input.imageFiles.length > 0) return "images";
-  const count = input.internalClipboardCount;
-  if (typeof count === "number" && count > 0) return "internal";
+  if (count > 0) return "internal";
   return "ignore";
 }
 

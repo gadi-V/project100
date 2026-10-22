@@ -14,8 +14,10 @@ import {
   calculateStaggeredOffsets,
   dataTransferHasFiles,
   decideImageDrop,
+  clipboardDataHasBoardShapeMarker,
   decidePasteAction,
   extractImageFromClipboard,
+  issueBoardShapeMarker,
   imageFilesFromDataTransfer,
   inspectImageDataTransfer,
   isTargetEditable,
@@ -459,8 +461,86 @@ describe("decidePasteAction", () => {
       targetEditable: true,
       expected: "ignore" as const,
     },
-  ])("$name", ({ imageFiles: files, internalClipboardCount, targetEditable, expected }) => {
-    expect(decidePasteAction({ imageFiles: files, internalClipboardCount, targetEditable })).toBe(expected);
+    {
+      name: "a later internal copy wins over a stale image left on the OS clipboard",
+      imageFiles,
+      internalClipboardCount: 2,
+      targetEditable: false,
+      hasInternalMarker: true,
+      expected: "internal" as const,
+    },
+    {
+      name: "image files paste when nothing was copied inside the board",
+      imageFiles,
+      internalClipboardCount: 0,
+      targetEditable: false,
+      hasInternalMarker: false,
+      expected: "images" as const,
+    },
+    {
+      name: "the shape marker alone pastes the internal clipboard",
+      imageFiles: [],
+      internalClipboardCount: 3,
+      targetEditable: false,
+      hasInternalMarker: true,
+      expected: "internal" as const,
+    },
+    {
+      name: "internal shapes paste when the OS clipboard is empty",
+      imageFiles: [],
+      internalClipboardCount: 1,
+      targetEditable: false,
+      hasInternalMarker: false,
+      expected: "internal" as const,
+    },
+    {
+      name: "an editable target ignores the shape marker so the board does not insert it",
+      imageFiles,
+      internalClipboardCount: 2,
+      targetEditable: true,
+      hasInternalMarker: true,
+      expected: "ignore" as const,
+    },
+  ])("$name", ({ imageFiles: files, internalClipboardCount, targetEditable, hasInternalMarker, expected }) => {
+    expect(
+      decidePasteAction({
+        imageFiles: files,
+        internalClipboardCount,
+        targetEditable,
+        hasInternalMarker,
+      }),
+    ).toBe(expected);
+  });
+
+  it("does not insert the shape marker into a text box", async () => {
+    const marker = issueBoardShapeMarker();
+    expect(marker.startsWith("project100-board-shapes:")).toBe(true);
+    expect(issueBoardShapeMarker()).not.toBe(marker);
+    expect(clipboardDataHasBoardShapeMarker({ getData: () => marker } as unknown as DataTransfer)).toBe(true);
+    expect(clipboardDataHasBoardShapeMarker({ getData: () => "hello" } as unknown as DataTransfer)).toBe(false);
+
+    const action = decidePasteAction({
+      imageFiles: [],
+      internalClipboardCount: 1,
+      targetEditable: true,
+      hasInternalMarker: clipboardDataHasBoardShapeMarker({ getData: () => marker } as unknown as DataTransfer),
+    });
+    expect(action).toBe("ignore");
+
+    const written: string[] = [];
+    await applyPasteDecision(action, {
+      notebookId: "nb-1",
+      files: [],
+      pageIndex: 0,
+      sizeRejected: false,
+      pasteClipboard: () => written.push("shapes"),
+      handleImageFile: async () => {
+        written.push("image");
+      },
+      notify: (message) => written.push(message),
+    });
+    expect(written).toEqual([]);
+    expect(written.join("\n")).not.toContain("project100-board-shapes:");
   });
 });
 
