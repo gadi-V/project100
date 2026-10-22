@@ -33,6 +33,7 @@ import {
 } from "../../lib/whiteboard/snap-commit";
 import { SnapSession } from "../../lib/whiteboard/snap-session";
 import type { RecognizedShape } from "../../lib/whiteboard/types";
+import { createStrokePartStore } from "../../lib/whiteboard/stroke-parts";
 
 function zigzagStroke(id: string, count: number) {
   const points = [];
@@ -414,8 +415,9 @@ describe("classroom whiteboard live stroke sync", () => {
     expect(events.every((event) => event.add.id === "stroke-600")).toBe(true);
     for (const event of events) expect(boardSyncEventBytes(event)).toBeLessThanOrEqual(STREAM_SAFE_LIMIT);
 
-    let remote = applyLiveAdd([], events[0]);
-    for (const event of events.slice(1)) remote = applyLiveAdd(remote, event);
+    const parts = createStrokePartStore();
+    let remote = applyLiveAdd([], events[0], parts);
+    for (const event of events.slice(1)) remote = applyLiveAdd(remote, event, parts);
 
     expect(remote).toHaveLength(1);
     expect(remote[0]).toMatchObject({ id: "stroke-600", kind: "stroke", tool: "pen", pageIndex: 0 });

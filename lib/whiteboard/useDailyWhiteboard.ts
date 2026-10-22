@@ -37,13 +37,22 @@ function deltasFromPayload(payload: Record<string, unknown>, senderId: string): 
       id,
       element: element as BoardDeltaMessage["element"],
     };
-    if (typeof payload.strokePart === "number" && payload.strokePart > 0) message.part = payload.strokePart;
+    if (typeof payload.strokePart === "number" && Number.isInteger(payload.strokePart) && payload.strokePart >= 0) {
+      message.part = payload.strokePart;
+    }
+    if (typeof payload.seq === "number" && Number.isInteger(payload.seq) && payload.seq >= 1) {
+      message.seq = payload.seq;
+    }
     messages.push(message);
   }
   if (Array.isArray(payload.remove)) {
     for (const id of payload.remove) {
       if (typeof id !== "string" || id.length === 0) continue;
-      messages.push({ type: "board_delta", op: "remove", senderId, id });
+      const remove: BoardDeltaMessage = { type: "board_delta", op: "remove", senderId, id };
+      if (typeof payload.seq === "number" && Number.isInteger(payload.seq) && payload.seq >= 1) {
+        remove.seq = payload.seq;
+      }
+      messages.push(remove);
     }
   }
   return messages;

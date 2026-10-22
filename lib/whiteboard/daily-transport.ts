@@ -34,7 +34,10 @@ export type BoardDeltaMessage = {
   senderId: string;
   id: string;
   element?: DailyElement;
+  /** Stroke piece index. `0` is a real part, not "absent". */
   part?: number;
+  /** Monotonic per sender. Retries reuse the same value. */
+  seq?: number;
 };
 
 export type RequestSnapshotMessage = {
@@ -169,13 +172,20 @@ function normalize(message: DailyBoardMessage): DailyBoardMessage | null {
     const id = readId(message.id);
     if (!senderId || !id || (message.op !== "add" && message.op !== "remove")) return null;
     if (message.op === "remove") {
-      return { type: "board_delta", op: "remove", senderId, id };
+      const remove: BoardDeltaMessage = { type: "board_delta", op: "remove", senderId, id };
+      if (typeof message.seq === "number" && Number.isInteger(message.seq) && message.seq >= 1) {
+        remove.seq = message.seq;
+      }
+      return remove;
     }
     const element = sanitizeDailyElement(message.element);
     if (!element || element.id !== id) return null;
     const next: BoardDeltaMessage = { type: "board_delta", op: "add", senderId, id, element };
-    if (typeof message.part === "number" && Number.isInteger(message.part) && message.part > 0) {
+    if (typeof message.part === "number" && Number.isInteger(message.part) && message.part >= 0) {
       next.part = message.part;
+    }
+    if (typeof message.seq === "number" && Number.isInteger(message.seq) && message.seq >= 1) {
+      next.seq = message.seq;
     }
     return next;
   }

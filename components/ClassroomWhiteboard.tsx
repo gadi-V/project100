@@ -56,6 +56,24 @@ import {
 import { useWhiteboardSnapshots } from "../lib/whiteboard/useWhiteboardSnapshots";
 import { useDailyWhiteboard, type DailyWhiteboardLink } from "../lib/whiteboard/useDailyWhiteboard";
 import type { RemoteLaser } from "../lib/whiteboard/laser-pointer";
+import {
+  createDeltaApplyState,
+  flushSenderDeltas,
+  guardIncomingOp,
+  hasHeldDeltas,
+  nextDeltaSeq,
+  pushSenderDelta,
+  resolveBoardSenderId,
+  tombstoneElement,
+  type RemoteBoardEvent,
+  type RemoteBoardOp,
+} from "../lib/whiteboard/delta-apply";
+import {
+  clearStrokeParts,
+  createStrokePartStore,
+  replaceStrokePart,
+  type StrokePartStore,
+} from "../lib/whiteboard/stroke-parts";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -371,6 +389,8 @@ interface SyncEvent {
   direction?: "forward" | "backward";
   historyPart?: { index: number; total: number; opId: string };
   strokePart?: number;
+  /** Per-sender delta sequence. Absent on legacy peers. */
+  seq?: number;
   layerOrder?: { pageIndex: number; ids: string[] };
 }
 
@@ -1356,14 +1376,28 @@ export function buildStrokeAddEvents(
   return pieces.map((piece, index) => ({ add: piece, strokePart: index, senderId }));
 }
 
-/** Apply one live `{add}`. Later pieces of the same stroke id are concatenated. */
+/**
+ * Apply one live `{add}`.
+ * With a part store, piece `(strokeId, partIndex)` replaces that piece and the
+ * stroke is rebuilt in index order. Without a store, later pieces still append
+ * so a single in-order pass reassembles a stroke.
+ */
 export function applyLiveAdd(
   elements: readonly DrawEl[],
   event: { add?: unknown; strokePart?: number },
+  parts?: StrokePartStore,
 ): DrawEl[] {
   const raw = coerceSyncEl(event.add);
   if (!raw) return [...elements];
-  if (raw.kind === "stroke" && (event.strokePart ?? 0) > 0) {
+  if (raw.kind === "stroke" && parts) {
+    if (typeof event.strokePart !== "number") {
+      clearStrokeParts(parts, raw.id);
+    } else {
+      const ordered = replaceStrokePart(parts, event.strokePart, raw);
+      const merged = mergeSyncElements(ordered as SyncEl[]);
+      return merged[0] ? upsertElement(elements, merged[0]) : [...elements];
+    }
+  } else if (raw.kind === "stroke" && (event.strokePart ?? 0) > 0) {
     const existing = elements.find((el) => el.id === raw.id);
     if (existing?.kind === "stroke") {
       const prev: SyncStroke = {
@@ -2558,7 +2592,14 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
     const broadcastRef = useRef<((payload: Record<string, unknown>) => void) | null>(null);
     const emitBoardEventRef = useRef<(payload: Record<string, unknown>) => void>(() => {});
     const clientIdRef = useRef(nanoid());
+    const senderIdRef = useRef(resolveBoardSenderId(userId, clientIdRef.current));
+    senderIdRef.current = resolveBoardSenderId(userId, clientIdRef.current);
     const dailyLinkRef = useRef<DailyWhiteboardLink | null>(null);
+    const deltaStateRef = useRef(createDeltaApplyState());
+    const strokePartsRef = useRef(createStrokePartStore());
+    const reorderTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const applyRemoteOpsRef = useRef<(ops: readonly RemoteBoardOp[]) => void>(() => {});
+    const ingestRemoteEventRef = useRef<(event: RemoteBoardEvent) => void>(() => {});
     const snapshotRequestedRef = useRef(false);
     const awaitingSnapshotRef = useRef(false);
     const snapshotBuffersRef = useRef(new Map<string, SnapshotChunkEvent[]>());
@@ -2647,7 +2688,66 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
       noteSnapshotMutationRef.current();
     }, [elements, paperStyle, pages]);
 
-    const dailyUserId = userId && userId.length > 0 ? userId : clientIdRef.current;
+    applyRemoteOpsRef.current = (ops) => {
+      const now = Date.now();
+      let next = elementsRef.current;
+      let applied = 0;
+      for (const op of ops) {
+        const allowed = guardIncomingOp(deltaStateRef.current, op, now);
+        if (!allowed) continue;
+        if (allowed.op === "remove") {
+          clearStrokeParts(strokePartsRef.current, allowed.id);
+          if (!next.some((el) => el.id === allowed.id)) continue;
+          next = next.filter((el) => el.id !== allowed.id);
+          applied += 1;
+          continue;
+        }
+        const updated = applyLiveAdd(
+          next,
+          { add: allowed.element, strokePart: allowed.part },
+          strokePartsRef.current,
+        );
+        const added = updated.find((el) => el.id === allowed.id);
+        if (added?.kind === "image") ensureImageInCache(added, imgCache.current);
+        next = updated;
+        applied += 1;
+      }
+      if (applied === 0) return;
+      elementsRef.current = next;
+      setElements(next);
+      scheduleLivePaintRef.current();
+    };
+
+    const releaseHeldDeltas = (): void => {
+      const released = flushSenderDeltas(deltaStateRef.current, Date.now());
+      for (const event of released) applyRemoteOpsRef.current(event.ops);
+      if (hasHeldDeltas(deltaStateRef.current)) armReorderFlush();
+    };
+
+    function armReorderFlush(): void {
+      if (reorderTimerRef.current !== null) return;
+      reorderTimerRef.current = setTimeout(() => {
+        reorderTimerRef.current = null;
+        releaseHeldDeltas();
+      }, 25);
+    }
+
+    ingestRemoteEventRef.current = (event) => {
+      const released = pushSenderDelta(deltaStateRef.current, event, Date.now());
+      for (const item of released) applyRemoteOpsRef.current(item.ops);
+      if (hasHeldDeltas(deltaStateRef.current)) armReorderFlush();
+    };
+
+    useEffect(() => {
+      return () => {
+        if (reorderTimerRef.current !== null) {
+          clearTimeout(reorderTimerRef.current);
+          reorderTimerRef.current = null;
+        }
+      };
+    }, []);
+
+    const dailyUserId = senderIdRef.current;
     const dailyLink = useDailyWhiteboard({
       userId: dailyUserId,
       serverReady: snapshotsReady,
@@ -2691,15 +2791,18 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
         scheduleLivePaintRef.current();
       },
       onBoardDelta: (delta) => {
-        const next =
-          delta.op === "remove"
-            ? elementsRef.current.filter((el) => el.id !== delta.id)
-            : applyLiveAdd(elementsRef.current, { add: delta.element, strokePart: delta.part });
-        const added = next.find((el) => el.id === delta.id);
-        if (added?.kind === "image") ensureImageInCache(added, imgCache.current);
-        elementsRef.current = next;
-        setElements(next);
-        scheduleLivePaintRef.current();
+        ingestRemoteEventRef.current({
+          senderId: delta.senderId,
+          seq: delta.seq,
+          ops: [
+            {
+              op: delta.op,
+              id: delta.id,
+              element: delta.element,
+              part: delta.part,
+            },
+          ],
+        });
       },
       onLasers: setPeerLasers,
       onLocalLaserIdle: () => {
@@ -2855,28 +2958,34 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
     }
 
     const broadcastElement = useCallback((payload: Record<string, unknown>): void => {
+      const deliver = (event: Record<string, unknown>): void => {
+        const isDelta = event.add != null || Array.isArray(event.remove);
+        const stamped: Record<string, unknown> = { ...event, senderId: senderIdRef.current };
+        if (isDelta) stamped.seq = nextDeltaSeq(deltaStateRef.current);
+        broadcastRef.current?.(stamped);
+        dailyLinkRef.current?.forwardPayload(stamped);
+      };
       const add = payload.add as SyncEl | undefined;
       if (add?.kind === "stroke" && typeof payload.strokePart !== "number") {
-        const senderId = typeof payload.senderId === "string" ? payload.senderId : clientIdRef.current;
-        const pieces = liveStrokePieces(add, paperStyleRef.current, senderId);
+        const pieces = liveStrokePieces(add, paperStyleRef.current, senderIdRef.current);
         const events =
           pieces.length <= 1
-            ? [{ add: pieces[0] ?? add, senderId }]
-            : pieces.map((piece, index) => ({ add: piece, strokePart: index, senderId }));
-        for (const event of events) {
-          broadcastRef.current?.(event);
-          dailyLinkRef.current?.forwardPayload(event);
+            ? [{ add: pieces[0] ?? add }]
+            : pieces.map((piece, index) => ({ add: piece, strokePart: index }));
+        for (const event of events) deliver(event);
+        return;
+      }
+      if (Array.isArray(payload.remove) && payload.remove.length > 1 && payload.add == null) {
+        for (const id of payload.remove) {
+          if (typeof id === "string" && id.length > 0) deliver({ remove: [id] });
         }
         return;
       }
-      const stamped =
-        typeof payload.senderId === "string" ? payload : { ...payload, senderId: clientIdRef.current };
-      broadcastRef.current?.(stamped);
-      dailyLinkRef.current?.forwardPayload(stamped);
+      deliver(payload);
     }, []);
 
     const broadcastHistory = useCallback((op: HistoryOp, direction: "forward" | "backward"): void => {
-      for (const event of buildHistorySyncEvents(op, direction, clientIdRef.current)) {
+      for (const event of buildHistorySyncEvents(op, direction, senderIdRef.current)) {
         broadcastElement(event as unknown as Record<string, unknown>);
       }
     }, [broadcastElement]);
@@ -2989,14 +3098,14 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
           elementsRef.current,
           paperStyleRef.current,
           nanoid(),
-          clientIdRef.current,
+          senderIdRef.current,
         );
         for (const chunk of chunks) emitBoardEventRef.current(chunk);
       };
 
       const onEvent = (ev: SyncEvent): void => {
         if (ev.type !== BOARD_EVENT || (ev.v !== PROTO_V && ev.v !== 5 && ev.v !== 4)) return;
-        if (ev.senderId === clientIdRef.current) return;
+        if (ev.senderId === senderIdRef.current) return;
         applyRemote.current = true;
         try {
           if (ev.action === "request_snapshot") {
@@ -3027,6 +3136,9 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
             return;
           }
           if (ev.action === "clear") {
+            const now = Date.now();
+            for (const el of elementsRef.current) tombstoneElement(deltaStateRef.current, el.id, now);
+            strokePartsRef.current.clear();
             activeRef.current = null;
             cursorRef.current = null;
             elementsRef.current = [];
@@ -3039,28 +3151,39 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
             return;
           }
           const historyReady = noteHistorySyncEvent(historySyncBuffersRef.current, ev);
-          if (historyReady) applyHistoryRemote(historyReady.op, historyReady.direction);
-          if (ev.add !== undefined && ev.add !== null) {
-            const raw = ev.add as SyncEl;
-            if (raw.kind === "stroke") {
-              const strokePart = typeof ev.strokePart === "number" ? ev.strokePart : undefined;
-              setElements((prev) => applyLiveAdd(prev, { add: raw, strokePart }));
-            } else if (raw.kind === "shape") {
-              setElements((prev) => upsertElement(prev, raw as ShapeEl));
-            } else if (raw.kind === "text") {
-              const el = normalizeTextEl(raw as TextEl);
-              setElements((prev) => upsertElement(prev, el));
-            } else if (raw.kind === "image") {
-              const el = rememberLegacyImage(raw);
-              if (el) {
-                ensureImageInCache(el, imgCache.current);
-                setElements((prev) => upsertElement(prev, el));
+          if (historyReady) {
+            if (historyReady.direction === "forward") {
+              const now = Date.now();
+              for (const el of historyReady.op.removed) {
+                tombstoneElement(deltaStateRef.current, el.id, now);
+                clearStrokeParts(strokePartsRef.current, el.id);
               }
+            }
+            applyHistoryRemote(historyReady.op, historyReady.direction);
+          }
+          const ops: RemoteBoardOp[] = [];
+          if (ev.add !== undefined && ev.add !== null && typeof ev.add === "object") {
+            const record = ev.add as { id?: unknown };
+            if (typeof record.id === "string" && record.id.length > 0) {
+              ops.push({
+                op: "add",
+                id: record.id,
+                element: ev.add,
+                part: typeof ev.strokePart === "number" ? ev.strokePart : undefined,
+              });
             }
           }
           if (Array.isArray(ev.remove)) {
-            const rmSet = new Set(ev.remove as string[]);
-            setElements((prev) => prev.filter((e) => !rmSet.has(e.id)));
+            for (const id of ev.remove) {
+              if (typeof id === "string" && id.length > 0) ops.push({ op: "remove", id });
+            }
+          }
+          if (ops.length > 0) {
+            ingestRemoteEventRef.current({
+              senderId: typeof ev.senderId === "string" ? ev.senderId : "",
+              seq: typeof ev.seq === "number" ? ev.seq : undefined,
+              ops,
+            });
           }
           if (ev.layerOrder) {
             const { pageIndex, ids } = ev.layerOrder;
@@ -3100,7 +3223,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
       ) {
         snapshotRequestedRef.current = true;
         awaitingSnapshotRef.current = true;
-        emitBoardEventRef.current(buildRequestSnapshot(clientIdRef.current, Date.now()));
+        emitBoardEventRef.current(buildRequestSnapshot(senderIdRef.current, Date.now()));
       }
       setSyncStatus("live");
       return () => {
@@ -4640,7 +4763,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
         setUndoStack((prev) => [...prev, { id: opId, removed, added: [], updated: [] }]);
         setRedoStack([]);
       }
-      for (const event of buildClearCanvasEvents(removed, opId, clientIdRef.current)) {
+      for (const event of buildClearCanvasEvents(removed, opId, senderIdRef.current)) {
         broadcastElement(event as unknown as Record<string, unknown>);
       }
     }, [broadcastElement]);
@@ -4981,7 +5104,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
                   setPaperStyle(opt.value);
                   paperStyleRef.current = opt.value;
                   setOpenMenu(null);
-                  broadcastElement({ action: "paper_style_change", paperStyle: opt.value, senderId: clientIdRef.current });
+                  broadcastElement({ action: "paper_style_change", paperStyle: opt.value });
                 }}
                 className={`flex flex-col gap-1 rounded-xl p-1.5 text-start transition-all ${
                   selected
