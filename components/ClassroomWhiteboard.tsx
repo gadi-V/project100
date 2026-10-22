@@ -55,7 +55,7 @@ import {
 } from "../lib/whiteboard/snapshot-lifecycle";
 import { useWhiteboardSnapshots } from "../lib/whiteboard/useWhiteboardSnapshots";
 import { useDailyWhiteboard, type DailyWhiteboardLink } from "../lib/whiteboard/useDailyWhiteboard";
-import type { RemoteLaser } from "../lib/whiteboard/laser-pointer";
+import { LASER_FADE_MS, laserFadeAlpha, laserOpacity, type RemoteLaser } from "../lib/whiteboard/laser-pointer";
 import {
   createDeltaApplyState,
   flushSenderDeltas,
@@ -104,7 +104,6 @@ const STREAM_PIECE_SPLIT = 1200;
 const IMAGE_MAX_WIDTH = 400;
 const PROTO_V = 6;
 const SNAPSHOT_CHUNK_CAP = 10;
-const LASER_FADE_MS = 1000;
 const PASTE_OFFSET = 24;
 const DUPLICATE_OFFSET = 20;
 const ERASER_SIZE_PRESETS = [
@@ -2590,6 +2589,8 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
     const shapeMarkerRef = useRef("");
     const shapeCopyArmedRef = useRef(false);
     const laserTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const laserFadeRef = useRef<number | null>(null);
+    const fadeLocalLaserRef = useRef<() => void>(() => {});
     const snapRef = useRef<SnapSession | null>(null);
     const cursorRef = useRef<(Point & { pageIndex: number }) | null>(null);
     const livePaintRafRef = useRef<number | null>(null);
@@ -2854,16 +2855,28 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
       },
       onLasers: setPeerLasers,
       onLocalLaserIdle: () => {
-        if (laserTimerRef.current) {
-          clearTimeout(laserTimerRef.current);
-          laserTimerRef.current = null;
-        }
-        setLaserPts(null);
-        setLaserPage(null);
-        setLaserAlpha(1);
+        fadeLocalLaserRef.current();
       },
     });
     dailyLinkRef.current = dailyLink;
+
+    fadeLocalLaserRef.current = () => {
+      if (laserFadeRef.current !== null) cancelAnimationFrame(laserFadeRef.current);
+      const started = performance.now();
+      const frame = (now: number) => {
+        const alpha = laserFadeAlpha(now - started, LASER_FADE_MS);
+        setLaserAlpha(alpha);
+        if (alpha <= 0) {
+          laserFadeRef.current = null;
+          setLaserPts(null);
+          setLaserPage(null);
+          setLaserAlpha(1);
+          return;
+        }
+        laserFadeRef.current = requestAnimationFrame(frame);
+      };
+      laserFadeRef.current = requestAnimationFrame(frame);
+    };
 
     useEffect(() => {
       const session = new SnapSession((preview) => {
@@ -2881,6 +2894,10 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
         if (laserTimerRef.current) {
           clearTimeout(laserTimerRef.current);
           laserTimerRef.current = null;
+        }
+        if (laserFadeRef.current !== null) {
+          cancelAnimationFrame(laserFadeRef.current);
+          laserFadeRef.current = null;
         }
       };
     }, []);
@@ -3462,6 +3479,10 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
         }
 
         if (tool === "laser") {
+          if (laserFadeRef.current !== null) {
+            cancelAnimationFrame(laserFadeRef.current);
+            laserFadeRef.current = null;
+          }
           if (laserTimerRef.current) clearTimeout(laserTimerRef.current);
           setLaserAlpha(1);
           setLaserPage(pageIndex);
@@ -3837,15 +3858,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
 
       if (tool === "laser") {
         dailyLinkRef.current?.notifyRelease();
-        if (laserTimerRef.current) clearTimeout(laserTimerRef.current);
-        laserTimerRef.current = setTimeout(() => {
-          setLaserAlpha(0);
-          setTimeout(() => {
-            setLaserPts(null);
-            setLaserPage(null);
-            setLaserAlpha(1);
-          }, 200);
-        }, LASER_FADE_MS);
+        fadeLocalLaserRef.current();
         return;
       }
 
@@ -5501,12 +5514,15 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
                     onPointerLeave={() => {
                       setCursorPt(null);
                       setEraserPt(null);
-                      if (tool === "laser") dailyLinkRef.current?.notifyRelease();
+                      if (tool === "laser") {
+                        dailyLinkRef.current?.notifyRelease();
+                        fadeLocalLaserRef.current();
+                      }
                     }}
                     onDoubleClick={(e) => onDblClick(e, idx)}
                     onContextMenu={onContextMenu}
                   />
-                  {peerLasers.some((laser) => laser.pageIndex === idx && laser.active) && (
+                  {peerLasers.some((laser) => laser.pageIndex === idx && laserOpacity(laser, Date.now()) > 0) && (
                     <svg
                       aria-hidden
                       className="pointer-events-none absolute inset-0 z-20"
@@ -5515,9 +5531,16 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
                       viewBox={`0 0 ${PAGE_W} ${PAGE_H}`}
                     >
                       {peerLasers
-                        .filter((laser) => laser.pageIndex === idx && laser.active)
+                        .filter((laser) => laser.pageIndex === idx && laserOpacity(laser, Date.now()) > 0)
                         .map((laser) => (
-                          <circle key={laser.userId} cx={laser.x} cy={laser.y} r={7} fill={laser.color} fillOpacity={0.95} />
+                          <circle
+                            key={laser.userId}
+                            cx={laser.x}
+                            cy={laser.y}
+                            r={7}
+                            fill={laser.color}
+                            fillOpacity={0.95 * laserOpacity(laser, Date.now())}
+                          />
                         ))}
                     </svg>
                   )}

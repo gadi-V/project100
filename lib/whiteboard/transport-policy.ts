@@ -38,7 +38,9 @@ export function classifyBoardPayload(payload: Record<string, unknown>): BoardEve
   return "history_op";
 }
 
-/** `null` means the event is intentionally not sent. */
+/** `null` means the event is intentionally not sent. Laser is disabled when Daily is offline. */
+export const LASER_STREAM_FALLBACK = "disabled" as const;
+
 export function selectTransport(kind: BoardEventKind, dailyActive: boolean): TransportHop | null {
   if (kind === "laser_update") return dailyActive ? "daily" : null;
   if (kind === "board_delta") return dailyActive ? "daily" : "stream";

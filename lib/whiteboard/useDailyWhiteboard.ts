@@ -12,6 +12,7 @@ import { createDailyPeerSync, type DailyPeerSync, type LiveBoard } from "./daily
 import {
   applyLaserUpdate,
   createLaserPointer,
+  laserOpacity,
   visibleLasers,
   type LaserPointer,
   type RemoteLaser,
@@ -138,10 +139,12 @@ export function useDailyWhiteboard(options: {
     const timer = setInterval(() => {
       const now = Date.now();
       const next = visibleLasers(lasersRef.current, now);
-      if (next.length === lasersRef.current.length) return;
+      const signature = (lasers: readonly RemoteLaser[]) =>
+        lasers.map((laser) => `${laser.userId}:${Math.round(laserOpacity(laser, now) * 20)}`).join("|");
+      if (signature(next) === signature(lasersRef.current)) return;
       lasersRef.current = next;
       optionsRef.current.onLasers(next);
-    }, 200);
+    }, 50);
     return () => clearInterval(timer);
   }, []);
 

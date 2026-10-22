@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  LASER_STREAM_FALLBACK,
   classifyBoardPayload,
   planBoardDelivery,
   selectTransport,
@@ -39,7 +40,8 @@ describe("whiteboard transport policy", () => {
     expect(planBoardDelivery({ type: "laser_update" }, true)).toEqual({ daily: true, stream: false });
   });
 
-  it("falls board deltas back to Stream when Daily is absent and does not mirror the laser", () => {
+  it("falls board deltas back to Stream when Daily is absent and disables the laser", () => {
+    expect(LASER_STREAM_FALLBACK).toBe("disabled");
     expect(selectTransport("board_delta", false)).toBe("stream");
     expect(selectTransport("laser_update", false)).toBeNull();
     expect(planBoardDelivery({ add: { id: "stroke-1" } }, false)).toEqual({ daily: false, stream: true });

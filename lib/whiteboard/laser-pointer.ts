@@ -2,6 +2,8 @@ import type { LaserUpdateMessage } from "./daily-transport";
 
 export const LASER_BROADCAST_INTERVAL_MS = 40;
 export const LASER_IDLE_MS = 1500;
+/** Local and remote pointers fade from opaque to clear over this long. */
+export const LASER_FADE_MS = 800;
 
 export type { LaserUpdateMessage };
 
@@ -19,6 +21,8 @@ export type RemoteLaser = {
   pageIndex: number;
   active: boolean;
   updatedAt: number;
+  /** Set when the pointer is released. Opacity runs to 0 over LASER_FADE_MS. */
+  fadeStartedAt?: number;
 };
 
 export type LaserPointer = {
@@ -32,13 +36,36 @@ function round1(value: number): number {
   return Math.round(value * 10) / 10;
 }
 
+export function laserFadeAlpha(elapsedMs: number, durationMs = LASER_FADE_MS): number {
+  if (!Number.isFinite(elapsedMs) || elapsedMs <= 0) return 1;
+  if (elapsedMs >= durationMs) return 0;
+  return 1 - elapsedMs / durationMs;
+}
+
+export function laserOpacity(
+  laser: RemoteLaser,
+  now: number,
+  fadeMs = LASER_FADE_MS,
+  idleMs = LASER_IDLE_MS,
+): number {
+  if (laser.fadeStartedAt != null) return laserFadeAlpha(now - laser.fadeStartedAt, fadeMs);
+  if (!laser.active) return 0;
+  const idleFor = now - laser.updatedAt;
+  if (idleFor < idleMs) return 1;
+  return laserFadeAlpha(idleFor - idleMs, fadeMs);
+}
+
 export function applyLaserUpdate(
   current: readonly RemoteLaser[],
   update: LaserUpdateMessage,
   now: number,
 ): RemoteLaser[] {
+  const existing = current.find((laser) => laser.userId === update.userId);
   const rest = current.filter((laser) => laser.userId !== update.userId);
-  if (!update.active) return rest;
+  if (!update.active) {
+    if (!existing) return rest;
+    return [...rest, { ...existing, active: false, updatedAt: now, fadeStartedAt: now }];
+  }
   return [
     ...rest,
     {
@@ -46,7 +73,7 @@ export function applyLaserUpdate(
       x: update.x,
       y: update.y,
       color: update.color,
-      pageIndex: update.pageIndex ?? 0,
+      pageIndex: update.pageIndex ?? existing?.pageIndex ?? 0,
       active: true,
       updatedAt: now,
     },
@@ -58,7 +85,7 @@ export function visibleLasers(
   now: number,
   idleMs = LASER_IDLE_MS,
 ): RemoteLaser[] {
-  return current.filter((laser) => laser.active && now - laser.updatedAt < idleMs);
+  return current.filter((laser) => laserOpacity(laser, now, LASER_FADE_MS, idleMs) > 0);
 }
 
 export function createLaserPointer(options: {

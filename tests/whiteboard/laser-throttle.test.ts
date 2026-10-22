@@ -1,9 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   LASER_BROADCAST_INTERVAL_MS,
+  LASER_FADE_MS,
   LASER_IDLE_MS,
   applyLaserUpdate,
   createLaserPointer,
+  laserFadeAlpha,
+  laserOpacity,
   visibleLasers,
   type LaserUpdateMessage,
 } from "../../lib/whiteboard/laser-pointer";
@@ -11,6 +14,14 @@ import {
 describe("broadcast laser pointer", () => {
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("fades the local pointer from opaque to clear across 800ms", () => {
+    expect(LASER_FADE_MS).toBe(800);
+    expect(laserFadeAlpha(0)).toBe(1);
+    expect(laserFadeAlpha(400)).toBeCloseTo(0.5);
+    expect(laserFadeAlpha(800)).toBe(0);
+    expect(laserFadeAlpha(1_000)).toBe(0);
   });
 
   it("throttles moves into a 30–50ms interval and keeps the latest point", () => {
@@ -77,8 +88,12 @@ describe("broadcast laser pointer", () => {
 
     const remote = applyLaserUpdate([], sent[0], 0);
     expect(visibleLasers(remote, LASER_IDLE_MS - 1)).toHaveLength(1);
-    expect(visibleLasers(remote, LASER_IDLE_MS)).toEqual([]);
-    expect(applyLaserUpdate(remote, sent.at(-1)!, LASER_IDLE_MS)).toEqual([]);
+    expect(visibleLasers(remote, LASER_IDLE_MS)).toHaveLength(1);
+    expect(visibleLasers(remote, LASER_IDLE_MS + LASER_FADE_MS)).toEqual([]);
+    const fading = applyLaserUpdate(remote, sent.at(-1)!, LASER_IDLE_MS);
+    expect(laserOpacity(fading[0]!, LASER_IDLE_MS)).toBe(1);
+    expect(laserOpacity(fading[0]!, LASER_IDLE_MS + LASER_FADE_MS / 2)).toBeCloseTo(0.5);
+    expect(visibleLasers(fading, LASER_IDLE_MS + LASER_FADE_MS)).toEqual([]);
   });
 
   it("clears the pointer on leave and does not broadcast after dispose", () => {
