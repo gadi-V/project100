@@ -31,6 +31,21 @@ import {
   type BoardImageEl,
 } from "../lib/whiteboard/board-image";
 import { prepareBoardImageFile } from "../lib/whiteboard/prepare-board-image";
+import {
+  BOARD_DND_STAGGER_PX,
+  IMAGE_STILL_TOO_LARGE_HINT,
+  NOTEBOOK_NOT_READY_HINT,
+  applyImageDropDecision,
+  applyPasteDecision,
+  dataTransferHasFiles,
+  decideImageDrop,
+  decidePasteAction,
+  inspectImageDataTransfer,
+  isTargetEditable,
+  mostVisiblePageIndex,
+  pagePointFromClient,
+  type CanvasHit,
+} from "../lib/whiteboard/board-dnd";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -2427,6 +2442,11 @@ const STROKE_STYLES: { value: StrokeStyle; label: string; preview: string }[] = 
   { value: "dotted", label: "נקודות", preview: "· · ·" },
 ];
 
+function clampOnPage(value: number, size: number, page: number): number {
+  const max = Math.max(20, page - size - 20);
+  return Math.min(Math.max(value, 20), max);
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhiteboardProps>(
@@ -2468,6 +2488,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
     const [showLassoMore, setShowLassoMore] = useState(false);
     const [transformMode, setTransformMode] = useState(false);
     const [aiHint, setAiHint] = useState<string | null>(null);
+    const [isDraggingOver, setIsDraggingOver] = useState(false);
     const [syncStatus, setSyncStatus] = useState<"idle" | "live" | "error">("idle");
     const [activePageIndex, setActivePageIndex] = useState(0);
     const [preLessonAssets, setPreLessonAssets] = useState<PreLessonAssetPanelItem[]>([]);
@@ -2511,6 +2532,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
     const skippedSyncCountRef = useRef(0);
     const paperStyleRef = useRef<PaperStyle>(paperStyle);
     const shiftPressedRef = useRef(false);
+    const dragDepthRef = useRef(0);
 
     const eraserRadius = eraserDiameter / 2;
 
@@ -2674,10 +2696,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
 
     function ptFrom(e: React.PointerEvent<HTMLCanvasElement>): Point {
       const r = e.currentTarget.getBoundingClientRect();
-      return {
-        x: (e.clientX - r.left) / zoomRef.current,
-        y: (e.clientY - r.top) / zoomRef.current,
-      };
+      return pagePointFromClient(e.clientX, e.clientY, r, zoomRef.current);
     }
 
     const broadcastElement = useCallback((payload: Record<string, unknown>): void => {
@@ -3649,7 +3668,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
 
     const uploadBoardFile = useCallback(async (file: File): Promise<string | null> => {
       if (!notebookId) {
-        setAiHint("המחברת עדיין לא מוכנה. נסו שוב בעוד רגע.");
+        setAiHint(NOTEBOOK_NOT_READY_HINT);
         return null;
       }
       try {
@@ -3676,7 +3695,11 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
     }, [notebookId]);
 
     const insertImageElement = useCallback(
-      async (imageId: string): Promise<boolean> => {
+      async (
+        imageId: string,
+        placement?: { pageIndex?: number; point?: { x: number; y: number }; staggerIndex?: number },
+      ): Promise<boolean> => {
+        const pageIndex = placement?.pageIndex ?? activePageIndex;
         const shell: ImageEl = {
           kind: "image",
           id: imageId,
@@ -3687,7 +3710,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
           h: 1,
           rotation: 0,
           crop: null,
-          pageIndex: activePageIndex,
+          pageIndex,
         };
         const img = await loadBoardImage(shell, imgCache.current, () => repaintBoardRef.current());
         if (!img) {
@@ -3698,10 +3721,22 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
         const sc = Math.min(IMAGE_MAX_WIDTH / img.naturalWidth, maxH / img.naturalHeight, 1);
         const w = Math.max(1, Math.floor(img.naturalWidth * sc));
         const h = Math.max(1, Math.floor(img.naturalHeight * sc));
+        const centeredX = Math.max(20, (PAGE_W - w) / 2);
+        const centeredY = Math.max(20, (PAGE_H - h) / 2);
+        const stagger = (placement?.staggerIndex ?? 0) * BOARD_DND_STAGGER_PX;
+        let x = centeredX;
+        let y = centeredY;
+        if (placement?.point) {
+          x = clampOnPage(placement.point.x + stagger, w, PAGE_W);
+          y = clampOnPage(placement.point.y + stagger, h, PAGE_H);
+        } else if (stagger !== 0) {
+          x = clampOnPage(centeredX + stagger, w, PAGE_W);
+          y = clampOnPage(centeredY + stagger, h, PAGE_H);
+        }
         const el: ImageEl = {
           ...shell,
-          x: Math.max(20, (PAGE_W - w) / 2),
-          y: Math.max(20, (PAGE_H - h) / 2),
+          x,
+          y,
           w,
           h,
         };
@@ -3715,12 +3750,15 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
     );
 
     const handleImageFile = useCallback(
-      async (file: File): Promise<void> => {
+      async (
+        file: File,
+        placement?: { pageIndex?: number; point?: { x: number; y: number }; staggerIndex?: number },
+      ): Promise<void> => {
         let prepared: File;
         try {
           const result = await prepareBoardImageFile(file);
           if ("error" in result) {
-            setAiHint("התמונה עדיין גדולה מדי אחרי הכיווץ. נסו קובץ קטן יותר.");
+            setAiHint(IMAGE_STILL_TOO_LARGE_HINT);
             return;
           }
           prepared = result.file;
@@ -3731,10 +3769,27 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
         }
         const imageId = await uploadBoardFile(prepared);
         if (!imageId) return;
-        await insertImageElement(imageId);
+        await insertImageElement(imageId, placement);
       },
       [insertImageElement, uploadBoardFile],
     );
+
+    const readCanvasHits = useCallback((): CanvasHit[] => {
+      const hits: CanvasHit[] = [];
+      pages.forEach((page, pageIndex) => {
+        const canvas = canvasMap.current.get(page.id);
+        if (!canvas) return;
+        const rect = canvas.getBoundingClientRect();
+        hits.push({
+          pageIndex,
+          left: rect.left,
+          top: rect.top,
+          right: rect.right,
+          bottom: rect.bottom,
+        });
+      });
+      return hits;
+    }, [pages]);
 
     /** Resolve asset URL → canvas-ready source (remote URL, mock path, or DataURL). */
     const resolveAssetImageSrc = useCallback(
@@ -4220,8 +4275,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
           if (editText) cutEditText();
           else cutSelection();
         } else if (action === "paste") {
-          e.preventDefault();
-          pasteClipboard();
+          return;
         } else if (action === "duplicate") {
           e.preventDefault();
           if (editText) duplicateEditText();
@@ -4258,7 +4312,6 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
       };
     }, [
       copySelection,
-      pasteClipboard,
       deleteSelection,
       cutSelection,
       cutEditText,
@@ -4268,6 +4321,56 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
       performUndo,
       performRedo,
     ]);
+
+    useEffect(() => {
+      const blockFileNavigation = (event: DragEvent): void => {
+        if (!dataTransferHasFiles(event.dataTransfer)) return;
+        event.preventDefault();
+      };
+      const clearDrag = (): void => {
+        dragDepthRef.current = 0;
+        setIsDraggingOver(false);
+      };
+      window.addEventListener("dragover", blockFileNavigation);
+      window.addEventListener("drop", blockFileNavigation);
+      window.addEventListener("dragend", clearDrag);
+      return () => {
+        window.removeEventListener("dragover", blockFileNavigation);
+        window.removeEventListener("drop", blockFileNavigation);
+        window.removeEventListener("dragend", clearDrag);
+      };
+    }, []);
+
+    useEffect(() => {
+      const onPaste = (event: ClipboardEvent): void => {
+        const report = inspectImageDataTransfer(event.clipboardData);
+        const targetEditable = isTargetEditable(event.target) || editText !== null;
+        const action = decidePasteAction({
+          imageFiles: report.accepted,
+          internalClipboardCount: clipboardRef.current.length,
+          targetEditable,
+        });
+        if (action !== "ignore") event.preventDefault();
+        const viewport = scrollRef.current?.getBoundingClientRect();
+        const visible = viewport
+          ? mostVisiblePageIndex(
+              { left: viewport.left, top: viewport.top, right: viewport.right, bottom: viewport.bottom },
+              readCanvasHits(),
+            )
+          : null;
+        void applyPasteDecision(action, {
+          notebookId,
+          files: report.accepted,
+          pageIndex: visible ?? activePageIndex,
+          sizeRejected: !targetEditable && report.rejected.some((item) => item.reason === "size"),
+          pasteClipboard,
+          handleImageFile: (file, placement) => handleImageFile(file, placement),
+          notify: setAiHint,
+        });
+      };
+      window.addEventListener("paste", onPaste);
+      return () => window.removeEventListener("paste", onPaste);
+    }, [activePageIndex, editText, handleImageFile, notebookId, pasteClipboard, readCanvasHits]);
 
     const collectExportFrames = useCallback(async (): Promise<ExportFrame[]> => {
       const frames: ExportFrame[] = [];
@@ -4718,7 +4821,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
     const handleToolClick = (t: DrawTool): void => {
       if (t === "image") {
         if (!notebookId) {
-          setAiHint("המחברת עדיין לא מוכנה. נסו שוב בעוד רגע.");
+          setAiHint(NOTEBOOK_NOT_READY_HINT);
           setOpenMenu(null);
           return;
         }
@@ -4899,6 +5002,43 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
           className="w-full h-full overflow-auto overscroll-x-contain"
           style={{ background: DESK_BG, touchAction: "pan-x pan-y" }}
           onContextMenu={(e) => e.preventDefault()}
+          onDragEnter={(e) => {
+            if (!dataTransferHasFiles(e.dataTransfer)) return;
+            e.preventDefault();
+            dragDepthRef.current += 1;
+            setIsDraggingOver(true);
+          }}
+          onDragOver={(e) => {
+            if (!dataTransferHasFiles(e.dataTransfer)) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "copy";
+          }}
+          onDragLeave={(e) => {
+            if (!dataTransferHasFiles(e.dataTransfer)) return;
+            dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+            if (dragDepthRef.current === 0) setIsDraggingOver(false);
+          }}
+          onDrop={(e) => {
+            if (!dataTransferHasFiles(e.dataTransfer)) return;
+            e.preventDefault();
+            dragDepthRef.current = 0;
+            setIsDraggingOver(false);
+            const report = inspectImageDataTransfer(e.dataTransfer);
+            const decision = decideImageDrop({
+              notebookId,
+              clientX: e.clientX,
+              clientY: e.clientY,
+              zoom: zoomRef.current,
+              canvases: readCanvasHits(),
+              files: report.accepted,
+              sizeRejections: report.rejected.filter((item) => item.reason === "size").length,
+            });
+            void applyImageDropDecision(
+              decision,
+              (file, placement) => handleImageFile(file, placement),
+              setAiHint,
+            );
+          }}
         >
           <div
             className="mx-auto flex flex-col items-center"
@@ -5430,6 +5570,13 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
             <div style={{ height: PAGE_GAP * 2 }} />
           </div>
         </div>
+
+        {isDraggingOver && (
+          <div
+            className="pointer-events-none absolute inset-0 z-[30] border-2 border-emerald-600/70 bg-emerald-500/10"
+            aria-hidden
+          />
+        )}
 
         {aiHint && (
           <div
