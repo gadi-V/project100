@@ -249,13 +249,20 @@ export function boardImageObjectPath(imageId: string, contentType: string): stri
   return `board-images/${imageId}.${ext}`;
 }
 
+/** Relative object key inside the lesson-boards bucket. Rejects traversal. */
+export function isSafeBoardObjectPath(objectPath: string): boolean {
+  if (!objectPath || objectPath.length > 512) return false;
+  if (objectPath.startsWith("/") || objectPath.includes("\\") || objectPath.includes("..")) return false;
+  return /^[A-Za-z0-9][A-Za-z0-9/._-]*$/.test(objectPath);
+}
+
 /**
  * Read a private board object for the same-origin image route.
  * Supabase is fetched with the service key. Local dev reads `public/uploads/board`.
  * Returns null when the object is missing.
  */
 export async function readBoardObject(objectPath: string): Promise<Buffer | null> {
-  if (!objectPath || objectPath.includes("..") || objectPath.startsWith("/") || objectPath.includes("\\")) {
+  if (!isSafeBoardObjectPath(objectPath)) {
     return null;
   }
 
@@ -279,15 +286,122 @@ export async function readBoardObject(objectPath: string): Promise<Buffer | null
     }
   }
 
+  return readBoardObjectFromDisk(objectPath);
+}
+
+async function boardDiskPath(objectPath: string): Promise<string | null> {
+  if (!isSafeBoardObjectPath(objectPath)) return null;
+  const path = await import("path");
+  const root = path.join(process.cwd(), "public", "uploads", "board");
+  const full = path.resolve(root, objectPath);
+  if (full !== root && !full.startsWith(root + path.sep)) return null;
+  return full;
+}
+
+async function readBoardObjectFromDisk(objectPath: string): Promise<Buffer | null> {
   if (!canUseLocalDiskStorage()) return null;
-  const filename = objectPath.split("/").pop() ?? "";
-  if (!/^[\w.-]+$/.test(filename)) return null;
   try {
     const { readFile } = await import("fs/promises");
     const path = await import("path");
-    return await readFile(path.join(process.cwd(), "public", "uploads", "board", filename));
+    const full = await boardDiskPath(objectPath);
+    if (full) {
+      try {
+        return await readFile(full);
+      } catch {
+        const filename = path.basename(objectPath);
+        if (filename !== objectPath && /^[\w.-]+$/.test(filename)) {
+          return await readFile(path.join(process.cwd(), "public", "uploads", "board", filename));
+        }
+      }
+    }
   } catch {
     return null;
+  }
+  return null;
+}
+
+/**
+ * Upload an immutable board object (snapshot gzip or image bytes).
+ * Local disk is the development fallback when Supabase is not configured.
+ */
+export async function uploadBoardObject(
+  objectPath: string,
+  body: Buffer,
+  contentType: string,
+): Promise<void> {
+  if (!isSafeBoardObjectPath(objectPath)) throw new StorageUploadError();
+  const cfg = getSupabaseStorageConfig();
+  if (!cfg) {
+    if (!canUseLocalDiskStorage()) throw unconfiguredStorageError("image");
+    await writeBoardObjectToDisk(objectPath, body);
+    return;
+  }
+  try {
+    await supabasePut(cfg, objectPath, body, contentType);
+  } catch (error) {
+    if (process.env.NODE_ENV === "development" && canUseLocalDiskStorage()) {
+      console.warn("[storage] Supabase board upload failed, saving under public/uploads/board");
+      await writeBoardObjectToDisk(objectPath, body);
+      return;
+    }
+    throw error;
+  }
+}
+
+/** Delete one object. A missing object is success. Failures are logged and swallowed. */
+export async function deleteBoardObject(objectPath: string): Promise<void> {
+  if (!isSafeBoardObjectPath(objectPath)) return;
+  const cfg = getSupabaseStorageConfig();
+  if (cfg) {
+    try {
+      const response = await fetch(`${cfg.url}/storage/v1/object/${cfg.bucket}/${objectPath}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${cfg.serviceKey}`,
+          apikey: cfg.serviceKey,
+        },
+        signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
+      });
+      if (!response.ok && response.status !== 404) {
+        const detail = await response.text().catch(() => "");
+        logStorageFailure("delete", {
+          bucket: cfg.bucket,
+          status: response.status,
+          reason: redactStorageDetail(detail || response.statusText, cfg.serviceKey),
+        });
+      }
+    } catch (error) {
+      logStorageFailure("delete", {
+        bucket: cfg.bucket,
+        reason: error instanceof Error ? error.name : "network",
+      });
+    }
+    return;
+  }
+  if (!canUseLocalDiskStorage()) return;
+  try {
+    const { unlink } = await import("fs/promises");
+    const full = await boardDiskPath(objectPath);
+    if (full) await unlink(full);
+  } catch {
+    // Already gone.
+  }
+}
+
+async function writeBoardObjectToDisk(objectPath: string, body: Buffer): Promise<void> {
+  try {
+    const { mkdir, writeFile } = await import("fs/promises");
+    const path = await import("path");
+    const full = await boardDiskPath(objectPath);
+    if (!full) throw new StorageUploadError();
+    await mkdir(path.dirname(full), { recursive: true });
+    await writeFile(full, body);
+  } catch (error) {
+    if (error instanceof StorageUploadError) throw error;
+    logStorageFailure("local-disk", {
+      reason: error instanceof Error ? error.name : "io",
+    });
+    throw new StorageUploadError();
   }
 }
 
