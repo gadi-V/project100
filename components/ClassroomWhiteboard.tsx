@@ -54,6 +54,8 @@ import {
   shouldRequestPeerSnapshot,
 } from "../lib/whiteboard/snapshot-lifecycle";
 import { useWhiteboardSnapshots } from "../lib/whiteboard/useWhiteboardSnapshots";
+import { useDailyWhiteboard, type DailyWhiteboardLink } from "../lib/whiteboard/useDailyWhiteboard";
+import type { RemoteLaser } from "../lib/whiteboard/laser-pointer";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -415,6 +417,8 @@ type ClassroomWhiteboardProps = {
   /** First notebook page for this lesson. Local page i is stored at startPage + i. */
   startPage?: number | null;
   endPage?: number | null;
+  /** Lesson participant id used on the Daily data channel. */
+  userId?: string | null;
 };
 
 type PreLessonAssetPanelItem = {
@@ -2472,6 +2476,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
       notebookId = null,
       startPage = null,
       endPage = null,
+      userId = null,
     },
     ref,
   ) {
@@ -2513,6 +2518,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
     const [syncStatus, setSyncStatus] = useState<"idle" | "live" | "error">("idle");
     const [snapshotSync, setSnapshotSync] = useState<"idle" | "saving" | "saved" | "error">("idle");
     const [snapshotsReady, setSnapshotsReady] = useState(notebookId == null || startPage == null);
+    const [peerLasers, setPeerLasers] = useState<RemoteLaser[]>([]);
     const [activePageIndex, setActivePageIndex] = useState(0);
     const [preLessonAssets, setPreLessonAssets] = useState<PreLessonAssetPanelItem[]>([]);
     const [assetsPanelOpen, setAssetsPanelOpen] = useState(false);
@@ -2552,6 +2558,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
     const broadcastRef = useRef<((payload: Record<string, unknown>) => void) | null>(null);
     const emitBoardEventRef = useRef<(payload: Record<string, unknown>) => void>(() => {});
     const clientIdRef = useRef(nanoid());
+    const dailyLinkRef = useRef<DailyWhiteboardLink | null>(null);
     const snapshotRequestedRef = useRef(false);
     const awaitingSnapshotRef = useRef(false);
     const snapshotBuffersRef = useRef(new Map<string, SnapshotChunkEvent[]>());
@@ -2639,6 +2646,73 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
       }
       noteSnapshotMutationRef.current();
     }, [elements, paperStyle, pages]);
+
+    const dailyUserId = userId && userId.length > 0 ? userId : clientIdRef.current;
+    const dailyLink = useDailyWhiteboard({
+      userId: dailyUserId,
+      serverReady: snapshotsReady,
+      readBoard: () => ({
+        paperStyle: paperStyleRef.current,
+        elements: elementsRef.current.flatMap((element) => {
+          const sync = toSyncEl(element);
+          return sync ? [{ ...sync, id: sync.id }] : [];
+        }) as Array<Record<string, unknown> & { id: string }>,
+      }),
+      onLiveSnapshot: (board) => {
+        const drawn: DrawEl[] = [];
+        for (const element of board.elements) {
+          const sync = coerceSyncEl(element);
+          if (!sync) continue;
+          const next = syncElToDraw(sync);
+          if (next) drawn.push(next);
+        }
+        if (drawn.length === 0) return;
+        const nextPaper = isPaperStyle(board.paperStyle) ? board.paperStyle : paperStyleRef.current;
+        for (const el of drawn) {
+          if (el.kind === "image") ensureImageInCache(el, imgCache.current);
+        }
+        elementsRef.current = drawn;
+        paperStyleRef.current = nextPaper;
+        setElements(drawn);
+        setPaperStyle(nextPaper);
+        const maxPage = drawn.reduce((max, el) => Math.max(max, el.pageIndex), 0);
+        setPages((prev) => {
+          const target = maxPage + 1;
+          if (prev.length >= target) return prev;
+          return [
+            ...prev,
+            ...Array.from({ length: target - prev.length }, (_, index) => ({
+              id: nanoid(),
+              pageNumber: prev.length + index + 1,
+            })),
+          ];
+        });
+        setSyncStatus("live");
+        scheduleLivePaintRef.current();
+      },
+      onBoardDelta: (delta) => {
+        const next =
+          delta.op === "remove"
+            ? elementsRef.current.filter((el) => el.id !== delta.id)
+            : applyLiveAdd(elementsRef.current, { add: delta.element, strokePart: delta.part });
+        const added = next.find((el) => el.id === delta.id);
+        if (added?.kind === "image") ensureImageInCache(added, imgCache.current);
+        elementsRef.current = next;
+        setElements(next);
+        scheduleLivePaintRef.current();
+      },
+      onLasers: setPeerLasers,
+      onLocalLaserIdle: () => {
+        if (laserTimerRef.current) {
+          clearTimeout(laserTimerRef.current);
+          laserTimerRef.current = null;
+        }
+        setLaserPts(null);
+        setLaserPage(null);
+        setLaserAlpha(1);
+      },
+    });
+    dailyLinkRef.current = dailyLink;
 
     useEffect(() => {
       const session = new SnapSession((preview) => {
@@ -2789,12 +2863,16 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
           pieces.length <= 1
             ? [{ add: pieces[0] ?? add, senderId }]
             : pieces.map((piece, index) => ({ add: piece, strokePart: index, senderId }));
-        for (const event of events) broadcastRef.current?.(event);
+        for (const event of events) {
+          broadcastRef.current?.(event);
+          dailyLinkRef.current?.forwardPayload(event);
+        }
         return;
       }
       const stamped =
         typeof payload.senderId === "string" ? payload : { ...payload, senderId: clientIdRef.current };
       broadcastRef.current?.(stamped);
+      dailyLinkRef.current?.forwardPayload(stamped);
     }, []);
 
     const broadcastHistory = useCallback((op: HistoryOp, direction: "forward" | "backward"): void => {
@@ -3211,6 +3289,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
           setLaserAlpha(1);
           setLaserPage(pageIndex);
           setLaserPts([pt]);
+          dailyLinkRef.current?.notifyMove(pt.x, pt.y, pageIndex);
           return;
         }
 
@@ -3473,6 +3552,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
 
         if (tool === "laser") {
           setLaserPts((prev) => [...(prev ?? []), pt]);
+          dailyLinkRef.current?.notifyMove(pt.x, pt.y, pageIndex);
           return;
         }
 
@@ -3579,6 +3659,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
       }
 
       if (tool === "laser") {
+        dailyLinkRef.current?.notifyRelease();
         if (laserTimerRef.current) clearTimeout(laserTimerRef.current);
         laserTimerRef.current = setTimeout(() => {
           setLaserAlpha(0);
@@ -5243,10 +5324,26 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
                     onPointerLeave={() => {
                       setCursorPt(null);
                       setEraserPt(null);
+                      if (tool === "laser") dailyLinkRef.current?.notifyRelease();
                     }}
                     onDoubleClick={(e) => onDblClick(e, idx)}
                     onContextMenu={onContextMenu}
                   />
+                  {peerLasers.some((laser) => laser.pageIndex === idx && laser.active) && (
+                    <svg
+                      aria-hidden
+                      className="pointer-events-none absolute inset-0 z-20"
+                      width={PAGE_W}
+                      height={PAGE_H}
+                      viewBox={`0 0 ${PAGE_W} ${PAGE_H}`}
+                    >
+                      {peerLasers
+                        .filter((laser) => laser.pageIndex === idx && laser.active)
+                        .map((laser) => (
+                          <circle key={laser.userId} cx={laser.x} cy={laser.y} r={7} fill={laser.color} fillOpacity={0.95} />
+                        ))}
+                    </svg>
+                  )}
 
                   {(() => {
                     const pageSelected = elements.some(

@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState, useRef } from "react";
 import DailyIframe, { DailyCall } from "@daily-co/daily-js";
+import { publishDailyAppSession, type DailyAppSession } from "../lib/whiteboard/daily-transport";
 import {
   DailyProvider,
   useLocalParticipant,
@@ -166,6 +167,20 @@ function MockVideoBox() {
   );
 }
 
+function toDailySession(call: DailyCall): DailyAppSession {
+  return {
+    sendAppMessage(data, to) {
+      call.sendAppMessage(data, to);
+    },
+    on(event, handler) {
+      call.on(event, handler);
+    },
+    off(event, handler) {
+      call.off(event, handler);
+    },
+  };
+}
+
 function destroyDailyCall(call: DailyCall | null | undefined): Promise<void> {
   if (!call || call.isDestroyed()) return Promise.resolve();
   // destroy() yields on leave() before it clears Daily's singleton.
@@ -235,6 +250,7 @@ export default function VideoRoom({ roomUrl, token }: VideoRoomProps) {
           });
       }
 
+      publishDailyAppSession(toDailySession(co));
       setCallObject(co);
       setDailyFailed(false);
 
@@ -258,6 +274,7 @@ export default function VideoRoom({ roomUrl, token }: VideoRoomProps) {
 
     return () => {
       cancelled = true;
+      publishDailyAppSession(null);
       const co = callObjectRef.current ?? DailyIframe.getCallInstance();
       callObjectRef.current = null;
       setCallObject(null);

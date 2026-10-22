@@ -288,6 +288,7 @@ export default function LessonRoomUI({
               notebookId={lesson.notebookId}
               startPage={lesson.startPage}
               endPage={lesson.endPage}
+              userId={user.id}
             />
           </div>
         </main>
