@@ -16,6 +16,7 @@ import {
   type LaserPointer,
   type RemoteLaser,
 } from "./laser-pointer";
+import { selectTransport } from "./transport-policy";
 
 const LASER_COLOR = "#ef4444";
 
@@ -23,6 +24,8 @@ export type DailyWhiteboardLink = {
   notifyMove(x: number, y: number, pageIndex: number): void;
   notifyRelease(): void;
   forwardPayload(payload: Record<string, unknown>): void;
+  /** True only while a joined Daily call is the live app-message transport. */
+  isDailyActive(): boolean;
 };
 
 function deltasFromPayload(payload: Record<string, unknown>, senderId: string): DailyBoardMessage[] {
@@ -60,7 +63,6 @@ function deltasFromPayload(payload: Record<string, unknown>, senderId: string): 
 
 export function useDailyWhiteboard(options: {
   userId: string;
-  serverReady: boolean;
   readBoard: () => LiveBoard;
   onLiveSnapshot: (board: LiveBoard) => void;
   onBoardDelta: (delta: BoardDeltaMessage) => void;
@@ -72,7 +74,6 @@ export function useDailyWhiteboard(options: {
   const transportRef = useRef<DailyBoardTransport | null>(null);
   const laserRef = useRef<LaserPointer | null>(null);
   const peerRef = useRef<DailyPeerSync | null>(null);
-  const requestedRef = useRef(false);
   const lasersRef = useRef<RemoteLaser[]>([]);
 
   useEffect(() => {
@@ -90,7 +91,6 @@ export function useDailyWhiteboard(options: {
       transportRef.current = null;
       laserRef.current = null;
       peerRef.current = null;
-      requestedRef.current = false;
       if (!session) return;
 
       transport = createDailyTransport(session);
@@ -114,15 +114,13 @@ export function useDailyWhiteboard(options: {
         userId,
         color: LASER_COLOR,
         send: (update) => {
+          // Laser stays on Daily. Stream is not a pointer channel.
+          if (selectTransport("laser_update", transportRef.current != null) !== "daily") return;
           transport?.send(update);
         },
         onIdle: () => optionsRef.current.onLocalLaserIdle(),
       });
       laserRef.current = laser;
-      if (optionsRef.current.serverReady && !requestedRef.current) {
-        requestedRef.current = true;
-        peer.onServerBaselineReady();
-      }
     });
 
     return () => {
@@ -137,12 +135,6 @@ export function useDailyWhiteboard(options: {
   }, [options.userId]);
 
   useEffect(() => {
-    if (!options.serverReady || requestedRef.current || !peerRef.current) return;
-    requestedRef.current = true;
-    peerRef.current.onServerBaselineReady();
-  }, [options.serverReady]);
-
-  useEffect(() => {
     const timer = setInterval(() => {
       const now = Date.now();
       const next = visibleLasers(lasersRef.current, now);
@@ -155,17 +147,30 @@ export function useDailyWhiteboard(options: {
 
   return {
     notifyMove(x, y, pageIndex) {
+      if (selectTransport("laser_update", transportRef.current != null) !== "daily") return;
       laserRef.current?.move({ x, y, pageIndex });
     },
     notifyRelease() {
+      if (selectTransport("laser_update", transportRef.current != null) !== "daily") return;
       laserRef.current?.release();
     },
     forwardPayload(payload) {
       const transport = transportRef.current;
       if (!transport) return;
+      if (!planAllowsDaily(payload)) return;
       for (const message of deltasFromPayload(payload, optionsRef.current.userId)) {
         transport.send(message);
       }
     },
+    isDailyActive() {
+      return transportRef.current != null;
+    },
   };
+}
+
+function planAllowsDaily(payload: Record<string, unknown>): boolean {
+  return selectTransport(
+    payload.add != null || payload.remove != null ? "board_delta" : "history_op",
+    true,
+  ) === "daily";
 }

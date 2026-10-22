@@ -200,6 +200,7 @@ export default function VideoRoom({ roomUrl, token }: VideoRoomProps) {
   useEffect(() => {
     // No credentials in dev → clean placeholder, no error.
     if (!roomUrl || !token) {
+      publishDailyAppSession(null);
       setCallObject(null);
       return;
     }
@@ -250,24 +251,35 @@ export default function VideoRoom({ roomUrl, token }: VideoRoomProps) {
           });
       }
 
-      publishDailyAppSession(toDailySession(co));
       setCallObject(co);
       setDailyFailed(false);
 
-      // Listen for Daily error events (e.g. account-missing-payment-method).
+      // The board may use sendAppMessage only after the room is actually joined.
+      // Join failure, a Daily error, or teardown publishes null so strokes fall back to Stream.
+      let joinFailed = false;
       co.on("error", (event) => {
         if (cancelled) return;
+        joinFailed = true;
         console.warn("[VideoRoom] Daily error event — using fallback:", event);
+        publishDailyAppSession(null);
         setDailyFailed(true);
       });
 
-      co.join({ url: roomUrl, token }).catch((err: unknown) => {
-        if (cancelled) return;
-        // Swallow join errors silently and fall back to MockVideoBox.
-        // Common causes: expired token, room deleted, billing issue.
-        console.warn("[VideoRoom] Daily join failed — using fallback:", err);
-        setDailyFailed(true);
-      });
+      void co.join({ url: roomUrl, token }).then(
+        () => {
+          if (cancelled || joinFailed) return;
+          publishDailyAppSession(toDailySession(co));
+        },
+        (err: unknown) => {
+          if (cancelled) return;
+          joinFailed = true;
+          // Swallow join errors silently and fall back to MockVideoBox.
+          // Common causes: expired token, room deleted, billing issue.
+          console.warn("[VideoRoom] Daily join failed — using fallback:", err);
+          publishDailyAppSession(null);
+          setDailyFailed(true);
+        },
+      );
     };
 
     void connect();

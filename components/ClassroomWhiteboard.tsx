@@ -74,6 +74,7 @@ import {
   replaceStrokePart,
   type StrokePartStore,
 } from "../lib/whiteboard/stroke-parts";
+import { planBoardDelivery } from "../lib/whiteboard/transport-policy";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -2750,7 +2751,6 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
     const dailyUserId = senderIdRef.current;
     const dailyLink = useDailyWhiteboard({
       userId: dailyUserId,
-      serverReady: snapshotsReady,
       readBoard: () => ({
         paperStyle: paperStyleRef.current,
         elements: elementsRef.current.flatMap((element) => {
@@ -2962,8 +2962,9 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
         const isDelta = event.add != null || Array.isArray(event.remove);
         const stamped: Record<string, unknown> = { ...event, senderId: senderIdRef.current };
         if (isDelta) stamped.seq = nextDeltaSeq(deltaStateRef.current);
-        broadcastRef.current?.(stamped);
-        dailyLinkRef.current?.forwardPayload(stamped);
+        const plan = planBoardDelivery(stamped, dailyLinkRef.current?.isDailyActive() ?? false);
+        if (plan.stream) broadcastRef.current?.(stamped);
+        if (plan.daily) dailyLinkRef.current?.forwardPayload(stamped);
       };
       const add = payload.add as SyncEl | undefined;
       if (add?.kind === "stroke" && typeof payload.strokePart !== "number") {
