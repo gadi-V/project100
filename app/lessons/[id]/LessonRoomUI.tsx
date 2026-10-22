@@ -71,6 +71,31 @@ const VideoRoom = dynamic(
   }
 );
 
+/**
+ * The 1s room clock has lived on this screen since the initial classroom
+ * commit, before the Daily board transport. It owns that tick so the
+ * whiteboard does not repaint every second.
+ */
+function RoomElapsedClock() {
+  const roomEntryMs = useRef(Date.now());
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - roomEntryMs.current) / 1000));
+    }, 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const minutes = Math.floor(elapsed / 60).toString().padStart(2, "0");
+  const seconds = (elapsed % 60).toString().padStart(2, "0");
+  return (
+    <div className="bg-white px-3 py-1 rounded-full text-emerald-700 font-mono text-sm font-bold border border-neutral-200/80">
+      {`${minutes}:${seconds}`}
+    </div>
+  );
+}
+
 interface LessonRoomUIProps {
   lesson: {
     id: string;
@@ -142,24 +167,6 @@ export default function LessonRoomUI({
     },
     []
   );
-
-  // Lock in the instant the teacher/student entered the room.
-  // A ref prevents re-renders; the state tracks only the derived elapsed seconds.
-  const roomEntryMs = useRef(Date.now());
-  const [elapsed, setElapsed] = useState(0);
-
-  useEffect(() => {
-    const id = setInterval(() => {
-      setElapsed(Math.floor((Date.now() - roomEntryMs.current) / 1000));
-    }, 1000);
-    return () => clearInterval(id);
-  }, []);
-
-  const formatTime = (secs: number): string => {
-    const m = Math.floor(secs / 60).toString().padStart(2, "0");
-    const s = (secs % 60).toString().padStart(2, "0");
-    return `${m}:${s}`;
-  };
 
   const canComplete = canCompleteFromRoom(user, lesson);
 
@@ -242,9 +249,7 @@ export default function LessonRoomUI({
           <h1 className="text-neutral-900 font-bold text-lg">
             {lesson.title || "כיתה וירטואלית"}
           </h1>
-          <div className="bg-white px-3 py-1 rounded-full text-emerald-700 font-mono text-sm font-bold border border-neutral-200/80">
-            {formatTime(elapsed)}
-          </div>
+          <RoomElapsedClock />
         </div>
 
         <div className="flex items-center gap-4">
