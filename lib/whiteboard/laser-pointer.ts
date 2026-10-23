@@ -90,6 +90,8 @@ export function visibleLasers(
 
 export function createLaserPointer(options: {
   userId: string;
+  /** Session-scoped sender key. Attached so a second tab is not treated as this pointer. */
+  senderKey?: string;
   color: string;
   now?: () => number;
   send: (update: LaserUpdateMessage) => void;
@@ -130,6 +132,7 @@ export function createLaserPointer(options: {
       active: isActive,
     };
     if (point?.pageIndex != null) update.pageIndex = point.pageIndex;
+    if (options.senderKey) update.senderKey = options.senderKey;
     options.send(update);
     active = isActive;
     if (isActive) lastSentAt = now();

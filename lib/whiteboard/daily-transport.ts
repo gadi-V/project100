@@ -45,23 +45,27 @@ export type BoardDeltaMessage = {
   type: "board_delta";
   op: "add" | "remove";
   senderId: string;
+  /** Session-scoped sender key. Echo suppression prefers this over `senderId`. */
+  senderKey?: string;
   id: string;
   element?: DailyElement;
   /** Stroke piece index. `0` is a real part, not "absent". */
   part?: number;
-  /** Monotonic per sender. Retries reuse the same value. */
+  /** Per-sender event sequence. Retries reuse the same value. */
   seq?: number;
 };
 
 export type RequestSnapshotMessage = {
   type: "request_snapshot";
   senderId: string;
+  senderKey?: string;
   timestamp: number;
 };
 
 export type SnapshotResponseMessage = {
   type: "snapshot_response";
   senderId: string;
+  senderKey?: string;
   snapshotId: string;
   chunkIndex: number;
   totalChunks: number;
@@ -75,6 +79,8 @@ export type LaserUpdateMessage = {
   y: number;
   color: string;
   userId: string;
+  /** Session-scoped sender key. A second tab of the same user is not an echo. */
+  senderKey?: string;
   active: boolean;
   pageIndex?: number;
 };
@@ -171,6 +177,10 @@ function readId(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 && value.length <= 128 ? value : null;
 }
 
+function readSenderKey(value: unknown): string | undefined {
+  return readId(value) ?? undefined;
+}
+
 function readPaper(value: unknown): string {
   return typeof value === "string" && PAPER_STYLES.has(value) ? value : "grid";
 }
@@ -186,6 +196,8 @@ function normalize(message: DailyBoardMessage): DailyBoardMessage | null {
     if (!senderId || !id || (message.op !== "add" && message.op !== "remove")) return null;
     if (message.op === "remove") {
       const remove: BoardDeltaMessage = { type: "board_delta", op: "remove", senderId, id };
+      const senderKey = readSenderKey(message.senderKey);
+      if (senderKey) remove.senderKey = senderKey;
       if (typeof message.seq === "number" && Number.isInteger(message.seq) && message.seq >= 1) {
         remove.seq = message.seq;
       }
@@ -194,6 +206,8 @@ function normalize(message: DailyBoardMessage): DailyBoardMessage | null {
     const element = sanitizeDailyElement(message.element);
     if (!element || element.id !== id) return null;
     const next: BoardDeltaMessage = { type: "board_delta", op: "add", senderId, id, element };
+    const senderKey = readSenderKey(message.senderKey);
+    if (senderKey) next.senderKey = senderKey;
     if (typeof message.part === "number" && Number.isInteger(message.part) && message.part >= 0) {
       next.part = message.part;
     }
@@ -205,7 +219,10 @@ function normalize(message: DailyBoardMessage): DailyBoardMessage | null {
   if (message.type === "request_snapshot") {
     const senderId = readId(message.senderId);
     if (!senderId || typeof message.timestamp !== "number" || !Number.isFinite(message.timestamp)) return null;
-    return { type: "request_snapshot", senderId, timestamp: message.timestamp };
+    const request: RequestSnapshotMessage = { type: "request_snapshot", senderId, timestamp: message.timestamp };
+    const senderKey = readSenderKey(message.senderKey);
+    if (senderKey) request.senderKey = senderKey;
+    return request;
   }
   if (message.type === "snapshot_response") {
     const senderId = readId(message.senderId);
@@ -219,7 +236,7 @@ function normalize(message: DailyBoardMessage): DailyBoardMessage | null {
       const element = sanitizeDailyElement(item);
       if (element) elements.push(element);
     }
-    return {
+    const response: SnapshotResponseMessage = {
       type: "snapshot_response",
       senderId,
       snapshotId,
@@ -228,6 +245,9 @@ function normalize(message: DailyBoardMessage): DailyBoardMessage | null {
       paperStyle: readPaper(message.paperStyle),
       elements,
     };
+    const senderKey = readSenderKey(message.senderKey);
+    if (senderKey) response.senderKey = senderKey;
+    return response;
   }
   if (message.type === "laser_update") {
     const userId = readId(message.userId);
@@ -244,6 +264,8 @@ function normalize(message: DailyBoardMessage): DailyBoardMessage | null {
       userId,
       active: message.active,
     };
+    const senderKey = readSenderKey(message.senderKey);
+    if (senderKey) next.senderKey = senderKey;
     if (typeof message.pageIndex === "number" && Number.isInteger(message.pageIndex) && message.pageIndex >= 0) {
       next.pageIndex = message.pageIndex;
     }
@@ -302,6 +324,7 @@ export function routeDailyMessage(message: DailyBoardMessage, routes: DailyMessa
 
 export function packSnapshotResponse(input: {
   senderId: string;
+  senderKey?: string;
   snapshotId: string;
   paperStyle: string;
   elements: readonly unknown[];
@@ -311,10 +334,12 @@ export function packSnapshotResponse(input: {
     .filter((element): element is DailyElement => element !== null);
   if (clean.length === 0) return [];
 
+  const senderKey = readSenderKey(input.senderKey);
   const fits = (elements: DailyElement[]): boolean =>
     encodeDailyMessage({
       type: "snapshot_response",
       senderId: input.senderId,
+      ...(senderKey ? { senderKey } : {}),
       snapshotId: input.snapshotId,
       chunkIndex: 0,
       totalChunks: 99,
@@ -339,6 +364,7 @@ export function packSnapshotResponse(input: {
     const encoded = encodeDailyMessage({
       type: "snapshot_response",
       senderId: input.senderId,
+      ...(senderKey ? { senderKey } : {}),
       snapshotId: input.snapshotId,
       chunkIndex: index,
       totalChunks: groups.length,

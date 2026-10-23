@@ -58,12 +58,12 @@ import { useDailyWhiteboard, type DailyWhiteboardLink } from "../lib/whiteboard/
 import { LASER_FADE_MS, laserFadeAlpha, laserOpacity, type RemoteLaser } from "../lib/whiteboard/laser-pointer";
 import {
   createDeltaApplyState,
-  flushSenderDeltas,
   guardIncomingOp,
-  hasHeldDeltas,
+  isOwnBoardEcho,
   nextDeltaSeq,
   pushSenderDelta,
-  resolveBoardSenderId,
+  readIncomingSenderKey,
+  resolveBoardSenderKey,
   tombstoneElement,
   type RemoteBoardEvent,
   type RemoteBoardOp,
@@ -189,7 +189,7 @@ export function shouldRequestSnapshot(elementCount: number, alreadyRequested: bo
 }
 
 export function buildRequestSnapshot(senderId: string, timestamp: number): SnapshotRequestEvent {
-  return { action: "request_snapshot", senderId, timestamp };
+  return { action: "request_snapshot", senderId, senderKey: senderId, timestamp };
 }
 
 export function readPaperStyleChange(value: { action?: string; paperStyle?: unknown }): PaperStyle | null {
@@ -401,12 +401,15 @@ interface SyncEvent {
   strokePart?: number;
   /** Per-sender delta sequence. Absent on legacy peers. */
   seq?: number;
+  /** Session-scoped sender key. Echo suppression compares this, not the user id alone. */
+  senderKey?: string;
   layerOrder?: { pageIndex: number; ids: string[] };
 }
 
 export type SnapshotChunkEvent = {
   action: "snapshot_chunk";
   senderId: string;
+  senderKey: string;
   snapshotId: string;
   chunkIndex: number;
   totalChunks: number;
@@ -417,6 +420,7 @@ export type SnapshotChunkEvent = {
 export type SnapshotRequestEvent = {
   action: "request_snapshot";
   senderId: string;
+  senderKey: string;
   timestamp: number;
 };
 
@@ -1204,6 +1208,7 @@ function snapshotChunkBody(
   return {
     action: "snapshot_chunk",
     senderId,
+    senderKey: senderId,
     snapshotId,
     chunkIndex,
     totalChunks,
@@ -1710,6 +1715,7 @@ export function buildSnapshotChunks(
   return groups.map((elementsChunk, chunkIndex) => ({
     action: "snapshot_chunk",
     senderId,
+    senderKey: senderId,
     snapshotId,
     chunkIndex,
     totalChunks: groups.length,
@@ -1751,6 +1757,7 @@ export function noteSnapshotChunk(
 export function parseSnapshotChunk(value: {
   action?: string;
   senderId?: unknown;
+  senderKey?: unknown;
   snapshotId?: unknown;
   chunkIndex?: unknown;
   totalChunks?: unknown;
@@ -1771,6 +1778,7 @@ export function parseSnapshotChunk(value: {
   return {
     action: "snapshot_chunk",
     senderId: value.senderId,
+    senderKey: typeof value.senderKey === "string" && value.senderKey.length > 0 ? value.senderKey : value.senderId,
     snapshotId: value.snapshotId,
     chunkIndex: value.chunkIndex,
     totalChunks: value.totalChunks,
@@ -2604,12 +2612,12 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
     const broadcastRef = useRef<((payload: Record<string, unknown>) => void) | null>(null);
     const emitBoardEventRef = useRef<(payload: Record<string, unknown>) => void>(() => {});
     const clientIdRef = useRef(nanoid());
-    const senderIdRef = useRef(resolveBoardSenderId(userId, clientIdRef.current));
-    senderIdRef.current = resolveBoardSenderId(userId, clientIdRef.current);
+    const sessionIdRef = useRef(nanoid(6));
+    const senderIdRef = useRef(resolveBoardSenderKey(userId, clientIdRef.current, sessionIdRef.current));
+    senderIdRef.current = resolveBoardSenderKey(userId, clientIdRef.current, sessionIdRef.current);
     const dailyLinkRef = useRef<DailyWhiteboardLink | null>(null);
     const deltaStateRef = useRef(createDeltaApplyState());
     const strokePartsRef = useRef(createStrokePartStore());
-    const reorderTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const applyRemoteOpsRef = useRef<(ops: readonly RemoteBoardOp[]) => void>(() => {});
     const ingestRemoteEventRef = useRef<(event: RemoteBoardEvent) => void>(() => {});
     const snapshotWaitRef = useRef<SnapshotWait<RemoteBoardEvent>>(createSnapshotWait());
@@ -2734,20 +2742,6 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
       scheduleLivePaintRef.current();
     };
 
-    const releaseHeldDeltas = (): void => {
-      const released = flushSenderDeltas(deltaStateRef.current, Date.now());
-      for (const event of released) applyRemoteOpsRef.current(event.ops);
-      if (hasHeldDeltas(deltaStateRef.current)) armReorderFlush();
-    };
-
-    function armReorderFlush(): void {
-      if (reorderTimerRef.current !== null) return;
-      reorderTimerRef.current = setTimeout(() => {
-        reorderTimerRef.current = null;
-        releaseHeldDeltas();
-      }, 25);
-    }
-
     replayBufferedDeltasRef.current = () => {
       if (snapshotTimerRef.current !== null) {
         clearTimeout(snapshotTimerRef.current);
@@ -2779,15 +2773,10 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
       if (bufferSnapshotDelta(snapshotWaitRef.current, event)) return;
       const released = pushSenderDelta(deltaStateRef.current, event, Date.now());
       for (const item of released) applyRemoteOpsRef.current(item.ops);
-      if (hasHeldDeltas(deltaStateRef.current)) armReorderFlush();
     };
 
     useEffect(() => {
       return () => {
-        if (reorderTimerRef.current !== null) {
-          clearTimeout(reorderTimerRef.current);
-          reorderTimerRef.current = null;
-        }
         if (snapshotTimerRef.current !== null) {
           clearTimeout(snapshotTimerRef.current);
           snapshotTimerRef.current = null;
@@ -2841,7 +2830,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
       },
       onBoardDelta: (delta) => {
         ingestRemoteEventRef.current({
-          senderId: delta.senderId,
+          senderId: readIncomingSenderKey(delta),
           seq: delta.seq,
           ops: [
             {
@@ -3025,7 +3014,11 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
     const broadcastElement = useCallback((payload: Record<string, unknown>): void => {
       const deliver = (event: Record<string, unknown>): void => {
         const isDelta = event.add != null || Array.isArray(event.remove);
-        const stamped: Record<string, unknown> = { ...event, senderId: senderIdRef.current };
+        const stamped: Record<string, unknown> = {
+          ...event,
+          senderId: senderIdRef.current,
+          senderKey: senderIdRef.current,
+        };
         if (isDelta) stamped.seq = nextDeltaSeq(deltaStateRef.current);
         const plan = planBoardDelivery(stamped, dailyLinkRef.current?.isDailyActive() ?? false);
         if (plan.stream) broadcastRef.current?.(stamped);
@@ -3172,7 +3165,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
 
       const onEvent = (ev: SyncEvent): void => {
         if (ev.type !== BOARD_EVENT || (ev.v !== PROTO_V && ev.v !== 5 && ev.v !== 4)) return;
-        if (ev.senderId === senderIdRef.current) return;
+        if (isOwnBoardEcho(readIncomingSenderKey(ev), senderIdRef.current)) return;
         applyRemote.current = true;
         try {
           if (ev.action === "request_snapshot") {
@@ -3245,7 +3238,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
           }
           if (ops.length > 0) {
             ingestRemoteEventRef.current({
-              senderId: typeof ev.senderId === "string" ? ev.senderId : "",
+              senderId: readIncomingSenderKey(ev),
               seq: typeof ev.seq === "number" ? ev.seq : undefined,
               ops,
             });

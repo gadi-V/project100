@@ -2,14 +2,16 @@ import { describe, expect, it } from "vitest";
 import { applyLiveAdd } from "../../components/ClassroomWhiteboard";
 import { encodeDailyMessage, decodeDailyMessage } from "../../lib/whiteboard/daily-transport";
 import {
-  SEQ_REORDER_MS,
+  MAX_TRACKED_SENDERS,
+  SEEN_EVENT_LIMIT,
   TOMBSTONE_TTL_MS,
   createDeltaApplyState,
-  flushSenderDeltas,
   guardIncomingOp,
+  isOwnBoardEcho,
   nextDeltaSeq,
   pushSenderDelta,
   resolveBoardSenderId,
+  resolveBoardSenderKey,
   type RemoteBoardEvent,
 } from "../../lib/whiteboard/delta-apply";
 import { createStrokePartStore } from "../../lib/whiteboard/stroke-parts";
@@ -71,37 +73,96 @@ describe("idempotent board deltas", () => {
     expect(board).toHaveLength(1);
   });
 
-  it("releases sender deltas in seq order and ignores stale or duplicate seqs", () => {
+  it("stamps a monotonic outgoing seq", () => {
     const state = createDeltaApplyState();
     expect(nextDeltaSeq(state)).toBe(1);
     expect(nextDeltaSeq(state)).toBe(2);
-    const t0 = 5_000;
-
-    expect(pushSenderDelta(state, delta(2, "add", "late"), t0)).toEqual([]);
-    expect(pushSenderDelta(state, delta(1, "add", "early"), t0 + 10)).toEqual([]);
-    expect(pushSenderDelta(state, delta(1, "add", "early"), t0 + 20)).toEqual([]);
-
-    const ordered = flushSenderDeltas(state, t0 + SEQ_REORDER_MS);
-    expect(ordered.map((event) => event.seq)).toEqual([1, 2]);
-    expect(ordered.map((event) => event.ops[0]?.id)).toEqual(["early", "late"]);
-
-    const third = pushSenderDelta(state, delta(3, "add", "next"), t0 + SEQ_REORDER_MS + 5);
-    expect(third.map((event) => event.seq)).toEqual([3]);
-    expect(pushSenderDelta(state, delta(3, "add", "next"), t0 + SEQ_REORDER_MS + 6)).toEqual([]);
-    expect(pushSenderDelta(state, delta(2, "add", "late"), t0 + SEQ_REORDER_MS + 7)).toEqual([]);
   });
 
-  it("skips a seq gap once the reorder window has elapsed", () => {
+  it("accepts a fresh session at seq 1 after the previous session reached seq 51", () => {
     const state = createDeltaApplyState();
-    const t0 = 8_000;
-    pushSenderDelta(state, delta(1, "add", "a"), t0);
-    expect(flushSenderDeltas(state, t0 + SEQ_REORDER_MS).map((event) => event.seq)).toEqual([1]);
+    const previous = resolveBoardSenderKey("user-1", "tab-a", "oldses");
+    const fresh = resolveBoardSenderKey("user-1", "tab-a", "newses");
+    expect(previous).toBe("user-1:oldses");
+    expect(fresh).toBe("user-1:newses");
+    expect(fresh).not.toBe(previous);
 
-    expect(pushSenderDelta(state, delta(4, "add", "d"), t0 + SEQ_REORDER_MS + 1)).toEqual([]);
-    expect(flushSenderDeltas(state, t0 + SEQ_REORDER_MS + 20)).toEqual([]);
-    const skipped = flushSenderDeltas(state, t0 + SEQ_REORDER_MS + 1 + SEQ_REORDER_MS);
-    expect(skipped.map((event) => event.seq)).toEqual([4]);
-    expect(pushSenderDelta(state, delta(2, "add", "lost"), t0 + 500)).toEqual([]);
+    for (let seq = 1; seq <= 51; seq += 1) {
+      const accepted = pushSenderDelta(state, { senderId: previous, seq, ops: [{ op: "add", id: `old-${seq}` }] }, seq);
+      expect(accepted).toHaveLength(1);
+    }
+
+    const restarted = pushSenderDelta(
+      state,
+      { senderId: fresh, seq: 1, ops: [{ op: "add", id: "fresh-stroke" }] },
+      52,
+    );
+    expect(restarted.map((event) => event.ops[0]?.id)).toEqual(["fresh-stroke"]);
+  });
+
+  it("applies one event received on two transports exactly once", () => {
+    const state = createDeltaApplyState();
+    const event = delta(7, "add", "shared");
+    expect(pushSenderDelta(state, event, 1).map((item) => item.ops[0]?.id)).toEqual(["shared"]);
+    expect(pushSenderDelta(state, event, 2)).toEqual([]);
+    expect(pushSenderDelta(state, { ...event }, 3)).toEqual([]);
+  });
+
+  it("applies out-of-order sequence numbers and ignores only exact duplicates", () => {
+    const state = createDeltaApplyState();
+    const t0 = 5_000;
+    expect(pushSenderDelta(state, delta(4, "add", "fourth"), t0).map((event) => event.seq)).toEqual([4]);
+    expect(pushSenderDelta(state, delta(1, "add", "first"), t0 + 1).map((event) => event.ops[0]?.id)).toEqual(["first"]);
+    expect(pushSenderDelta(state, delta(4, "add", "fourth"), t0 + 2)).toEqual([]);
+    expect(pushSenderDelta(state, delta(2, "add", "second"), t0 + 3).map((event) => event.seq)).toEqual([2]);
+  });
+
+  it("does not drop a second tab of the same user as an echo", () => {
+    const local = resolveBoardSenderKey("user-1", "tab-a", "aaaaaa");
+    const otherTab = resolveBoardSenderKey("user-1", "tab-b", "bbbbbb");
+    expect(local).not.toBe(otherTab);
+    expect(isOwnBoardEcho(local, local)).toBe(true);
+    expect(isOwnBoardEcho(otherTab, local)).toBe(false);
+    expect(resolveBoardSenderKey("", "tab-9", "sess01")).toBe("tab-9");
+    expect(resolveBoardSenderKey(null, "tab-9", "sess01")).toBe("tab-9");
+
+    const state = createDeltaApplyState();
+    const applied = isOwnBoardEcho(otherTab, local)
+      ? []
+      : pushSenderDelta(state, { senderId: otherTab, seq: 1, ops: [{ op: "add", id: "tab-b-stroke" }] }, 0);
+    expect(applied.map((event) => event.ops[0]?.id)).toEqual(["tab-b-stroke"]);
+    expect(isOwnBoardEcho(local, local) ? [] : pushSenderDelta(state, { senderId: local, seq: 1, ops: [{ op: "add", id: "echo" }] }, 0)).toEqual(
+      [],
+    );
+  });
+
+  it("slides event ids out after 2000 and evicts sender keys past 50", () => {
+    const state = createDeltaApplyState();
+    const senderKey = "user-1:sess01";
+    for (let seq = 1; seq <= SEEN_EVENT_LIMIT; seq += 1) {
+      expect(pushSenderDelta(state, { senderId: senderKey, seq, ops: [{ op: "add", id: `s-${seq}` }] }, seq)).toHaveLength(1);
+    }
+    expect(pushSenderDelta(state, { senderId: senderKey, seq: 1, ops: [{ op: "add", id: "dup" }] }, 0)).toEqual([]);
+
+    expect(
+      pushSenderDelta(
+        state,
+        { senderId: senderKey, seq: SEEN_EVENT_LIMIT + 1, ops: [{ op: "add", id: "newest" }] },
+        0,
+      ),
+    ).toHaveLength(1);
+    expect(pushSenderDelta(state, { senderId: senderKey, seq: 1, ops: [{ op: "add", id: "slid" }] }, 0)).toHaveLength(1);
+    expect(state.seen.size).toBeLessThanOrEqual(SEEN_EVENT_LIMIT);
+
+    const capped = createDeltaApplyState();
+    for (let index = 0; index < MAX_TRACKED_SENDERS; index += 1) {
+      pushSenderDelta(capped, { senderId: `user-${index}:sess`, seq: 1, ops: [{ op: "add", id: `u-${index}` }] }, index);
+    }
+    expect(capped.senders.size).toBe(MAX_TRACKED_SENDERS);
+    pushSenderDelta(capped, { senderId: "user-extra:sess", seq: 1, ops: [{ op: "add", id: "extra" }] }, 0);
+    expect(capped.senders.has("user-0:sess")).toBe(false);
+    expect(capped.senders.size).toBe(MAX_TRACKED_SENDERS);
+    expect(pushSenderDelta(capped, { senderId: "user-0:sess", seq: 1, ops: [{ op: "add", id: "still-dup" }] }, 0)).toEqual([]);
   });
 
   it("drops an add that arrives after a remove until the tombstone expires", () => {

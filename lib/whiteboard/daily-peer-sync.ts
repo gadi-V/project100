@@ -1,3 +1,4 @@
+import { isOwnBoardEcho, readIncomingSenderKey } from "./delta-apply";
 import {
   packSnapshotResponse,
   type BoardDeltaMessage,
@@ -44,7 +45,7 @@ export function createDailyPeerSync(options: {
   let pending: PendingSnapshot | null = null;
 
   const acceptSnapshot = (message: SnapshotResponseMessage): LiveBoard | null => {
-    if (message.senderId === options.userId || !requested) return null;
+    if (isOwnBoardEcho(readIncomingSenderKey(message), options.userId) || !requested) return null;
     if (message.totalChunks === 1) {
       return { elements: asElements(message.elements), paperStyle: message.paperStyle };
     }
@@ -73,11 +74,12 @@ export function createDailyPeerSync(options: {
   const unsubscribe = options.transport.subscribe((message) => {
     if (closed) return;
     if (message.type === "request_snapshot") {
-      if (message.senderId === options.userId) return;
+      if (isOwnBoardEcho(readIncomingSenderKey(message), options.userId)) return;
       const board = options.readBoard();
       if (board.elements.length === 0) return;
       const chunks = packSnapshotResponse({
         senderId: options.userId,
+        senderKey: options.userId,
         snapshotId: `${options.userId}-${now()}`,
         paperStyle: board.paperStyle,
         elements: board.elements,
@@ -92,12 +94,12 @@ export function createDailyPeerSync(options: {
       return;
     }
     if (message.type === "board_delta") {
-      if (message.senderId === options.userId) return;
+      if (isOwnBoardEcho(readIncomingSenderKey(message), options.userId)) return;
       options.applyDelta?.(message);
       return;
     }
     if (message.type === "laser_update") {
-      if (message.userId === options.userId) return;
+      if (isOwnBoardEcho(readIncomingSenderKey(message), options.userId)) return;
       options.onLaser?.(message);
     }
   });
@@ -109,6 +111,7 @@ export function createDailyPeerSync(options: {
       options.transport.send({
         type: "request_snapshot",
         senderId: options.userId,
+        senderKey: options.userId,
         timestamp: now(),
       });
     },

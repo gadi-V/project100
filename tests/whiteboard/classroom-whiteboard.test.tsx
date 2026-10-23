@@ -201,6 +201,7 @@ describe("classroom whiteboard late-join sync", () => {
     expect(buildRequestSnapshot("student-1", 1_700_000_000_000)).toEqual({
       action: "request_snapshot",
       senderId: "student-1",
+      senderKey: "student-1",
       timestamp: 1_700_000_000_000,
     });
   });

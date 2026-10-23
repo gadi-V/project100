@@ -1,17 +1,25 @@
 /**
  * Idempotent live-delta intake.
  *
- * Each sender stamps a monotonic `seq` on every delta. The receiver holds a
- * short reorder window so an inverted pair is applied in seq order, drops a
- * seq it has already released, and skips a gap that never arrives.
- * Stroke parts are a separate idempotency key — see stroke-parts.ts.
+ * Identity is a per-mount sender key: `userId:sessionId` for a signed-in
+ * participant, otherwise the tab's client id. A second tab of the same user
+ * is a different sender. Each accepted event is `senderKey:seq`.
+ *
+ * Delivery may duplicate an event across Daily and Stream and may reorder it.
+ * The receiver keeps a sliding window of seen event ids and applies anything
+ * it has not seen yet. Exact duplicates are ignored. There is no monotonic
+ * cursor, so a fresh session may restart at seq 1 and a late lower seq still
+ * applies.
  *
  * Deletes leave a tombstone. An add for that id is ignored until it expires,
  * so a delayed create cannot resurrect a stroke that was already removed.
  */
 
 export const TOMBSTONE_TTL_MS = 20_000;
-export const SEQ_REORDER_MS = 50;
+/** Last seen event ids. Older ids can be delivered again after they slide out. */
+export const SEEN_EVENT_LIMIT = 2_000;
+/** Oldest sender keys are dropped once tracking would pass this many senders. */
+export const MAX_TRACKED_SENDERS = 50;
 
 export type RemoteBoardOp = {
   op: "add" | "remove";
@@ -21,24 +29,20 @@ export type RemoteBoardOp = {
 };
 
 export type RemoteBoardEvent = {
+  /** Session-scoped sender key, or a legacy sender id. */
   senderId: string;
   seq?: number;
   ops: RemoteBoardOp[];
 };
 
-type SenderCursor = {
-  /** Next seq to release. Unset until the first reorder window opens. */
-  next?: number;
-  openedAt?: number;
-  /** When the current gap (missing `next`) started. */
-  gapSince?: number;
-  hold: Map<number, RemoteBoardEvent>;
-};
-
 export type DeltaApplyState = {
   outgoingSeq: number;
   tombstones: Map<string, number>;
-  senders: Map<string, SenderCursor>;
+  /** Oldest sender key first. Presence only; dedup lives in `seen`. */
+  senders: Map<string, true>;
+  /** Oldest event id first. */
+  seenOrder: string[];
+  seen: Set<string>;
 };
 
 export function createDeltaApplyState(): DeltaApplyState {
@@ -46,6 +50,8 @@ export function createDeltaApplyState(): DeltaApplyState {
     outgoingSeq: 0,
     tombstones: new Map(),
     senders: new Map(),
+    seenOrder: [],
+    seen: new Set(),
   };
 }
 
@@ -55,76 +61,79 @@ export function resolveBoardSenderId(userId: string | null | undefined, clientId
   return clientId;
 }
 
+/**
+ * Per-mount sender key. The session token makes a second tab, and a reloaded
+ * tab, a new sender so its seq space starts at 1 without looking stale.
+ * Anonymous tabs are already unique via `clientId`.
+ */
+export function resolveBoardSenderKey(
+  userId: string | null | undefined,
+  clientId: string,
+  sessionId: string,
+): string {
+  if (typeof userId === "string" && userId.length > 0) return `${userId}:${sessionId}`;
+  return clientId;
+}
+
+export function boardEventId(senderKey: string, seq: number): string {
+  return `${senderKey}:${seq}`;
+}
+
+/** True only when the incoming key is this mount. A sibling tab is not an echo. */
+export function isOwnBoardEcho(incomingSenderKey: string | null | undefined, localSenderKey: string): boolean {
+  return typeof incomingSenderKey === "string" && incomingSenderKey.length > 0 && incomingSenderKey === localSenderKey;
+}
+
+export function readIncomingSenderKey(value: { senderKey?: unknown; senderId?: unknown; userId?: unknown }): string {
+  if (typeof value.senderKey === "string" && value.senderKey.length > 0) return value.senderKey;
+  if (typeof value.senderId === "string" && value.senderId.length > 0) return value.senderId;
+  if (typeof value.userId === "string" && value.userId.length > 0) return value.userId;
+  return "";
+}
+
 export function nextDeltaSeq(state: DeltaApplyState): number {
   state.outgoingSeq += 1;
   return state.outgoingSeq;
 }
 
-function cursorFor(state: DeltaApplyState, senderId: string): SenderCursor {
-  let cursor = state.senders.get(senderId);
-  if (!cursor) {
-    cursor = { hold: new Map() };
-    state.senders.set(senderId, cursor);
+function trackSender(state: DeltaApplyState, senderKey: string): void {
+  if (state.senders.has(senderKey)) return;
+  while (state.senders.size >= MAX_TRACKED_SENDERS) {
+    const oldest = state.senders.keys().next().value;
+    if (oldest === undefined) break;
+    state.senders.delete(oldest);
   }
-  return cursor;
-}
-
-function releaseSender(cursor: SenderCursor, now: number): RemoteBoardEvent[] {
-  const ready: RemoteBoardEvent[] = [];
-  if (cursor.hold.size === 0) return ready;
-
-  if (cursor.next === undefined) {
-    const opened = cursor.openedAt ?? now;
-    if (now - opened < SEQ_REORDER_MS) return ready;
-    cursor.next = Math.min(...cursor.hold.keys());
-  }
-
-  while (cursor.next !== undefined) {
-    const event = cursor.hold.get(cursor.next);
-    if (!event) {
-      const higher = [...cursor.hold.keys()].filter((seq) => seq > cursor.next!).sort((a, b) => a - b)[0];
-      if (higher === undefined) return ready;
-      if (cursor.gapSince === undefined) cursor.gapSince = now;
-      if (now - cursor.gapSince < SEQ_REORDER_MS) return ready;
-      cursor.next = higher;
-      cursor.gapSince = undefined;
-      continue;
-    }
-    cursor.gapSince = undefined;
-    cursor.hold.delete(cursor.next);
-    ready.push(event);
-    cursor.next += 1;
-  }
-  return ready;
+  state.senders.set(senderKey, true);
 }
 
 /**
- * Park `event` until it is the next seq for its sender.
- * Events with no seq apply immediately (legacy peers).
- * A seq already released, or already waiting, is ignored.
+ * Records `senderKey:seq` if it is new.
+ * Returns false for an exact duplicate still inside the window.
+ * Invalid seqs are not tracked and are treated as unseen so legacy events apply.
  */
-export function pushSenderDelta(state: DeltaApplyState, event: RemoteBoardEvent, now: number): RemoteBoardEvent[] {
-  if (event.seq === undefined || !Number.isInteger(event.seq) || event.seq < 1) return [event];
-  const cursor = cursorFor(state, event.senderId);
-  if (cursor.next !== undefined && event.seq < cursor.next) return [];
-  if (cursor.hold.has(event.seq)) return [];
-  cursor.hold.set(event.seq, event);
-  if (cursor.openedAt === undefined) cursor.openedAt = now;
-  return releaseSender(cursor, now);
-}
-
-/** Release anything the reorder window or a gap timeout has unblocked. */
-export function flushSenderDeltas(state: DeltaApplyState, now: number): RemoteBoardEvent[] {
-  const ready: RemoteBoardEvent[] = [];
-  for (const cursor of state.senders.values()) ready.push(...releaseSender(cursor, now));
-  return ready;
-}
-
-export function hasHeldDeltas(state: DeltaApplyState): boolean {
-  for (const cursor of state.senders.values()) {
-    if (cursor.hold.size > 0) return true;
+export function rememberBoardEvent(state: DeltaApplyState, senderKey: string, seq: number): boolean {
+  if (!Number.isInteger(seq) || seq < 1 || senderKey.length === 0) return true;
+  const eventId = boardEventId(senderKey, seq);
+  if (state.seen.has(eventId)) return false;
+  trackSender(state, senderKey);
+  state.seen.add(eventId);
+  state.seenOrder.push(eventId);
+  while (state.seenOrder.length > SEEN_EVENT_LIMIT) {
+    const dropped = state.seenOrder.shift();
+    if (dropped !== undefined) state.seen.delete(dropped);
   }
-  return false;
+  return true;
+}
+
+/**
+ * Accept any unseen event id immediately, including a lower seq than one
+ * already applied. Exact duplicates return nothing.
+ * Events with no seq apply immediately and are not tracked (legacy peers).
+ */
+export function pushSenderDelta(state: DeltaApplyState, event: RemoteBoardEvent, _now: number): RemoteBoardEvent[] {
+  if (event.seq === undefined || !Number.isInteger(event.seq) || event.seq < 1) return [event];
+  if (!rememberBoardEvent(state, event.senderId, event.seq)) return [];
+  return [event];
 }
 
 export function tombstoneElement(state: DeltaApplyState, id: string, now: number): void {

@@ -47,6 +47,11 @@ function deltasFromPayload(payload: Record<string, unknown>, senderId: string): 
     if (typeof payload.seq === "number" && Number.isInteger(payload.seq) && payload.seq >= 1) {
       message.seq = payload.seq;
     }
+    if (typeof payload.senderKey === "string" && payload.senderKey.length > 0) {
+      message.senderKey = payload.senderKey;
+    } else {
+      message.senderKey = senderId;
+    }
     messages.push(message);
   }
   if (Array.isArray(payload.remove)) {
@@ -56,6 +61,7 @@ function deltasFromPayload(payload: Record<string, unknown>, senderId: string): 
       if (typeof payload.seq === "number" && Number.isInteger(payload.seq) && payload.seq >= 1) {
         remove.seq = payload.seq;
       }
+      remove.senderKey = typeof payload.senderKey === "string" && payload.senderKey.length > 0 ? payload.senderKey : senderId;
       messages.push(remove);
     }
   }
@@ -113,6 +119,7 @@ export function useDailyWhiteboard(options: {
       peerRef.current = peer;
       laser = createLaserPointer({
         userId,
+        senderKey: userId,
         color: LASER_COLOR,
         send: (update) => {
           // Laser stays on Daily. Stream is not a pointer channel.
