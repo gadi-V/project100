@@ -11,11 +11,14 @@
  * cursor, so a fresh session may restart at seq 1 and a late lower seq still
  * applies.
  *
- * Deletes leave a tombstone. An add for that id is ignored until it expires,
- * so a delayed create cannot resurrect a stroke that was already removed.
+ * Deletes leave a tombstone. An add for that id is ignored until the
+ * tombstone expires or a restore clears it, so a delayed create cannot
+ * resurrect a stroke that was already removed. The cache keeps the newest
+ * 500 ids.
  */
 
 export const TOMBSTONE_TTL_MS = 20_000;
+export const TOMBSTONE_LIMIT = 500;
 /** Last seen event ids. Older ids can be delivered again after they slide out. */
 export const SEEN_EVENT_LIMIT = 2_000;
 /** Oldest sender keys are dropped once tracking would pass this many senders. */
@@ -35,8 +38,15 @@ export type RemoteBoardEvent = {
   ops: RemoteBoardOp[];
 };
 
+export type HistoryRestoreOp = {
+  removed: readonly { id: string }[];
+  added: readonly { id: string }[];
+  updated: readonly { id: string }[];
+};
+
 export type DeltaApplyState = {
   outgoingSeq: number;
+  /** Oldest tombstone first. Value is the expiry timestamp. */
   tombstones: Map<string, number>;
   /** Oldest sender key first. Presence only; dedup lives in `seen`. */
   senders: Map<string, true>;
@@ -137,7 +147,34 @@ export function pushSenderDelta(state: DeltaApplyState, event: RemoteBoardEvent,
 }
 
 export function tombstoneElement(state: DeltaApplyState, id: string, now: number): void {
+  state.tombstones.delete(id);
   state.tombstones.set(id, now + TOMBSTONE_TTL_MS);
+  while (state.tombstones.size > TOMBSTONE_LIMIT) {
+    const oldest = state.tombstones.keys().next().value;
+    if (oldest === undefined) break;
+    state.tombstones.delete(oldest);
+  }
+}
+
+export function removeTombstone(state: DeltaApplyState, id: string): void {
+  state.tombstones.delete(id);
+}
+
+/** Ids a history step puts back on the board. */
+export function restoredElementIds(direction: "forward" | "backward", op: HistoryRestoreOp): string[] {
+  if (direction === "backward") {
+    return [...op.removed.map((el) => el.id), ...op.updated.map((el) => el.id)];
+  }
+  return [...op.added.map((el) => el.id), ...op.updated.map((el) => el.id)];
+}
+
+/** Local undo/redo and a remote historyOp both clear tombstones for restored ids. */
+export function clearTombstonesOnRestore(
+  state: DeltaApplyState,
+  direction: "forward" | "backward",
+  op: HistoryRestoreOp,
+): void {
+  for (const id of restoredElementIds(direction, op)) removeTombstone(state, id);
 }
 
 export function isTombstoned(state: DeltaApplyState, id: string, now: number): boolean {

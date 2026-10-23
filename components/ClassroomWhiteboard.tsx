@@ -57,6 +57,7 @@ import { useWhiteboardSnapshots } from "../lib/whiteboard/useWhiteboardSnapshots
 import { useDailyWhiteboard, type DailyWhiteboardLink } from "../lib/whiteboard/useDailyWhiteboard";
 import { LASER_FADE_MS, laserFadeAlpha, laserOpacity, type RemoteLaser } from "../lib/whiteboard/laser-pointer";
 import {
+  clearTombstonesOnRestore,
   createDeltaApplyState,
   guardIncomingOp,
   isOwnBoardEcho,
@@ -3121,6 +3122,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
       if (stack.length === 0) return;
       const op = stack[stack.length - 1];
       ensureHistoryImages(op, imgCache.current);
+      clearTombstonesOnRestore(deltaStateRef.current, "backward", op);
       setElements((prev) => applyHistoryBackward(prev, op));
       setUndoStack((prev) => prev.slice(0, -1));
       setRedoStack((prev) => [...prev, op]);
@@ -3132,6 +3134,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
       if (stack.length === 0) return;
       const op = stack[stack.length - 1];
       ensureHistoryImages(op, imgCache.current);
+      clearTombstonesOnRestore(deltaStateRef.current, "forward", op);
       setElements((prev) => applyHistoryForward(prev, op));
       setRedoStack((prev) => prev.slice(0, -1));
       setUndoStack((prev) => [...prev, op]);
@@ -3275,6 +3278,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
                 clearStrokeParts(strokePartsRef.current, el.id);
               }
             }
+            clearTombstonesOnRestore(deltaStateRef.current, historyReady.direction, historyReady.op);
             applyHistoryRemote(historyReady.op, historyReady.direction);
           }
           const ops: RemoteBoardOp[] = [];

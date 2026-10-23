@@ -4,12 +4,17 @@ import { encodeDailyMessage, decodeDailyMessage } from "../../lib/whiteboard/dai
 import {
   MAX_TRACKED_SENDERS,
   SEEN_EVENT_LIMIT,
+  TOMBSTONE_LIMIT,
   TOMBSTONE_TTL_MS,
+  clearTombstonesOnRestore,
   createDeltaApplyState,
   guardIncomingOp,
   isOwnBoardEcho,
+  isTombstoned,
+  removeTombstone,
   nextDeltaSeq,
   pushSenderDelta,
+  tombstoneElement,
   resolveBoardSenderId,
   resolveBoardSenderKey,
   type RemoteBoardEvent,
@@ -180,6 +185,63 @@ describe("idempotent board deltas", () => {
     ).toBe("add");
     expect(TOMBSTONE_TTL_MS).toBeGreaterThanOrEqual(15_000);
     expect(TOMBSTONE_TTL_MS).toBeLessThanOrEqual(30_000);
+  });
+
+  it("evicts the oldest tombstone once the cache exceeds 500", () => {
+    const state = createDeltaApplyState();
+    const now = 2_000;
+    for (let index = 0; index < TOMBSTONE_LIMIT; index += 1) {
+      tombstoneElement(state, `id-${index}`, now);
+    }
+    expect(state.tombstones.size).toBe(TOMBSTONE_LIMIT);
+    tombstoneElement(state, "id-500", now);
+    expect(state.tombstones.size).toBe(TOMBSTONE_LIMIT);
+    expect(state.tombstones.has("id-0")).toBe(false);
+    expect(isTombstoned(state, "id-0", now + 1)).toBe(false);
+    expect(isTombstoned(state, "id-1", now + 1)).toBe(true);
+    expect(isTombstoned(state, "id-500", now + 1)).toBe(true);
+
+    tombstoneElement(state, "id-1", now);
+    tombstoneElement(state, "id-501", now);
+    expect(state.tombstones.has("id-1")).toBe(true);
+    expect(state.tombstones.has("id-2")).toBe(false);
+    removeTombstone(state, "id-1");
+    expect(isTombstoned(state, "id-1", now + 1)).toBe(false);
+  });
+
+  it("clears a tombstone when a local undo or redo restores the element", () => {
+    const state = createDeltaApplyState();
+    const now = 3_000;
+    tombstoneElement(state, "ink", now);
+    clearTombstonesOnRestore(state, "backward", {
+      removed: [{ id: "ink" }],
+      added: [],
+      updated: [],
+    });
+    expect(isTombstoned(state, "ink", now + 1)).toBe(false);
+    expect(guardIncomingOp(state, { op: "add", id: "ink", element: stroke("ink", [1, 2]) }, now + 1)?.op).toBe("add");
+
+    tombstoneElement(state, "ink", now);
+    clearTombstonesOnRestore(state, "forward", {
+      removed: [],
+      added: [{ id: "ink" }],
+      updated: [],
+    });
+    expect(isTombstoned(state, "ink", now + 1)).toBe(false);
+  });
+
+  it("clears a tombstone when a remote historyOp restores the element", () => {
+    const state = createDeltaApplyState();
+    const now = 4_000;
+    tombstoneElement(state, "ink", now);
+    const remote = {
+      direction: "backward" as const,
+      historyOp: { removed: [{ id: "ink" }], added: [], updated: [{ id: "shape-1" }] },
+    };
+    clearTombstonesOnRestore(state, remote.direction, remote.historyOp);
+    expect(isTombstoned(state, "ink", now + 1)).toBe(false);
+    expect(isTombstoned(state, "shape-1", now + 1)).toBe(false);
+    expect(guardIncomingOp(state, { op: "add", id: "ink", element: stroke("ink", [3, 4]) }, now + 1)?.op).toBe("add");
   });
 
   it("keeps seq and part 0 on a Daily board delta", () => {
