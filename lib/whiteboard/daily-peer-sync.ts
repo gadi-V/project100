@@ -2,6 +2,7 @@ import { isOwnBoardEcho, readIncomingSenderKey } from "./delta-apply";
 import {
   packSnapshotResponse,
   type BoardDeltaMessage,
+  type BoardSyncMessage,
   type DailyBoardTransport,
   type LaserUpdateMessage,
   type SnapshotResponseMessage,
@@ -37,7 +38,10 @@ export function createDailyPeerSync(options: {
   readBoard: () => LiveBoard;
   applyLive: (board: LiveBoard) => void;
   applyDelta?: (delta: BoardDeltaMessage) => void;
+  onBoardSync?: (message: BoardSyncMessage) => void;
   onLaser?: (update: LaserUpdateMessage) => void;
+  /** Returns false when this snapshot request was already answered. */
+  claimSnapshotRequest?: (senderKey: string, timestamp: number) => boolean;
 }): DailyPeerSync {
   const now = options.now ?? (() => Date.now());
   let requested = false;
@@ -77,6 +81,8 @@ export function createDailyPeerSync(options: {
       if (isOwnBoardEcho(readIncomingSenderKey(message), options.userId)) return;
       const board = options.readBoard();
       if (board.elements.length === 0) return;
+      const requester = readIncomingSenderKey(message);
+      if (options.claimSnapshotRequest?.(requester, message.timestamp) === false) return;
       const chunks = packSnapshotResponse({
         senderId: options.userId,
         senderKey: options.userId,
@@ -96,6 +102,11 @@ export function createDailyPeerSync(options: {
     if (message.type === "board_delta") {
       if (isOwnBoardEcho(readIncomingSenderKey(message), options.userId)) return;
       options.applyDelta?.(message);
+      return;
+    }
+    if (message.type === "board_sync") {
+      if (isOwnBoardEcho(readIncomingSenderKey(message), options.userId)) return;
+      options.onBoardSync?.(message);
       return;
     }
     if (message.type === "laser_update") {

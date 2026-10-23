@@ -61,8 +61,8 @@ import {
   guardIncomingOp,
   isOwnBoardEcho,
   nextDeltaSeq,
-  pushSenderDelta,
   readIncomingSenderKey,
+  rememberBoardEvent,
   resolveBoardSenderKey,
   tombstoneElement,
   type RemoteBoardEvent,
@@ -74,7 +74,7 @@ import {
   replaceStrokePart,
   type StrokePartStore,
 } from "../lib/whiteboard/stroke-parts";
-import { planBoardDelivery } from "../lib/whiteboard/transport-policy";
+import { classifyBoardPayload, planBoardDelivery } from "../lib/whiteboard/transport-policy";
 import {
   SNAPSHOT_CHUNK_TIMEOUT_MS,
   beginSnapshotWait,
@@ -103,6 +103,8 @@ export const STREAM_SAFE_LIMIT = 1400;
 const STREAM_PIECE_SPLIT = 1200;
 const IMAGE_MAX_WIDTH = 400;
 const PROTO_V = 6;
+/** Give a same-turn Daily snapshot request time to claim the reply before Stream chunks go out. */
+const SNAPSHOT_STREAM_REPLY_MS = 50;
 const SNAPSHOT_CHUNK_CAP = 10;
 const PASTE_OFFSET = 24;
 const DUPLICATE_OFFSET = 20;
@@ -2627,6 +2629,21 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
     const snapshotRequestedRef = useRef(false);
     const awaitingSnapshotRef = useRef(false);
     const snapshotBuffersRef = useRef(new Map<string, SnapshotChunkEvent[]>());
+    const snapshotClaimsRef = useRef(new Set<string>());
+    const claimSnapshotRequestRef = useRef<(senderKey: string, token: number) => boolean>(() => true);
+    claimSnapshotRequestRef.current = (senderKey, token) => {
+      const id = `${senderKey}:${token}`;
+      if (snapshotClaimsRef.current.has(id)) return false;
+      snapshotClaimsRef.current.add(id);
+      while (snapshotClaimsRef.current.size > 200) {
+        const oldest = snapshotClaimsRef.current.values().next().value;
+        if (oldest === undefined) break;
+        snapshotClaimsRef.current.delete(oldest);
+      }
+      return true;
+    };
+    const applyBoardSyncRef = useRef<(ev: SyncEvent) => void>(() => {});
+    const routeOutgoingRef = useRef<(payload: Record<string, unknown>) => void>(() => {});
     const historySyncBuffersRef = useRef<HistoryPartBuffer>(new Map());
     const skippedSyncCountRef = useRef(0);
     const paperStyleRef = useRef<PaperStyle>(paperStyle);
@@ -2749,7 +2766,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
       }
       awaitingSnapshotRef.current = false;
       const queued = finishSnapshotWait(snapshotWaitRef.current);
-      for (const event of queued) ingestRemoteEventRef.current(event);
+      for (const event of queued) applyRemoteOpsRef.current(event.ops);
     };
 
     armSnapshotTimeoutRef.current = () => {
@@ -2760,7 +2777,7 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
           noteSnapshotRetry(snapshotWaitRef.current);
           snapshotBuffersRef.current.clear();
           awaitingSnapshotRef.current = true;
-          emitBoardEventRef.current(buildRequestSnapshot(senderIdRef.current, Date.now()));
+          routeOutgoingRef.current(buildRequestSnapshot(senderIdRef.current, Date.now()));
           armSnapshotTimeoutRef.current();
           return;
         }
@@ -2770,9 +2787,16 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
     };
 
     ingestRemoteEventRef.current = (event) => {
+      if (
+        event.seq !== undefined &&
+        Number.isInteger(event.seq) &&
+        event.seq >= 1 &&
+        !rememberBoardEvent(deltaStateRef.current, event.senderId, event.seq)
+      ) {
+        return;
+      }
       if (bufferSnapshotDelta(snapshotWaitRef.current, event)) return;
-      const released = pushSenderDelta(deltaStateRef.current, event, Date.now());
-      for (const item of released) applyRemoteOpsRef.current(item.ops);
+      applyRemoteOpsRef.current(event.ops);
     };
 
     useEffect(() => {
@@ -2842,6 +2866,10 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
           ],
         });
       },
+      onBoardSync: (message) => {
+        applyBoardSyncRef.current(message);
+      },
+      claimSnapshotRequest: (senderKey, token) => claimSnapshotRequestRef.current(senderKey, token),
       onLasers: setPeerLasers,
       onLocalLaserIdle: () => {
         fadeLocalLaserRef.current();
@@ -3013,14 +3041,19 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
 
     const broadcastElement = useCallback((payload: Record<string, unknown>): void => {
       const deliver = (event: Record<string, unknown>): void => {
-        const isDelta = event.add != null || Array.isArray(event.remove);
         const stamped: Record<string, unknown> = {
           ...event,
           senderId: senderIdRef.current,
           senderKey: senderIdRef.current,
         };
-        if (isDelta) stamped.seq = nextDeltaSeq(deltaStateRef.current);
-        const plan = planBoardDelivery(stamped, dailyLinkRef.current?.isDailyActive() ?? false);
+        const kind = classifyBoardPayload(stamped);
+        if (kind !== "laser_update" && kind !== "stroke_preview" && typeof stamped.seq !== "number") {
+          stamped.seq = nextDeltaSeq(deltaStateRef.current);
+        }
+        const plan = planBoardDelivery(stamped, {
+          dailyJoined: dailyLinkRef.current?.isDailyActive() ?? false,
+          remoteParticipants: dailyLinkRef.current?.remotePeerCount() ?? 0,
+        });
         if (plan.stream) broadcastRef.current?.(stamped);
         if (plan.daily) dailyLinkRef.current?.forwardPayload(stamped);
       };
@@ -3042,6 +3075,24 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
       }
       deliver(payload);
     }, []);
+
+    routeOutgoingRef.current = (payload) => {
+      const stamped: Record<string, unknown> = {
+        ...payload,
+        senderId: senderIdRef.current,
+        senderKey: senderIdRef.current,
+      };
+      const kind = classifyBoardPayload(stamped);
+      if (kind !== "laser_update" && kind !== "stroke_preview" && typeof stamped.seq !== "number") {
+        stamped.seq = nextDeltaSeq(deltaStateRef.current);
+      }
+      const plan = planBoardDelivery(stamped, {
+        dailyJoined: dailyLinkRef.current?.isDailyActive() ?? false,
+        remoteParticipants: dailyLinkRef.current?.remotePeerCount() ?? 0,
+      });
+      if (plan.stream) emitBoardEventRef.current(stamped);
+      if (plan.daily) dailyLinkRef.current?.forwardPayload(stamped);
+    };
 
     const broadcastHistory = useCallback((op: HistoryOp, direction: "forward" | "backward"): void => {
       for (const event of buildHistorySyncEvents(op, direction, senderIdRef.current)) {
@@ -3165,11 +3216,18 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
 
       const onEvent = (ev: SyncEvent): void => {
         if (ev.type !== BOARD_EVENT || (ev.v !== PROTO_V && ev.v !== 5 && ev.v !== 4)) return;
-        if (isOwnBoardEcho(readIncomingSenderKey(ev), senderIdRef.current)) return;
+        const senderKey = readIncomingSenderKey(ev);
+        if (isOwnBoardEcho(senderKey, senderIdRef.current)) return;
+        const seq = typeof ev.seq === "number" && Number.isInteger(ev.seq) && ev.seq >= 1 ? ev.seq : undefined;
+        if (seq !== undefined && !rememberBoardEvent(deltaStateRef.current, senderKey, seq)) return;
         applyRemote.current = true;
         try {
           if (ev.action === "request_snapshot") {
-            publishSnapshot();
+            const token = typeof ev.timestamp === "number" ? ev.timestamp : 0;
+            window.setTimeout(() => {
+              if (!claimSnapshotRequestRef.current(senderKey, token)) return;
+              publishSnapshot();
+            }, SNAPSHOT_STREAM_REPLY_MS);
             return;
           }
           if (ev.action === "snapshot_chunk") {
@@ -3237,11 +3295,10 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
             }
           }
           if (ops.length > 0) {
-            ingestRemoteEventRef.current({
-              senderId: readIncomingSenderKey(ev),
-              seq: typeof ev.seq === "number" ? ev.seq : undefined,
-              ops,
-            });
+            const remoteEvent: RemoteBoardEvent = { senderId: senderKey, seq, ops };
+            if (!bufferSnapshotDelta(snapshotWaitRef.current, remoteEvent)) {
+              applyRemoteOpsRef.current(ops);
+            }
           }
           if (ev.layerOrder) {
             const { pageIndex, ids } = ev.layerOrder;
@@ -3268,6 +3325,8 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
         }
       };
 
+      applyBoardSyncRef.current = onEvent;
+      // Stream stays subscribed while Daily is joined. Receivers listen on both hops.
       const unbound = streamChannel.on(BOARD_EVENT as "message.new", onEvent as never);
       const waitingForServer = Boolean(notebookId && startPage != null && !snapshotsReady);
       const serverHydrated = Boolean(notebookId && startPage != null && snapshotsReady);
@@ -3282,11 +3341,12 @@ const ClassroomWhiteboard = forwardRef<ClassroomWhiteboardHandle, ClassroomWhite
         snapshotRequestedRef.current = true;
         beginSnapshotWait(snapshotWaitRef.current);
         awaitingSnapshotRef.current = true;
-        emitBoardEventRef.current(buildRequestSnapshot(senderIdRef.current, Date.now()));
+        routeOutgoingRef.current(buildRequestSnapshot(senderIdRef.current, Date.now()));
         armSnapshotTimeoutRef.current();
       }
       setSyncStatus("live");
       return () => {
+        applyBoardSyncRef.current = () => {};
         if (snapshotTimerRef.current !== null) {
           clearTimeout(snapshotTimerRef.current);
           snapshotTimerRef.current = null;

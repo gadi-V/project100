@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DAILY_EVENT_MAX_BYTES,
+  countRemoteParticipants,
   createDailyTransport,
   decodeDailyMessage,
   encodeDailyMessage,
@@ -49,6 +50,17 @@ function mockSession() {
 }
 
 describe("daily transport", () => {
+  it("counts remote Daily participants and ignores the local tile", () => {
+    expect(
+      countRemoteParticipants({
+        local: { local: true },
+        "local-session": { local: true },
+        "peer-a": { local: false },
+        "peer-b": { local: false },
+      }),
+    ).toBe(2);
+  });
+
   it("serializes and deserializes each board event", () => {
     const messages: DailyBoardMessage[] = [
       {
@@ -76,6 +88,14 @@ describe("daily transport", () => {
         color: "#ef4444",
         userId: "teacher-1",
         active: true,
+      },
+      {
+        type: "board_sync",
+        senderId: "teacher-1:sess01",
+        senderKey: "teacher-1:sess01",
+        v: 6,
+        seq: 3,
+        action: "clear",
       },
     ];
 

@@ -2,7 +2,12 @@
 
 import React, { useEffect, useState, useRef } from "react";
 import DailyIframe, { DailyCall } from "@daily-co/daily-js";
-import { publishDailyAppSession, type DailyAppSession } from "../lib/whiteboard/daily-transport";
+import {
+  countRemoteParticipants,
+  publishDailyAppSession,
+  publishDailyRemotePeerCount,
+  type DailyAppSession,
+} from "../lib/whiteboard/daily-transport";
 import {
   DailyProvider,
   useLocalParticipant,
@@ -196,6 +201,7 @@ export default function VideoRoom({ roomUrl, token }: VideoRoomProps) {
   const [dailyFailed, setDailyFailed] = useState(false);
   const callObjectRef = useRef<DailyCall | null>(null);
   const teardownRef = useRef<Promise<void>>(Promise.resolve());
+  const stopPeerWatchRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     // No credentials in dev → clean placeholder, no error.
@@ -268,7 +274,21 @@ export default function VideoRoom({ roomUrl, token }: VideoRoomProps) {
       void co.join({ url: roomUrl, token }).then(
         () => {
           if (cancelled || joinFailed) return;
+          const publishPeers = (): void => {
+            publishDailyRemotePeerCount(countRemoteParticipants(co.participants()));
+          };
+          const stopPeerWatch = (): void => {
+            co.off("participant-joined", publishPeers);
+            co.off("participant-left", publishPeers);
+            co.off("joined-meeting", publishPeers);
+          };
+          stopPeerWatchRef.current?.();
+          stopPeerWatchRef.current = stopPeerWatch;
+          co.on("participant-joined", publishPeers);
+          co.on("participant-left", publishPeers);
+          co.on("joined-meeting", publishPeers);
           publishDailyAppSession(toDailySession(co));
+          publishPeers();
         },
         (err: unknown) => {
           if (cancelled) return;
@@ -286,6 +306,8 @@ export default function VideoRoom({ roomUrl, token }: VideoRoomProps) {
 
     return () => {
       cancelled = true;
+      stopPeerWatchRef.current?.();
+      stopPeerWatchRef.current = null;
       publishDailyAppSession(null);
       const co = callObjectRef.current ?? DailyIframe.getCallInstance();
       callObjectRef.current = null;

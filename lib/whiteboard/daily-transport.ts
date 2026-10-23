@@ -85,11 +85,35 @@ export type LaserUpdateMessage = {
   pageIndex?: number;
 };
 
+export type BoardSyncMessage = {
+  type: "board_sync";
+  senderId: string;
+  senderKey?: string;
+  v?: number;
+  seq?: number;
+  action?: string;
+  add?: DailyElement;
+  remove?: string[];
+  strokePart?: number;
+  paperStyle?: string;
+  pageCount?: number;
+  direction?: "forward" | "backward";
+  historyOp?: unknown;
+  historyPart?: { index: number; total: number; opId: string };
+  layerOrder?: { pageIndex: number; ids: string[] };
+  timestamp?: number;
+  snapshotId?: string;
+  chunkIndex?: number;
+  totalChunks?: number;
+  elementsChunk?: DailyElement[];
+};
+
 export type DailyBoardMessage =
   | BoardDeltaMessage
   | RequestSnapshotMessage
   | SnapshotResponseMessage
-  | LaserUpdateMessage;
+  | LaserUpdateMessage
+  | BoardSyncMessage;
 
 export type DailyMessageHandler = (message: DailyBoardMessage, fromId: string | null) => void;
 
@@ -115,15 +139,40 @@ export type DailyMessageRoutes = {
   request_snapshot?: (message: RequestSnapshotMessage) => void;
   snapshot_response?: (message: SnapshotResponseMessage) => void;
   laser_update?: (message: LaserUpdateMessage) => void;
+  board_sync?: (message: BoardSyncMessage) => void;
 };
 
 type SessionListener = (session: DailyAppSession | null) => void;
 
 let currentSession: DailyAppSession | null = null;
+let remotePeerCount = 0;
 const sessionListeners = new Set<SessionListener>();
+const remotePeerListeners = new Set<(count: number) => void>();
+
+export function countRemoteParticipants(participants: { [id: string]: { local?: boolean } | undefined }): number {
+  let count = 0;
+  for (const [id, participant] of Object.entries(participants)) {
+    if (id === "local" || !participant || participant.local) continue;
+    count += 1;
+  }
+  return count;
+}
+
+export function publishDailyRemotePeerCount(count: number): void {
+  remotePeerCount = Math.max(0, Math.floor(count));
+  for (const listener of remotePeerListeners) listener(remotePeerCount);
+}
+
+export function readDailyRemotePeerCount(): number {
+  return remotePeerCount;
+}
 
 export function publishDailyAppSession(session: DailyAppSession | null): void {
   currentSession = session;
+  if (session === null && remotePeerCount !== 0) {
+    remotePeerCount = 0;
+    for (const listener of remotePeerListeners) listener(0);
+  }
   for (const listener of sessionListeners) listener(session);
 }
 
@@ -271,7 +320,77 @@ function normalize(message: DailyBoardMessage): DailyBoardMessage | null {
     }
     return next;
   }
+  if (message.type === "board_sync") return normalizeBoardSync(message);
   return null;
+}
+
+function normalizeBoardSync(message: BoardSyncMessage): BoardSyncMessage | null {
+  const senderId = readId(message.senderId);
+  if (!senderId) return null;
+  const next: BoardSyncMessage = { type: "board_sync", senderId };
+  const senderKey = readSenderKey(message.senderKey);
+  if (senderKey) next.senderKey = senderKey;
+  if (typeof message.v === "number" && Number.isInteger(message.v)) next.v = message.v;
+  if (typeof message.seq === "number" && Number.isInteger(message.seq) && message.seq >= 1) next.seq = message.seq;
+  if (typeof message.action === "string" && message.action.length > 0 && message.action.length <= 64) {
+    next.action = message.action;
+  }
+  if (message.add) {
+    const element = sanitizeDailyElement(message.add);
+    if (element) next.add = element;
+  }
+  if (Array.isArray(message.remove)) {
+    const ids = message.remove.filter((id): id is string => readId(id) !== null);
+    if (ids.length > 0) next.remove = ids;
+  }
+  if (typeof message.strokePart === "number" && Number.isInteger(message.strokePart) && message.strokePart >= 0) {
+    next.strokePart = message.strokePart;
+  }
+  if (typeof message.paperStyle === "string") next.paperStyle = readPaper(message.paperStyle);
+  if (typeof message.pageCount === "number" && Number.isInteger(message.pageCount) && message.pageCount > 0) {
+    next.pageCount = message.pageCount;
+  }
+  if (message.direction === "forward" || message.direction === "backward") next.direction = message.direction;
+  if (message.historyOp && typeof message.historyOp === "object") {
+    const clean = sanitizeValue(message.historyOp);
+    if (clean && typeof clean === "object") next.historyOp = clean;
+  }
+  const part = message.historyPart;
+  if (
+    part &&
+    Number.isInteger(part.index) &&
+    Number.isInteger(part.total) &&
+    part.index >= 0 &&
+    part.total >= 1 &&
+    part.index < part.total &&
+    readId(part.opId)
+  ) {
+    next.historyPart = { index: part.index, total: part.total, opId: part.opId };
+  }
+  if (message.layerOrder && Number.isInteger(message.layerOrder.pageIndex) && message.layerOrder.pageIndex >= 0) {
+    const ids = Array.isArray(message.layerOrder.ids)
+      ? message.layerOrder.ids.filter((id): id is string => typeof id === "string" && id.length > 0)
+      : [];
+    next.layerOrder = { pageIndex: message.layerOrder.pageIndex, ids };
+  }
+  if (typeof message.timestamp === "number" && Number.isFinite(message.timestamp)) next.timestamp = message.timestamp;
+  const snapshotId = readId(message.snapshotId);
+  if (snapshotId) next.snapshotId = snapshotId;
+  if (typeof message.chunkIndex === "number" && Number.isInteger(message.chunkIndex) && message.chunkIndex >= 0) {
+    next.chunkIndex = message.chunkIndex;
+  }
+  if (typeof message.totalChunks === "number" && Number.isInteger(message.totalChunks) && message.totalChunks >= 1) {
+    next.totalChunks = message.totalChunks;
+  }
+  if (Array.isArray(message.elementsChunk)) {
+    const elements: DailyElement[] = [];
+    for (const item of message.elementsChunk) {
+      const element = sanitizeDailyElement(item);
+      if (element) elements.push(element);
+    }
+    if (elements.length > 0) next.elementsChunk = elements;
+  }
+  return next;
 }
 
 export function encodeDailyMessage(message: DailyBoardMessage): string | null {
@@ -296,7 +415,8 @@ export function decodeDailyMessage(data: unknown): DailyBoardMessage | null {
     record.type !== "board_delta" &&
     record.type !== "request_snapshot" &&
     record.type !== "snapshot_response" &&
-    record.type !== "laser_update"
+    record.type !== "laser_update" &&
+    record.type !== "board_sync"
   ) {
     return null;
   }
@@ -316,6 +436,9 @@ export function routeDailyMessage(message: DailyBoardMessage, routes: DailyMessa
       return;
     case "laser_update":
       routes.laser_update?.(message);
+      return;
+    case "board_sync":
+      routes.board_sync?.(message);
       return;
     default:
       return;
